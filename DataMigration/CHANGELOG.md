@@ -6,8 +6,10 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
-| 2026-10-12 | `fix-consumer2-duplicate`, `report-consumer2-duplicate` | Read up to eight points concurrently for cleanup dry-run and reporting; add cleanup progress/wait updates and dry-run read-error counts, preserving ordered results, match limits and sequential live updates. | *(this commit)* |
-| 2026-10-12 | `report-consumer2-duplicate` | Show loading/checking counts, five-second Settl wait updates and final output/limit/error details. | *(this commit)* |
+| 2026-10-12 | `report-delivery-start --include-history` | Group all delivery-state/reason sequences with MP counts and three full-period/source-response examples per pattern; preserve missing/unknown states and include inactive MPs, with eight concurrent read-only requests. | *(this commit)* |
+| 2026-10-12 | `fix-consumer2-duplicate` | Include non-child MPs with false or missing InDelivery in both dry-run and live cleanup scans; preserve duplicate detection and sequential updates. | *(this commit)* |
+| 2026-10-12 | `fix-consumer2-duplicate`, `report-consumer2-duplicate` | Read up to eight points concurrently for cleanup dry-run and reporting; add cleanup progress/wait updates and dry-run read-error counts, preserving ordered results, match limits and sequential live updates. | abfcb99b |
+| 2026-10-12 | `report-consumer2-duplicate` | Show loading/checking counts, five-second Settl wait updates and final output/limit/error details. | abfcb99b |
 | 2026-10-12 | `report-consumer2-duplicate` | Add a read-only duplicate Consumer 2 CSV using existing detection and market delivery signals; include inactive candidates and explain uncertainty about post-migration changes without altering cleanup (US 45871). | b085b7df |
 | 2026-10-07 | `export-settlement-config` | Move named customer exceptions into validated customerExceptions config: exact names or one trailing wildcard, exact/longest precedence, canonical segment/schedule targets and no hidden Hybel defaults. CLI config supplies the four Hybel rules; source blockers and original-value evidence remain, with matched pattern/mode. | This commit |
 | 2026-10-07 | `export-settlement-config` | Match Hybel Nord/Sjælland/Syd/Midt names by base or whitespace-delimited suffix, including names without A/S; reject joined regions such as Hybel Sydvest. Preserve source blockers and record HybelCustomerNamePrefix in exception evidence. | This commit |

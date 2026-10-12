@@ -20,6 +20,7 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     private MeteringPointV4Dto? _lastRead;
     private readonly object _readLock = new();
     public Dictionary<Guid, MeteringPointV4Dto?> ConsumerPoints { get; } = [];
+    public Dictionary<Guid, (string? Json, string? Error)> DeliveryHistories { get; } = [];
 
     /// <summary>What <see cref="BlankDuplicateSecondConsumerNameAsync"/> reports. Defaults to success.</summary>
     public (bool Success, string? Error) BlankResult { get; set; } = (true, null);
@@ -69,7 +70,7 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Task<(MeteringPointCurrentDto? MeteringPoint, string? Error)> GetByIdAsync(Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointCurrentDto?, string?)>>();
     public Task<(string? Json, string? Error)> GetByIdRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(string?, string?)>>();
     public Task<(GetDeliveryStatusesResponse? DeliveryStatuses, string? Error)> GetDeliveryStatusesAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(GetDeliveryStatusesResponse?, string?)>>();
-    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(string?, string?)>>();
+    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Task.FromResult(DeliveryHistories.GetValueOrDefault(meteringPointId, (null, "Missing fixture")));
     public Task<(bool Success, string? Error)> UpdateAsync(Guid meteringPointId, MeteringPointDto dto, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(BillingMeteringPointInfoDto? MeteringPoint, string? Error)> SearchBillingByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointInfoDto?, string?)>>();
     public Task<(BillingMeteringPointHistoryResponse? History, string? Error)> GetBillingHistoryAsync(Guid billingMeteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointHistoryResponse?, string?)>>();

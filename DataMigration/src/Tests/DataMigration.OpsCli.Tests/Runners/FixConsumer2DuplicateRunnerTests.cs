@@ -76,6 +76,41 @@ public class FixConsumer2DuplicateRunnerTests
         Assert.DoesNotContain(loggedLines, l => l.Contains("fixed —", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(null, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(null, false)]
+    public async Task Full_scan_includes_all_delivery_states_in_dry_run_and_live_cleanup(bool? inDelivery, bool dryRun)
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.MarketPoints.Add(new() { Id = id, InDelivery = inDelivery });
+        client.Reads.Enqueue(DuplicateMp(id));
+        client.Reads.Enqueue(BlankedMp(id));
+        using var progress = new StringWriter();
+        var logs = new List<string>();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }
+            .RunAsync(new() { DryRun = dryRun }));
+        Assert.Equal(dryRun ? 1 : 2, client.GetByIdV4Calls);
+        Assert.Equal(dryRun ? 0 : 1, client.BlankCalls);
+        Assert.Contains(logs, line => line.Contains("Matched:  1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Full_scan_still_excludes_child_points()
+    {
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.MarketPoints.Add(new() { Id = Guid.NewGuid(), InDelivery = false, ParentMeteringPoint = new() { Id = Guid.NewGuid() } });
+        using var progress = new StringWriter();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, _ => { }) { ProgressOutput = progress }
+            .RunAsync(new() { DryRun = true }));
+        Assert.Equal(0, client.GetByIdV4Calls);
+        Assert.Equal(0, client.BlankCalls);
+    }
+
     [Fact]
     public async Task Dry_run_never_calls_the_write_or_verify_path()
     {

@@ -482,6 +482,27 @@ Both existing CSV reports state whether the check was enabled and show the event
 original periods and resulting periods. Only saved snapshots are read; no production
 refresh or new-customer creation occurs. HomeCharge UA follow-up flags remain visible.
 
+# Delivery-state pattern investigation
+
+`report-delivery-start --include-history --env featuretest --output delivery-patterns.csv`
+reads all non-child MPs, including true/false/missing delivery flags, with up to
+eight concurrent history reads and progress/wait updates. No consumer-name
+filter or Settl update is used. `--include-children` includes child MPs too.
+
+The main CSV has one row per exact state/start-reason/stop-reason sequence and
+an MP count. Dates and the current MP-level flag do not split groups. Consecutive
+true periods stay separate; patterns are descriptions, not error classifications.
+Periods are ordered by start; missing/invalid starts follow dated entries in
+source order and are identified in the examples.
+
+`delivery-patterns.examples.csv` contains up to three MPs per pattern, with all
+their periods/states/reasons, current MP flag and current/completed list periods.
+`SourceLine` refers to the corresponding line in `delivery-patterns.sources.jsonl`,
+whose `ResponseJson` is the exact history response read for that example.
+Unknown and missing values are retained, and failed/empty/missing histories have
+separate groups. Only example responses are saved; there is no 60k-row MP export.
+Without `--include-history`, the existing delivery-start CSV stays unchanged.
+
 # Duplicate Consumer 2 uncertainty report
 
 `report-consumer2-duplicate` is read-only. It uses the exact private-person/name
@@ -516,6 +537,10 @@ dotnet run --project src/DataMigration.OpsCli -- fix-consumer2-duplicate --env f
 The cleanup now shows checking totals, matches, errors and five-second wait
 updates in both modes. Dry-run summaries count failed reads, including during
 a full scan. They never call the consumer update operation.
+
+Both cleanup modes scan non-child MPs in every delivery state, including false
+and missing `InDelivery` values. Delivery state does not determine eligibility
+for duplicate Consumer 2 correction; the existing private-person/name rule does.
 
 The UTF-8 semicolon CSV contains both consumer names, MP identification, Settl ID,
 resolved environment, current/completed delivery periods, delivery state and

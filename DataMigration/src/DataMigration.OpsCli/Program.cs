@@ -2284,11 +2284,15 @@ rootCommand.Subcommands.Add(pbsMatchCommand);
 // === report-delivery-start command ===
 var reportDeliveryStartEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production)" };
 var reportDeliveryStartIncludeChildrenOption = new Option<bool>("--include-children") { Description = "Inkluder child-målepunkter (springer normalt over)" };
+var reportDeliveryHistoryOption = new Option<bool>("--include-history") { Description = "Group actual delivery histories by state/reason pattern; export counts, examples and source responses" };
+var reportDeliveryOutputOption = new Option<string?>("--output") { Description = "Output CSV path (history mode: patterns CSV plus .examples.csv and .sources.jsonl)" };
 
 var reportDeliveryStartCommand = new Command("report-delivery-start", "Read-only TSV report: MeteringPointIdentification + DeliveryStatus.Start for alle MPs i Settl")
 {
     reportDeliveryStartEnvOption,
-    reportDeliveryStartIncludeChildrenOption
+    reportDeliveryStartIncludeChildrenOption,
+    reportDeliveryHistoryOption,
+    reportDeliveryOutputOption
 };
 
 reportDeliveryStartCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -2299,7 +2303,24 @@ reportDeliveryStartCommand.SetAction(async (parseResult, cancellationToken) =>
     {
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
         var runner = new ReportDeliveryStartRunner(meteringPointClient);
-        var outputPath = $"report-delivery-start-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        var history = parseResult.GetValue(reportDeliveryHistoryOption);
+        var outputPath = parseResult.GetValue(reportDeliveryOutputOption)
+            ?? $"report-delivery-{(history ? "patterns" : "start")}-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        if (history)
+        {
+            var prefix = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outputPath))!, Path.GetFileNameWithoutExtension(outputPath));
+            var examplesPath = prefix + ".examples.csv";
+            var sourcesPath = prefix + ".sources.jsonl";
+            if (new[] { Path.GetFullPath(outputPath), examplesPath, sourcesPath }.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3)
+                throw new ArgumentException("Output path overlaps a companion file.");
+            await using var patterns = new StreamWriter(outputPath, false, new System.Text.UTF8Encoding(true));
+            await using var examples = new StreamWriter(examplesPath, false, new System.Text.UTF8Encoding(true));
+            await using var sources = new StreamWriter(sourcesPath, false, System.Text.Encoding.UTF8);
+            var result = await new ReportDeliveryPatternsRunner(meteringPointClient)
+                .RunAsync(settlEnv, includeChildren, patterns, examples, sources, cancellationToken);
+            Console.Error.WriteLine($"Patterns: {Path.GetFullPath(outputPath)}\nExamples: {examplesPath}\nSources: {sourcesPath}");
+            return result;
+        }
         await using var outputFile = new StreamWriter(outputPath, append: false, System.Text.Encoding.UTF8);
         var exitCode = await runner.RunAsync(includeChildren, outputFile, cancellationToken);
         await outputFile.FlushAsync();

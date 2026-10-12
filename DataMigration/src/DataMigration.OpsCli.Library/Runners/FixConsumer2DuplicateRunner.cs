@@ -99,11 +99,11 @@ public class FixConsumer2DuplicateRunner
         }
         else
         {
-            Log("Loading metering points (full scan)...");
+            Log("Loading metering points (full scan, all delivery states)...");
             var loading = "Loading metering points...";
             progress.Update(loading, force: true);
             var selection = await progress.ReadAsync(() => SettlMeteringPointScanner.SelectAsync(
-                _meteringPointClient, includeChildren: false, includeNotInDelivery: false,
+                _meteringPointClient, includeChildren: false, includeNotInDelivery: true,
                 progress: message =>
                 {
                     loading = message.TrimStart('\r').TrimStart();
