@@ -1,0 +1,1432 @@
+{
+  "CustTables": [
+    {
+      "Accountnum": "405013",
+      "Dataareaid": "hol",
+      "Name": "Navnl Navnc",
+      "Address": "Fiktivvejm 83\n8960 Randers SØ",
+      "Street": "Fiktivvejm 83",
+      "City": "Randers SØ",
+      "Zipcode": "8960",
+      "Countryregionid": "DK",
+      "Phone": "",
+      "Cellularphone": "65262414",
+      "Telefax": "",
+      "Email": "ue@da.example.dk",
+      "Companyregnum": "",
+      "Identificationnumber": "",
+      "Partytype": 2,
+      "Namealias": "Navnl Navnc",
+      "ExuCprDisponent1": "1602657709",
+      "Exualternativecustomernumber": "PNR=1602657709",
+      "ExuAdditionalname": "Navnm Navnn Navnc",
+      "ExuCprDisponent2": "0703718725",
+      "ExuCvrDisponent1": "",
+      "ExuCvrDisponent2": "",
+      "Recid": 25637597055,
+      "Partyid": "554897",
+      "ExuTechnicgroup4": "Medarbej"
+    }
+  ],
+  "ExuContractTables": [
+    {
+      "Contractnum": "10404506",
+      "Dataareaid": "hol",
+      "Custaccount": "405013",
+      "Name": "",
+      "Contractstartdate": "2020-05-20T00:00:00",
+      "Contractenddate": "1900-01-01T00:00:00",
+      "Companyid": "",
+      "Deliverycategory": "",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 15593934,
+      "Pbstransactioncode": 2,
+      "Mobilepaysubscriptionagre20135": "agr_LAkykWzVwm",
+      "Mobilepayagreementcanceldate": "2021-10-25T08:49:12",
+      "Einvoiceeannum": "",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "KvartalAC",
+      "Billingbasis": 1,
+      "Contracttemplatenum": "C-alm",
+      "Custcontactpersonid": "",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637817773
+    },
+    {
+      "Contractnum": "10404508",
+      "Dataareaid": "hol",
+      "Custaccount": "405013",
+      "Name": "",
+      "Contractstartdate": "2020-05-20T00:00:00",
+      "Contractenddate": "2025-10-02T00:00:00",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Referencetomaincontract": "10404506",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 0,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "KvartalAC",
+      "Billingbasis": 1,
+      "Contracttemplatenum": "V_Privat",
+      "Custcontactpersonid": "",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637817775
+    },
+    {
+      "Contractnum": "10487370",
+      "Dataareaid": "hol",
+      "Custaccount": "405013",
+      "Name": "",
+      "Contractstartdate": "2024-01-01T00:00:00",
+      "Contractenddate": "2024-01-01T00:00:00",
+      "Companyid": "",
+      "Deliverycategory": "",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 0,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "Måned.",
+      "Billingbasis": 0,
+      "Contracttemplatenum": "Opladning",
+      "Custcontactpersonid": "",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637972634
+    },
+    {
+      "Contractnum": "10487740",
+      "Dataareaid": "hol",
+      "Custaccount": "405013",
+      "Name": "",
+      "Contractstartdate": "2024-01-01T00:00:00",
+      "Contractenddate": "2024-01-01T00:00:00",
+      "Companyid": "",
+      "Deliverycategory": "",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 0,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "Måned.",
+      "Billingbasis": 0,
+      "Contracttemplatenum": "Opladning",
+      "Custcontactpersonid": "",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637973129
+    }
+  ],
+  "ExuContractPartTables": [
+    {
+      "Contractnum": "10404506",
+      "Instagreenum": "1076840",
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Productnum": "Vand-alm",
+      "Startdate": "2020-05-20T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638052519
+    },
+    {
+      "Contractnum": "10404506",
+      "Instagreenum": "1076840",
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Productnum": "Varme-alm",
+      "Startdate": "2020-05-20T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638052520
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Fordel U",
+      "Startdate": "2020-05-20T00:00:00",
+      "Enddate": "2020-06-30T00:00:00",
+      "Amrcode": "Fordel",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638052524
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Fordel U",
+      "Startdate": "2020-07-01T00:00:00",
+      "Enddate": "2022-04-30T00:00:00",
+      "Amrcode": "Medarbej",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638059036
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Variabel",
+      "Startdate": "2022-05-01T00:00:00",
+      "Enddate": "2022-07-31T00:00:00",
+      "Amrcode": "ST 0600",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638180709
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Kvartal",
+      "Startdate": "2022-08-01T00:00:00",
+      "Enddate": "2022-09-30T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638211371
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Variabel",
+      "Startdate": "2022-10-01T00:00:00",
+      "Enddate": "2023-09-30T00:00:00",
+      "Amrcode": "ST 0600",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638221197
+    },
+    {
+      "Contractnum": "10404508",
+      "Instagreenum": "3065589",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "V Variabel",
+      "Startdate": "2023-10-01T00:00:00",
+      "Enddate": "2025-10-02T00:00:00",
+      "Amrcode": "ST 0800",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638316696
+    },
+    {
+      "Contractnum": "10487370",
+      "Instagreenum": "1081300",
+      "Deliverycategory": "Charge",
+      "Companyid": "for",
+      "Productnum": "Gl.CLejMEL",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638265727
+    },
+    {
+      "Contractnum": "10487370",
+      "Instagreenum": "1081300",
+      "Deliverycategory": "Charge_Abo",
+      "Companyid": "for",
+      "Productnum": "ORefuElafg",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638265728
+    },
+    {
+      "Contractnum": "10487740",
+      "Instagreenum": "1081339",
+      "Deliverycategory": "Charge",
+      "Companyid": "for",
+      "Productnum": "MidEnergit",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638266696
+    },
+    {
+      "Contractnum": "10487740",
+      "Instagreenum": "1081339",
+      "Deliverycategory": "Charge",
+      "Companyid": "for",
+      "Productnum": "ORefuElafg",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638266695
+    },
+    {
+      "Contractnum": "10487740",
+      "Instagreenum": "1081339",
+      "Deliverycategory": "Charge_Abo",
+      "Companyid": "for",
+      "Productnum": "Gl.CLejMEL",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-01-01T00:00:00",
+      "Amrcode": "",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638266694
+    }
+  ],
+  "DirPartyAddressRelationships": [
+    {
+      "Recid": 25638012679,
+      "Dataareaid": "hol",
+      "Partyid": "554897",
+      "Isprimary": 1,
+      "Validtodatetime": "2154-12-30T23:00:00"
+    }
+  ],
+  "DirPartyAddressRelationshi1066s": [
+    {
+      "Recid": 25638012679,
+      "Dataareaid": "hol",
+      "Addressrecid": 25638098746,
+      "Partyaddressrelationshiprecid": 25638012679
+    }
+  ],
+  "Addresses": [
+    {
+      "Recid": 25638098746,
+      "Dataareaid": "hol",
+      "Street": "Fiktivvejm 83",
+      "Zipcode": "8960",
+      "City": "Randers SØ",
+      "Countryregionid": "DK",
+      "State": "",
+      "County": "",
+      "Addrtableid": 2303,
+      "ExuAddressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "FullAddress": "Fiktivvejm 83 8960 Randers SØ"
+    }
+  ],
+  "ExuAgreementTables": [
+    {
+      "Agreementnum": "3065589",
+      "Dataareaid": "hol",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Startdate": "2020-05-20T00:00:00",
+      "Enddate": "2025-10-02T00:00:00",
+      "Instbillingname": "",
+      "Street": "Fiktivvejm 83",
+      "Streetnum": "0838",
+      "Housenumstart": 83,
+      "Houseletterstart": "",
+      "Floor": "",
+      "Apartment": "",
+      "Zipcodeid": "8960",
+      "City": "Randers SØ",
+      "Addrlocation": "",
+      "Countycode": "",
+      "Country": "DK",
+      "Recid": 5637430357
+    }
+  ],
+  "ExuDelpoints": [
+    {
+      "Num": "1",
+      "DelParentdelpointnum": "",
+      "Extnum": "           4223195",
+      "Name": "Forbrug",
+      "Deliverycategory": "El-Ekstern",
+      "Attachmentnum": "3065589",
+      "Companyid": "for",
+      "Custaccount": "",
+      "Streetnum": "0838",
+      "Countynum": "730",
+      "Zipcodeid": "8960",
+      "Meteringpoint": "571313115242231955",
+      "Addressstreet": "",
+      "Gsrn": "",
+      "Housenumstart": 83,
+      "Houseletterstart": "",
+      "Apartment": "",
+      "Floor": "",
+      "Addrlocation": "",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "EmsNetarea": "131",
+      "Powerexchangearea": "DK Vest",
+      "Dataareaid": "hol",
+      "Recid": 25637605445
+    }
+  ],
+  "ExuDelpointContactInfoTables": [
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 1,
+      "Startdate": "2020-04-08T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2020-05-19T00:00:00",
+      "Streetname": "Fiktivvejcm",
+      "Housenumber": "10",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "649762c9-dcf0-4759-a175-8756d98a92b1",
+      "Name1": "Navno Navnp ApS",
+      "Name2": "Navno Navnp A",
+      "Recid": 1291186
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 1,
+      "Startdate": "2020-05-20T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2021-02-01T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnl Navnc",
+      "Recid": 1308894
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 1,
+      "Startdate": "2021-02-02T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-10-02T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1462758
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2020-04-08T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2020-05-19T00:00:00",
+      "Streetname": "Fiktivvejcm",
+      "Housenumber": "10",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "Navno Navnp ApS",
+      "Name2": "",
+      "Recid": 1290488
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2020-05-20T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2020-06-09T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1309171
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2020-06-10T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2021-02-01T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc Navnq",
+      "Recid": 1315066
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2021-02-02T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2022-09-22T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1433581
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2022-09-23T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2022-09-24T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1700956
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2022-09-25T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2023-05-07T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1702002
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2023-05-08T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2023-06-14T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1806820
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2023-06-15T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2023-07-26T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1826523
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2023-07-27T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2024-03-18T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1840065
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2024-03-19T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2024-06-13T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 1985449
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2024-06-14T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2024-07-23T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 2025588
+    },
+    {
+      "Meteringpoint": "571313115242231955",
+      "Contacttype": 4,
+      "Startdate": "2024-07-24T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-10-02T00:00:00",
+      "Streetname": "Fiktivvejm",
+      "Housenumber": "83",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8960",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153",
+      "Name1": "Navnl Navnc",
+      "Name2": "Navnm Navnn Navnc",
+      "Recid": 2038245
+    }
+  ],
+  "AddressZipCodes": [
+    {
+      "Zipcode": "8960",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Randers SØ",
+      "Recid": 74079154
+    },
+    {
+      "Zipcode": "9500",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Hobro",
+      "Recid": 1269
+    }
+  ],
+  "DirPartyECommunicationRela2608s": [
+    {
+      "Partyid": "554897",
+      "Status": 0,
+      "Priority": 1,
+      "Valuesrecid": 25637518831,
+      "Dataareaid": "hol",
+      "Recid": 25638073300
+    },
+    {
+      "Partyid": "554897",
+      "Status": 0,
+      "Priority": 1,
+      "Valuesrecid": 5637198737,
+      "Dataareaid": "hol",
+      "Recid": 25638073301
+    },
+    {
+      "Partyid": "554897",
+      "Status": 0,
+      "Priority": 0,
+      "Valuesrecid": 5637192710,
+      "Dataareaid": "hol",
+      "Recid": 25638133819
+    },
+    {
+      "Partyid": "554897",
+      "Status": 0,
+      "Priority": 0,
+      "Valuesrecid": 25637518831,
+      "Dataareaid": "hol",
+      "Recid": 25638496227
+    }
+  ],
+  "DirECommunicationAddresses": [
+    {
+      "Ecommunicationtypeid": "CellularPhone",
+      "Url": "",
+      "Email": "",
+      "Phone": "",
+      "Dataareaid": "hol",
+      "Recid": 5637192710
+    },
+    {
+      "Ecommunicationtypeid": "CellularPhone",
+      "Url": "",
+      "Email": "",
+      "Phone": "65262414",
+      "Dataareaid": "hol",
+      "Recid": 5637198737
+    },
+    {
+      "Ecommunicationtypeid": "Email",
+      "Url": "",
+      "Email": "ue@da.example.dk",
+      "Phone": "",
+      "Dataareaid": "hol",
+      "Recid": 25637518831
+    }
+  ],
+  "EgsMeterpointTypecodeperiods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3065589",
+      "Delpointnum": "1",
+      "Startdate": "2020-04-08T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meterpointtypecode": "FORB",
+      "Recid": 25637450859
+    }
+  ],
+  "ExuBillingMethodPeriods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3065589",
+      "Delpointnum": "1",
+      "Startdate": "2020-04-08T00:00:00",
+      "Enddate": "2154-12-31T00:00:00",
+      "Billingmethod": 3,
+      "Recid": 25637662195
+    }
+  ],
+  "ExuDelpoint2delpointrela25505s": [],
+  "ExuStreets": [
+    {
+      "Streetnum": "0838",
+      "Countynum": "730",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejm",
+      "Recid": 451523
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "846",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcn",
+      "Recid": 511124
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "787",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejco",
+      "Recid": 5637172077
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "147",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcp",
+      "Recid": 30021194517
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "159",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcq",
+      "Recid": 30021195134
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "240",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcr",
+      "Recid": 30021198651
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "270",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcs",
+      "Recid": 30021200319
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "250",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejct",
+      "Recid": 30021201542
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "316",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcu",
+      "Recid": 30021201886
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "253",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcv",
+      "Recid": 30021203176
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "306",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcw",
+      "Recid": 30021203673
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "340",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcx",
+      "Recid": 30021204181
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "260",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcy",
+      "Recid": 30021204352
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "350",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcz",
+      "Recid": 30021204591
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "360",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejda",
+      "Recid": 30021208428
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "420",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdb",
+      "Recid": 30021209322
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "370",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdc",
+      "Recid": 30021209720
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "450",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdd",
+      "Recid": 30021210103
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "482",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejde",
+      "Recid": 30021211485
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "330",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdf",
+      "Recid": 30021212214
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "430",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdg",
+      "Recid": 30021215489
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "575",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejh",
+      "Recid": 30021217017
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "480",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdh",
+      "Recid": 30021218269
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "390",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdi",
+      "Recid": 30021218749
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "410",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdj",
+      "Recid": 30021219612
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "706",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdk",
+      "Recid": 30021222557
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "440",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdl",
+      "Recid": 30021222823
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "510",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdm",
+      "Recid": 30021226252
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "540",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdn",
+      "Recid": 30021226763
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "550",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdo",
+      "Recid": 30021227024
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "630",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdp",
+      "Recid": 30021227160
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "561",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdq",
+      "Recid": 30021227423
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "766",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdr",
+      "Recid": 30021228728
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "573",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejds",
+      "Recid": 30021229463
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "779",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdt",
+      "Recid": 30021229830
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "580",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdu",
+      "Recid": 30021231523
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "840",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdv",
+      "Recid": 30021232793
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "621",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdw",
+      "Recid": 30021233012
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "849",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdx",
+      "Recid": 30021233186
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "740",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdy",
+      "Recid": 30021233944
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "657",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdz",
+      "Recid": 30021235025
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "756",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejea",
+      "Recid": 30021235688
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "760",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejeb",
+      "Recid": 30021235876
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "791",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejec",
+      "Recid": 30021237674
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "707",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejed",
+      "Recid": 30021237865
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "810",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejee",
+      "Recid": 30021238249
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "746",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejef",
+      "Recid": 30021238886
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "851",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejdk",
+      "Recid": 30021240264
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "151",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejeg",
+      "Recid": 30021247424
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "173",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejeh",
+      "Recid": 30021247562
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "710",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejei",
+      "Recid": 30021249205
+    },
+    {
+      "Streetnum": "0838",
+      "Countynum": "265",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejej",
+      "Recid": 720510702129
+    }
+  ],
+  "ExuMeterTableTrades": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Agreementnum": "3065589",
+      "Delpointnum": "1",
+      "Startdate": "2020-04-08T00:00:00",
+      "Enddate": "2020-04-24T00:00:00",
+      "Meternum": "",
+      "Recid": 5637693430
+    },
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Agreementnum": "3065589",
+      "Delpointnum": "1",
+      "Startdate": "2020-04-25T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meternum": "30426225",
+      "Recid": 5637695553
+    }
+  ],
+  "ExuGroupTables": [
+    {
+      "Groupnum": "Medarbej",
+      "Dataareaid": "hol"
+    }
+  ],
+  "ExuInstallations": [
+    {
+      "Instnum": "1076840",
+      "Dataareaid": "hol",
+      "Recid": 21735574244,
+      "Zipcodeid": "8960",
+      "Instaddressformatted": "Fiktivvejm  83, 8960 Randers SØ",
+      "Addressid": "31876bdc-5a0b-4584-9091-701e5bde6153"
+    },
+    {
+      "Instnum": "1081300",
+      "Dataareaid": "hol",
+      "Recid": 21735628250,
+      "Zipcodeid": "8260",
+      "Instaddressformatted": "Fiktivvejek  23, st th, 8260 Viby J",
+      "Addressid": ""
+    },
+    {
+      "Instnum": "1081339",
+      "Dataareaid": "hol",
+      "Recid": 21735628742,
+      "Zipcodeid": "8960",
+      "Instaddressformatted": "Fiktivvejm  83, 8960 Randers SØ",
+      "Addressid": ""
+    }
+  ],
+  "ExuMeterJournalTrans": [
+    {
+      "Dataareaid": "hol",
+      "Journalid": "570873",
+      "Linenum": 1,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "71798218",
+      "Transdate": "2020-02-03T00:00:00",
+      "Journaltype": 7,
+      "Posted": 1,
+      "Recid": 25639391885
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "571190",
+      "Linenum": 1,
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Installationnum": "1076840",
+      "Meternum": "76821818",
+      "Transdate": "2020-02-19T00:00:00",
+      "Journaltype": 7,
+      "Posted": 1,
+      "Recid": 25639392882
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "578480",
+      "Linenum": 1,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "71798218",
+      "Transdate": "2020-08-17T00:00:00",
+      "Journaltype": 1,
+      "Posted": 1,
+      "Recid": 25639435014
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "578481",
+      "Linenum": 1,
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Installationnum": "1076840",
+      "Meternum": "76821818",
+      "Transdate": "2020-08-17T00:00:00",
+      "Journaltype": 1,
+      "Posted": 1,
+      "Recid": 25639435015
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "602846",
+      "Linenum": 1,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "71798218",
+      "Transdate": "2022-01-17T00:00:00",
+      "Journaltype": 1,
+      "Posted": 1,
+      "Recid": 25639638467
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "602847",
+      "Linenum": 1,
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Installationnum": "1076840",
+      "Meternum": "76821818",
+      "Transdate": "2022-01-17T00:00:00",
+      "Journaltype": 1,
+      "Posted": 1,
+      "Recid": 25639638468
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "574945",
+      "Linenum": 1,
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-05-19T00:00:00",
+      "Journaltype": 4,
+      "Posted": 0,
+      "Recid": 25639417553
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "574945",
+      "Linenum": 2,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-05-19T00:00:00",
+      "Journaltype": 4,
+      "Posted": 0,
+      "Recid": 25639417554
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "574946",
+      "Linenum": 1,
+      "Deliverycategory": "Vand",
+      "Companyid": "van",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-05-20T00:00:00",
+      "Journaltype": 6,
+      "Posted": 0,
+      "Recid": 25639417555
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "574946",
+      "Linenum": 2,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-05-20T00:00:00",
+      "Journaltype": 6,
+      "Posted": 0,
+      "Recid": 25639417556
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "581693",
+      "Linenum": 1,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-10-27T00:00:00",
+      "Journaltype": 5,
+      "Posted": 0,
+      "Recid": 25639450374
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "584413",
+      "Linenum": 8508,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2020-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25639477775
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "601287",
+      "Linenum": 9028,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2021-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25639596277
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "637087",
+      "Linenum": 9119,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2022-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25639757138
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "660285",
+      "Linenum": 9504,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2023-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25639878175
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "678032",
+      "Linenum": 9622,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2024-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25640014975
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "697764",
+      "Linenum": 9699,
+      "Deliverycategory": "Varme",
+      "Companyid": "var",
+      "Installationnum": "1076840",
+      "Meternum": "",
+      "Transdate": "2025-12-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25640143836
+    },
+    {
+      "Dataareaid": "hol",
+      "Journalid": "646178",
+      "Linenum": 1,
+      "Deliverycategory": "Charge",
+      "Companyid": "for",
+      "Installationnum": "1081339",
+      "Meternum": "",
+      "Transdate": "2024-01-31T00:00:00",
+      "Journaltype": 2,
+      "Posted": 0,
+      "Recid": 25639793870
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "Name": "ppa-missing",
+  "Description": "ppa-missing",
+  "StartingPayerId": 10000,
+
+  "Accounts": ["492768"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["492768"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {
+      "Nykredit": "E_PPA_Nykredit",
+      "ForeBankDa": "E_PPA_Foreningen_Bankdata",
+      "JN Data": "E_PPA_JN_Data",
+      "SparNordBa": "E_PPA_Spar_Nord_Bank",
+      "MerkurKlim": "E_PPA_Merkur_Klimafond",
+      "LollandsBa": "E_PPA_Lollands_Bank",
+      "Spk.Nr.Neb": "E_PPA_Sparekassen_for_Nr._Nebel_og_Omegn",
+      "FasterAnde": "E_PPA_Faster_Andelskasse"
+    },
+    "ProductNum": {
+      "V LadVariP": "V Lade Variabel"
+    }
+  }
+}

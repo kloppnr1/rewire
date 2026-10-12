@@ -1,0 +1,3190 @@
+using DataMigration.XellentData;
+using Microsoft.EntityFrameworkCore;
+using DataMigration.SettlApi.Clients;
+using DataMigration.SettlApi.Models;
+using System.Text.Json;
+using TimeSeries.Cli.Services;
+using TimeSeries.Core.Models;
+
+namespace TimeSeries.Cli.Runners;
+
+/// <summary>
+/// The distinct reasons a metering point can be left out of a run. Each maps to its own CSV so an
+/// operator can work one failure mode at a time instead of grepping the log.
+/// </summary>
+public enum TimeSeriesSkipCategory
+{
+    /// <summary>More than one time resolution in the window and --skip-resolution-change was set.</summary>
+    ResolutionChange,
+
+    /// <summary>More than one InDelivery=true delivery status, so the revision is not derivable.</summary>
+    AmbiguousRevision,
+
+    /// <summary>InDelivery=false periods exist but none ends at the revision.</summary>
+    DeliveryBoundaryUnresolved,
+
+    /// <summary>Several InDelivery=false periods end at the revision.</summary>
+    DeliveryBoundaryAmbiguous,
+
+    /// <summary>The matching InDelivery=false period has an unusable Period.</summary>
+    DeliveryBoundaryInvalid,
+
+    /// <summary>Every extracted point fell before the delivery boundary.</summary>
+    NoPointsAfterBoundary,
+
+    /// <summary>Settl already holds points in the window and --skip-if-existing-points was set.</summary>
+    ExistingSettlData,
+
+    /// <summary>
+    /// Batch mode: no Xellent contract, on any account, runs on the day before delivery starts in
+    /// Settl — the migrated relationship is missing (or was closed early) in Xellent.
+    /// </summary>
+    MissingInXellent,
+
+    /// <summary>
+    /// Batch mode: Settl does not mark the metering point as in delivery, and Xellent shows no
+    /// migration on the day before its current delivery status starts — it was never migrated.
+    /// </summary>
+    NotMigrated,
+
+    /// <summary>
+    /// Known Xellent issue: values stored at a different resolution than Xellent says the metering point
+    /// was read at, with no series of that resolution (MP 571313185621006160: hourly values where it reads
+    /// quarter-hourly). Listed whether the metering point is then skipped or fails.
+    /// </summary>
+    KnownIssueXellentResolution,
+
+    /// <summary>The metering point's current payer in Settl is in the 6##### series; those are not migrated.</summary>
+    ExcludedPayer
+}
+
+public sealed record CoverageStatusCount(string Status, int Count);
+
+public sealed record MissingReadingsEntry(string MeteringPointId, Guid SettlId, string? Account,
+    DateOnly? WindowStart, DateOnly? WindowEnd, string Status, string? Detail);
+
+public sealed record MissingReadingsScanResult(IReadOnlyList<MissingReadingsEntry> Entries, int ExitCode);
+
+public sealed record CoverageExclusionCount(string Reason, int Count, int Parents, int Children);
+
+public sealed record AccountCoverageReport(
+    string Account,
+    int MeteringPointsInScope,
+    int Completed,
+    int Ready,
+    int Blocked)
+{
+    public int Remaining => MeteringPointsInScope - Completed;
+    public decimal CoveragePercent => Percentage(Completed, MeteringPointsInScope);
+
+    private static decimal Percentage(int count, int total) =>
+        total == 0 ? 100m : Math.Round(count * 100m / total, 2);
+}
+
+public sealed record TimeSeriesCoverageReport(
+    DateTimeOffset GeneratedAtUtc,
+    string Environment,
+    DateTimeOffset? SnapshotCheckedAt,
+    bool IncludesChildren,
+    int SettlSnapshotRows,
+    int DuplicateSettlRows,
+    int SettlRowsWithoutIdentification,
+    int MeteringPointsExamined,
+    int MeteringPointsInScope,
+    int ExcludedFromScope,
+    int Completed,
+    int Ready,
+    int Blocked,
+    int ParentMeteringPoints,
+    int ChildMeteringPoints,
+    int AccountsInScope,
+    int AccountsComplete,
+    IReadOnlyList<CoverageExclusionCount> Exclusions,
+    IReadOnlyList<CoverageStatusCount> RemainingStatuses,
+    IReadOnlyList<AccountCoverageReport>? Accounts)
+{
+    public int Remaining => MeteringPointsInScope - Completed;
+    public decimal CoveragePercent => Percentage(Completed, MeteringPointsInScope);
+    public decimal ReadyOrCompletedPercent => Percentage(Completed + Ready, MeteringPointsInScope);
+    public decimal AccountCoveragePercent => Percentage(AccountsComplete, AccountsInScope);
+
+    private static decimal Percentage(int count, int total) =>
+        total == 0 ? 100m : Math.Round(count * 100m / total, 2);
+}
+
+public class TimeSeriesRunner
+{
+    public const string AmbiguousRevisionCsvFileName = "ambiguous-revisions.csv";
+
+    /// <summary>
+    /// One CSV per distinct skip code path, so an operator can see every metering point that was
+    /// left behind and why. <see cref="AmbiguousRevisionCsvFileName"/> keeps its own richer schema
+    /// (it carries the competing period starts) and is therefore not part of this map.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<TimeSeriesSkipCategory, string> SkipCsvFileNames =
+        new Dictionary<TimeSeriesSkipCategory, string>
+        {
+            [TimeSeriesSkipCategory.ResolutionChange] = "skip-resolution-change.csv",
+            [TimeSeriesSkipCategory.DeliveryBoundaryUnresolved] = "skip-delivery-boundary-unresolved.csv",
+            [TimeSeriesSkipCategory.DeliveryBoundaryAmbiguous] = "skip-delivery-boundary-ambiguous.csv",
+            [TimeSeriesSkipCategory.DeliveryBoundaryInvalid] = "skip-delivery-boundary-invalid.csv",
+            [TimeSeriesSkipCategory.NoPointsAfterBoundary] = "skip-no-points-after-boundary.csv",
+            [TimeSeriesSkipCategory.ExistingSettlData] = "skip-existing-settl-data.csv",
+            [TimeSeriesSkipCategory.MissingInXellent] = "skip-missing-in-xellent.csv",
+            [TimeSeriesSkipCategory.NotMigrated] = "skip-not-migrated.csv",
+            [TimeSeriesSkipCategory.KnownIssueXellentResolution] = "known-issue-xellent-resolution.csv",
+            [TimeSeriesSkipCategory.ExcludedPayer] = "skip-payer-6-series.csv"
+        };
+
+    /// <summary>Every skip artifact a run can produce, ambiguity CSV included. Used by the dashboard to bundle them.</summary>
+    public static IReadOnlyList<string> AllSkipCsvFileNames { get; } =
+        new[] { AmbiguousRevisionCsvFileName }.Concat(SkipCsvFileNames.Values).ToArray();
+
+    private static readonly string[] SkipCsvHeader =
+        ["CustomerNumber", "MeteringPointIdentification", "Type", "SettlMeteringPointId", "Revision", "DeliveryBoundary", "Detail"];
+
+    private static readonly string[] AmbiguousRevisionCsvHeader =
+        ["CustomerNumber", "MeteringPointIdentification", "Type", "SettlMeteringPointId", "ActiveInDeliveryCount", "ActivePeriodStarts"];
+
+    // Every CSV this tool writes opens straight in Excel on a Danish machine: UTF-8 with a BOM,
+    // semicolon between fields, CRLF, and every field quoted so a metering point number stays text
+    // instead of turning into 5,71313E+17.
+    private static readonly System.Text.UTF8Encoding CsvEncoding = new(true);
+
+    internal static string CsvLine(IEnumerable<string> fields) => string.Join(";", fields.Select(EscapeCsv)) + "\r\n";
+
+    // Appends one row, writing the header (with the BOM) when the file is new.
+    private static void AppendCsvRow(string path, string[] header, IEnumerable<string> fields)
+    {
+        if (!File.Exists(path))
+            File.WriteAllText(path, CsvLine(header), CsvEncoding);
+        File.AppendAllText(path, CsvLine(fields), CsvEncoding);
+    }
+
+    private static readonly TimeZoneInfo DanishTimeZone =
+        TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Romance Standard Time" : "Europe/Copenhagen");
+
+    private readonly string _connectionString;
+    private readonly string _outputBaseDirectory;
+    private readonly int _defaultTimeSeriesYears;
+    private readonly ISettlTimeSeriesClient? _settlTimeSeriesClient;
+    private readonly ISettlTimeSeriesMeteringPointClient? _settlMeteringPointClient;
+    private readonly ISettlCustomerClient? _settlCustomerClient;
+    private readonly ISettlPayerClient? _settlPayerClient;
+    private readonly Func<XellentDbContext>? _contextFactory;
+    private readonly Action<string> _defaultLog;
+    private Action<string> _log;
+
+    // Callback contract — mirrors DataMigration.Migration.Runners.CreateRunner so a single
+    // dashboard host (Dashboard.Api) can wire log/progress/phase streaming uniformly.
+    public Action<string>? OnLogLine
+    {
+        set => _log = value ?? _defaultLog;
+    }
+    public Action<int, int>? OnProgress { get; set; }
+
+    /// <summary>
+    /// Progress through a long step (step name, done, total), called often and from parallel work. A
+    /// console host shows it as one line that updates in place. Without it, progress is logged as
+    /// ordinary lines every 250 items.
+    /// </summary>
+    public Action<string, int, int>? OnStepProgress { get; set; }
+
+    private void ReportProgress(string step, int done, int total)
+    {
+        if (OnStepProgress != null)
+            OnStepProgress(step, done, total);
+        else if (done % 250 == 0 || done == total)
+            _log($"  ...{step}: {done}/{total}");
+    }
+    public Action<string?>? OnPhase { get; set; }
+
+    public TimeSeriesRunner(
+        string connectionString,
+        string outputBaseDirectory,
+        int defaultTimeSeriesYears = 3,
+        ISettlTimeSeriesClient? settlTimeSeriesClient = null,
+        ISettlTimeSeriesMeteringPointClient? settlMeteringPointClient = null,
+        ISettlCustomerClient? settlCustomerClient = null,
+        Func<XellentDbContext>? contextFactory = null,
+        Action<string>? log = null,
+        ISettlPayerClient? settlPayerClient = null)
+    {
+        _connectionString = connectionString;
+        _outputBaseDirectory = outputBaseDirectory;
+        _defaultTimeSeriesYears = defaultTimeSeriesYears;
+        _settlTimeSeriesClient = settlTimeSeriesClient;
+        _settlMeteringPointClient = settlMeteringPointClient;
+        _settlCustomerClient = settlCustomerClient;
+        _settlPayerClient = settlPayerClient;
+        _contextFactory = contextFactory;
+        _defaultLog = log ?? (msg => Console.WriteLine(msg));
+        _log = _defaultLog;
+    }
+
+    public async Task<int> RunExtractAsync(ExtractOptions options)
+    {
+        if (options.IncludeOutgoingPreview && options.SimulateMissing)
+            return Error("Outgoing previews cannot include simulated values.");
+        _log("=== Time Series Extraction ===");
+        _log("");
+
+        var startDate = options.StartDate ?? DateTime.Today.AddYears(-_defaultTimeSeriesYears);
+        var endDate = options.EndDate ?? DateTime.Today;
+        var deliveryCategory = options.DeliveryCategory ?? "El-ekstern";
+
+        string runTitle;
+        if (options.MeteringPointId != null)
+            runTitle = $"timeseries_{options.MeteringPointId}";
+        else if (options.AccountNumber != null)
+            runTitle = $"timeseries_{options.AccountNumber}";
+        else
+            return Error("Either --account or --metering-point must be specified.");
+
+        _log($"Mode: {GetModeDescription(options.MeteringPointId, options.AccountNumber)}");
+        _log($"Delivery Category: {deliveryCategory}");
+        _log($"Period: {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}");
+        if (options.IncludeChildren) _log("Include children: Yes");
+        if (options.SimulateMissing) _log("Simulate missing: Yes");
+        _log("");
+
+        await using var context = BuildXellentContext();
+
+        if (!await TestConnectionAsync(context))
+            return 1;
+
+        var (meteringPointIds, accounts) = await ResolveMeteringPointsAsync(
+            context, options.MeteringPointId, options.AccountNumber, deliveryCategory, options.IncludeChildren);
+
+        if (meteringPointIds.Length == 0)
+        {
+            _log("No metering points found for this account.");
+            return 0;
+        }
+
+        var outputDirectory = Path.Combine(_outputBaseDirectory, runTitle);
+
+        if (Directory.Exists(outputDirectory))
+        {
+            _log($"Clearing existing output directory: {outputDirectory}");
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+        Directory.CreateDirectory(outputDirectory);
+
+        _log($"Output: {outputDirectory}");
+        _log("");
+
+        var timeSeries = await ExtractTimeSeriesAsync(
+            context, accounts, meteringPointIds, deliveryCategory, options.IncludeChildren, startDate, endDate);
+
+        if (options.SimulateMissing)
+        {
+            timeSeries = FillGaps(timeSeries, startDate, endDate);
+        }
+
+        _log("Exporting TimeSeries to JSON files...");
+        var jsonExportService = new JsonExportService();
+        var fileCount = await jsonExportService.ExportTimeSeriesAsync(timeSeries, outputDirectory, _log);
+        if (options.IncludeOutgoingPreview)
+            await jsonExportService.ExportOutgoingPreviewsAsync(timeSeries, outputDirectory, options.DeliveryBoundary);
+        _log($"Exported {fileCount} TimeSeries JSON files");
+
+        _log("");
+        _log("Time Series extraction completed successfully!");
+        _log($"JSON files created in: {Path.GetFullPath(outputDirectory)}");
+
+        return 0;
+    }
+
+    public Task<int> RunPostAsync(PostOptions options, CancellationToken cancellationToken = default)
+    {
+        if (options.ResetAmbiguityCsv)
+            ResetSkipArtifacts();
+        return RunPostCoreAsync(options, cancellationToken);
+    }
+
+    private async Task<int> RunPostCoreAsync(PostOptions options, CancellationToken cancellationToken)
+    {
+        var dryRun = options.DryRun;
+        // Inside a batch run the run's own header already says all of this, once; per metering point only
+        // what is about that metering point is logged.
+        var inBatch = options.InBatch;
+        void LogSetup(string message)
+        {
+            if (!inBatch)
+                _log(message);
+        }
+        LogSetup(dryRun ? "=== Time Series Post to Settl (DRY RUN) ===" : "=== Time Series Post to Settl ===");
+        LogSetup("");
+
+        if (_settlTimeSeriesClient == null || _settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+
+        var startDate = options.StartDate ?? DateTime.Today.AddYears(-_defaultTimeSeriesYears);
+        var endDate = options.EndDate ?? DateTime.Today;
+        var deliveryCategory = options.DeliveryCategory ?? "El-ekstern";
+
+        if (options.MeteringPointId == null && options.AccountNumber == null)
+            return Error("Either --account or --metering-point must be specified.");
+
+        LogSetup($"Environment: {options.Environment}");
+        if (dryRun) LogSetup("Dry run: Yes (no mutations will be made)");
+        LogSetup($"Mode: {GetModeDescription(options.MeteringPointId, options.AccountNumber)}");
+        LogSetup($"Delivery Category: {deliveryCategory}");
+        LogSetup($"Period: {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}");
+        if (options.IncludeChildren) LogSetup("Include children: Yes");
+        LogSetup("");
+
+        _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
+
+        await using var context = BuildXellentContext();
+
+        // A batch run tested the connection once at its start.
+        if (!inBatch && !await TestConnectionAsync(context))
+            return 1;
+
+        OnPhase?.Invoke("resolve-metering-point");
+        var (meteringPointIds, accounts) = await ResolveMeteringPointsAsync(
+            context, options.MeteringPointId, options.AccountNumber, deliveryCategory, options.IncludeChildren, quiet: inBatch);
+
+        if (meteringPointIds.Length == 0)
+        {
+            _log("No metering points found.");
+            OnPhase?.Invoke(null);
+            return 0;
+        }
+
+        OnPhase?.Invoke("extract-xellent");
+        // A batch dry run knows the metering point's delivery boundary up front and posts nothing, so it
+        // only counts the points: what it reports and checks is the same, without reading every point.
+        var countOnly = dryRun && inBatch && options.MeteringPointId != null && options.ResolvedRevision != null;
+        var timeSeries = countOnly
+            ? [await CountTimeSeriesAsync(context, options.MeteringPointId!, deliveryCategory, startDate, endDate, options.ResolvedDeliveryBoundary)]
+            : await ExtractTimeSeriesAsync(
+                context, accounts, meteringPointIds, deliveryCategory, options.IncludeChildren, startDate, endDate, quiet: inBatch);
+
+        // Known Xellent issue: values stored at the wrong resolution. Listed in their own file whatever
+        // happens next, so every such metering point can be found.
+        foreach (var mpTs in timeSeries.Where(t => t.ValuesWithWrongResolution.Count > 0))
+            RecordSkip(TimeSeriesSkipCategory.KnownIssueXellentResolution, options.CustomerNumber ?? options.AccountNumber,
+                mpTs.MeteringPointId, options.MeteringPointGuid, options.ResolvedRevision, options.ResolvedDeliveryBoundary,
+                string.Join("; ", mpTs.ValuesWithWrongResolution));
+
+        LogSetup("");
+        LogSetup(dryRun ? "Checking against Settl (dry run — nothing is posted)..." : "Posting to Settl API...");
+        LogSetup("");
+
+        var posted = 0;
+        var skippedSafety = 0;
+        var pointsPosted = 0;
+        var failedMps = new List<string>();
+        OnPhase?.Invoke("post-timeseries");
+        OnProgress?.Invoke(0, timeSeries.Count);
+
+        // Per-MP processing as a local function so a failure can become either an abort (default)
+        // or a recorded error the run continues past (--force / ContinueOnError), mirroring
+        // DataMigration's CreateRunner. Returns the error message (null = success) plus the number
+        // of points posted before the failure, so the summary stays accurate either way. Skipped=true
+        // means "no-op for safety reasons" (e.g. existing Settl data) — counted separately from
+        // both posted and failed.
+        async Task<(string? Error, int Points, bool Skipped)> PostMeteringPointAsync(MeteringPointTimeSeriesDto mpTs)
+        {
+            var points = 0;
+
+            Guid mpGuid;
+            if (options.MeteringPointGuid is { } preResolvedGuid)
+            {
+                mpGuid = preResolvedGuid;
+            }
+            else
+            {
+                var (mpInfo, searchError) = await _settlMeteringPointClient.SearchByIdentificationAsync(
+                    mpTs.MeteringPointId, cancellationToken);
+                if (searchError != null)
+                    return ($"  Settl MP lookup failed: {searchError}", points, false);
+                if (mpInfo == null)
+                    return ($"  Metering point {mpTs.MeteringPointId} not found in Settl.", points, false);
+                mpGuid = mpInfo.Id;
+            }
+
+            DateTimeOffset revision;
+            DateTimeOffset? deliveryBoundary;
+            if (options.ResolvedRevision is { } preResolvedRevision)
+            {
+                if (preResolvedRevision == default)
+                    return ($"  Pre-resolved revision is default for MP {mpTs.MeteringPointId} ({mpGuid}).", points, false);
+                revision = preResolvedRevision;
+                deliveryBoundary = options.ResolvedDeliveryBoundary;
+                if (deliveryBoundary is { } preResolvedBoundary && preResolvedBoundary == default)
+                    return ($"  Pre-resolved delivery boundary is default for MP {mpTs.MeteringPointId} ({mpGuid}).", points, false);
+            }
+            else
+            {
+                var resolution = await ResolveRevisionAsync(mpGuid, cancellationToken);
+                if (resolution.Outcome == RevisionResolutionOutcome.Ambiguous)
+                {
+                    var reason = $"ambiguous delivery statuses ({resolution.ActiveStatuses.Count} InDelivery=true)";
+                    _log($"SKIP MP {mpTs.MeteringPointId}: {reason}{TypeSuffix()}");
+                    RecordAmbiguousRevision(
+                        options.CustomerNumber ?? options.AccountNumber,
+                        mpTs.MeteringPointId,
+                        mpGuid,
+                        resolution.ActiveStatuses);
+                    return (null, points, true);
+                }
+                if (resolution.Outcome == RevisionResolutionOutcome.SafetySkip)
+                {
+                    _log($"REVISION MP {mpTs.MeteringPointId}: {resolution.Revision:O}");
+                    _log($"SKIP MP {mpTs.MeteringPointId}: {resolution.SkipReason}{TypeSuffix()}");
+                    RecordSkip(
+                        resolution.SkipCategory!.Value,
+                        options.CustomerNumber ?? options.AccountNumber,
+                        mpTs.MeteringPointId,
+                        mpGuid,
+                        resolution.Revision,
+                        null,
+                        resolution.SkipReason ?? "");
+                    return (null, points, true);
+                }
+                if (resolution.Outcome == RevisionResolutionOutcome.Error)
+                    return ($"  Revision resolution failed for MP {mpTs.MeteringPointId} ({mpGuid}): {resolution.Error}", points, false);
+
+                revision = resolution.Revision;
+                deliveryBoundary = resolution.DeliveryBoundary;
+            }
+
+            _log($"REVISION MP {mpTs.MeteringPointId}: {revision:O}");
+
+            if (mpTs.SeriesWithoutAgreement.Count > 0)
+                return ($"  Xellent series without an agreement period for MP {mpTs.MeteringPointId} " +
+                        $"(RecId/CompanyId: {string.Join(", ", mpTs.SeriesWithoutAgreement)}) — their points have no period to go in.",
+                        points, false);
+
+            var originalPointCount = mpTs.Segments.Sum(PointCount) + (mpTs.CountedPointsBeforeBoundary ?? 0);
+            var filteredSegments = mpTs.Segments
+                .Select(segment => segment.CountedPoints != null
+                    ? segment // counted on or after the boundary already
+                    : new TimeSeriesSegmentDto
+                    {
+                        TimeResolution = segment.TimeResolution,
+                        ReadingResolution = segment.ReadingResolution,
+                        CompanyId = segment.CompanyId,
+                        PeriodStart = segment.PeriodStart,
+                        PeriodEnd = segment.PeriodEnd,
+                        Points = deliveryBoundary is { } boundary
+                            ? segment.Points.Where(point => point.TimeOfValue >= boundary).ToList()
+                            : segment.Points.ToList()
+                    })
+                .Where(segment => PointCount(segment) > 0)
+                .ToList();
+            var includedPointCount = filteredSegments.Sum(PointCount);
+            var excludedPointCount = originalPointCount - includedPointCount;
+            var boundaryText = deliveryBoundary?.ToString("O") ?? "none";
+            _log($"DELIVERY FILTER MP {mpTs.MeteringPointId}: boundary={boundaryText}, excluded={excludedPointCount}, included={includedPointCount}");
+
+            if (deliveryBoundary != null && originalPointCount > 0 && filteredSegments.Count == 0)
+            {
+                _log($"SKIP MP {mpTs.MeteringPointId}: no points on or after delivery boundary ({boundaryText}){TypeSuffix()}");
+                RecordSkip(
+                    TimeSeriesSkipCategory.NoPointsAfterBoundary,
+                    options.CustomerNumber ?? options.AccountNumber,
+                    mpTs.MeteringPointId,
+                    mpGuid,
+                    revision,
+                    deliveryBoundary,
+                    $"all {originalPointCount} extracted points fall before the delivery boundary");
+                return (null, points, true);
+            }
+
+            // Use only included outgoing resolutions, identical in counted and live runs.
+            var outgoingResolutions = filteredSegments.Select(OutgoingTimeSeries.Resolution)
+                .Distinct().OrderBy(r => r, StringComparer.Ordinal).ToArray();
+            var convertedHours = filteredSegments.Where(OutgoingTimeSeries.RequiresConversion).Sum(PointCount);
+            // Dashboard contract: describes the plan, including candidates later skipped or blocked.
+            // Counts are after delivery filtering; zero means no conversion, not missing evidence.
+            _log($"OUTGOING MP {mpTs.MeteringPointId}: resolutions={(outgoingResolutions.Length == 0 ? "none" : string.Join("+", outgoingResolutions))}, " +
+                 $"convertedHours={convertedHours}, convertedQuarters={checked(convertedHours * 4)}");
+            if (options.SkipResolutionChange && outgoingResolutions.Length > 1)
+            {
+                var reason = $"resolution change ({string.Join(" → ", outgoingResolutions)})";
+                _log($"SKIP MP {mpTs.MeteringPointId}: {reason}{TypeSuffix()}");
+                RecordSkip(TimeSeriesSkipCategory.ResolutionChange, options.CustomerNumber ?? options.AccountNumber,
+                    mpTs.MeteringPointId, mpGuid, revision, deliveryBoundary, reason);
+                return (null, points, true);
+            }
+
+            var (tsList, tsError) = await GetTimeSeriesListAsync(mpGuid, cancellationToken);
+            if (tsError != null)
+                return ($"  GetTimeSeries failed: {tsError}", points, false);
+            tsList ??= [];
+            var effectiveWindowStart = DateOnly.FromDateTime(startDate);
+            if (deliveryBoundary is { } effectiveBoundary)
+            {
+                var boundaryDate = ToDanishDate(effectiveBoundary);
+                if (boundaryDate > effectiveWindowStart)
+                    effectiveWindowStart = boundaryDate;
+            }
+
+            // Pre-check: hvis brugeren har bedt om --skip-if-existing-points, så spørg Settl om
+            // hver matchet TS allerede har points i [startDate, endDate]. Ét segment med data
+            // → spring hele MP'et over (atomic — vi vil ikke have half-migrated MPs).
+            if (options.SkipIfExistingPoints)
+            {
+                var summaryFrom = effectiveWindowStart;
+                var summaryTo = DateOnly.FromDateTime(endDate);
+                foreach (var segment in filteredSegments)
+                {
+                    var (resLength, resUnit) = ToSettlResolution(OutgoingTimeSeries.Resolution(segment));
+                    var matchingTs = tsList.FirstOrDefault(t =>
+                        t.TimeResolution?.Length == resLength &&
+                        string.Equals(t.TimeResolution?.Unit, resUnit, StringComparison.OrdinalIgnoreCase));
+                    if (matchingTs == null)
+                        continue;
+
+                    var (summary, summaryError) = await GetPointsSummaryInYearChunksAsync(
+                        matchingTs.Id, summaryFrom, summaryTo, cancellationToken);
+                    if (summaryError != null)
+                        return ($"  GetPointsSummary failed: {summaryError}", points, false);
+                    if (summary != null && summary.Count > 0)
+                    {
+                        // Samme kontrakt-format som --skip-resolution-change-skip (Dashboard
+                        // useTimeSeriesRun.ts-parseren matcher uændret).
+                        var fromStr = summary.From?.ToString("yyyy-MM-dd") ?? "?";
+                        var toStr = summary.To?.ToString("yyyy-MM-dd") ?? "?";
+                        _log($"SKIP MP {mpTs.MeteringPointId}: existing Settl TS data (count={summary.Count}, from={fromStr}, to={toStr}, ts={matchingTs.Id}){TypeSuffix()}");
+                        RecordSkip(
+                            TimeSeriesSkipCategory.ExistingSettlData,
+                            options.CustomerNumber ?? options.AccountNumber,
+                            mpTs.MeteringPointId,
+                            mpGuid,
+                            revision,
+                            deliveryBoundary,
+                            $"existing Settl TS data (count={summary.Count}, from={fromStr}, to={toStr}, ts={matchingTs.Id})");
+                        return (null, points, true);
+                    }
+                }
+            }
+
+            // Validate every included value before making any write for this metering point.
+            foreach (var sourceSegment in filteredSegments)
+                if (OutgoingTimeSeries.Validate(sourceSegment) is { } conversionError)
+                    return ($"  Conversion failed for MP {mpTs.MeteringPointId}: {conversionError}", points, false);
+            filteredSegments = filteredSegments.Select(OutgoingTimeSeries.Prepare).ToList();
+
+            foreach (var segment in filteredSegments)
+            {
+                var (length, unit) = ToSettlResolution(segment.TimeResolution);
+                if (!tsList.Any(t => t.TimeResolution?.Length == length &&
+                    string.Equals(t.TimeResolution?.Unit, unit, StringComparison.OrdinalIgnoreCase)))
+                    return ($"  No Settl TimeSeries found for MP {mpTs.MeteringPointId} segment {segment.TimeResolution} " +
+                            $"(company={segment.CompanyId}, resolution={length} {unit}). Required time series must already exist in Settl.", points, false);
+            }
+
+            var eipPeriods = ComputeEipPeriods(filteredSegments, effectiveWindowStart, DateOnly.FromDateTime(endDate));
+
+            // Iterér segmenter — Settl har én TS per resolution. Begge TS forventes at finde
+            // i Settl på forhånd; matcher et segment ikke en eksisterende TS, fejler vi.
+            for (int segIdx = 0; segIdx < filteredSegments.Count; segIdx++)
+            {
+                var segment = filteredSegments[segIdx];
+                var (resLength, resUnit) = ToSettlResolution(segment.TimeResolution);
+                var matchingTs = tsList.FirstOrDefault(t =>
+                    t.TimeResolution?.Length == resLength &&
+                    string.Equals(t.TimeResolution?.Unit, resUnit, StringComparison.OrdinalIgnoreCase));
+
+                if (matchingTs == null)
+                    return ($"  No Settl TimeSeries found for MP {mpTs.MeteringPointId} segment {segment.TimeResolution} " +
+                            $"(company={segment.CompanyId}, resolution={resLength} {resUnit}). " +
+                            "Both time series must already exist in Settl.", points, false);
+
+                var tsGuid = matchingTs.Id;
+                _log($"  segment {segment.TimeResolution} (company={segment.CompanyId}, {PointCount(segment)} points) → matched Settl TS {tsGuid}");
+
+                var payload = dryRun ? null : BuildSegmentRequest(segment, revision);
+                var pointCount = payload?.Points.Count ?? PointCount(segment);
+
+                var (segStart, segEnd) = eipPeriods[segIdx];
+                if (segStart >= segEnd)
+                    return ($"  Empty or inverted EIP period for MP {mpTs.MeteringPointId} segment {segment.TimeResolution} " +
+                            $"(company={segment.CompanyId}): {segStart:yyyy-MM-dd} → {segEnd:yyyy-MM-dd}.", points, false);
+
+                OnPhase?.Invoke("post-timeseries");
+                if (dryRun)
+                {
+                    _log($"    [dry-run] would POST {pointCount} points to TS {tsGuid}");
+                    _log($"    [dry-run] would add EIP ({segStart:yyyy-MM-dd} → {segEnd:yyyy-MM-dd}, TS={tsGuid})");
+                }
+                else if (pointCount == 0)
+                {
+                    // Settl POST /points fejler med "Sequence contains no elements" på tomme arrays.
+                    // Skip både POST og EIP — der er intet at migrere; vi vil ikke markere perioden
+                    // som externally-invoiced uden faktiske points bag sig.
+                    _log("    no points to post — skipping POST and EIP");
+                }
+                else
+                {
+                    var (postSuccess, postError) = await _settlTimeSeriesClient.PostPointsAsync(
+                        tsGuid, payload!, cancellationToken);
+                    if (!postSuccess)
+                        return ($"    Time-series POST failed: {postError}", points, false);
+                    _log($"    posted {pointCount} points to TS {tsGuid}");
+
+                    OnPhase?.Invoke("post-eip");
+                    var eipRequest = new AddExternallyInvoicedPeriodsRequest
+                    {
+                        TransactionId = Guid.NewGuid(),
+                        Periods =
+                        [
+                            new ExternallyInvoicedPeriodDto
+                            {
+                                Period = new BillingTimePeriodDto
+                                {
+                                    Start = segStart,
+                                    End = segEnd
+                                },
+                                // All these BillableTypes must always be set on El metering points (clarified with Systemate on 2026-08-26).
+                                BillableTypes = ["Contracts", "ExtraInvoiceLines", "MarketPriceLists", "NationalContracts", "PaymentFee", "MovingFee"],
+                                Revision = revision,
+                                TimeSeriesId = tsGuid
+                            }
+                        ]
+                    };
+
+                    var (eipSuccess, eipError) = await _settlMeteringPointClient.AddExternallyInvoicedPeriodsAsync(
+                        mpGuid, eipRequest, cancellationToken);
+                    if (!eipSuccess)
+                        return ($"    externallyInvoicedPeriod POST failed: {eipError}", points, false);
+                    _log("    + externally invoiced period added (Contracts)");
+                }
+
+                points += pointCount;
+            }
+
+            _log($"RESULT MP {mpTs.MeteringPointId}: points={points}, excluded={excludedPointCount}, boundary={boundaryText}");
+            return (null, points, false);
+        }
+
+        foreach (var mpTs in timeSeries)
+        {
+            var totalPoints = mpTs.Segments.Sum(PointCount) + (mpTs.CountedPointsBeforeBoundary ?? 0);
+            _log($"MP {mpTs.MeteringPointId} ({mpTs.Segments.Count} segment(s), {totalPoints} points)");
+
+            var (mpError, mpPoints, mpSkipped) = await PostMeteringPointAsync(mpTs);
+            pointsPosted += mpPoints;
+
+            if (mpError != null)
+            {
+                _log($"ERROR: {mpError}");
+                failedMps.Add(mpTs.MeteringPointId);
+                if (!options.ContinueOnError)
+                {
+                    OnPhase?.Invoke(null);
+                    return 1;
+                }
+                _log($"=== MP {mpTs.MeteringPointId} fejlede — fortsaetter (--force) ===");
+                OnProgress?.Invoke(posted + skippedSafety + failedMps.Count, timeSeries.Count);
+                continue;
+            }
+
+            if (mpSkipped)
+            {
+                skippedSafety++;
+                OnProgress?.Invoke(posted + skippedSafety + failedMps.Count, timeSeries.Count);
+                continue;
+            }
+
+            posted++;
+            OnProgress?.Invoke(posted + skippedSafety + failedMps.Count, timeSeries.Count);
+        }
+
+        OnPhase?.Invoke(null);
+        // In a batch run the batch's own summary covers this metering point; its ERROR lines are above.
+        LogSetup("");
+        var skipFragment = skippedSafety > 0 ? $", {skippedSafety} skipped (safety checks)" : "";
+        if (failedMps.Count > 0)
+        {
+            LogSetup($"Post completed with errors: {posted} metering points succeeded{skipFragment}, {failedMps.Count} failed, {pointsPosted:N0} points posted.");
+            LogSetup($"Failed MPs: {string.Join(", ", failedMps)}");
+            return 1;
+        }
+        options.PointsPosted = dryRun ? 0 : pointsPosted;
+        LogSetup(dryRun
+            ? $"Dry run completed: {posted} metering points{skipFragment}, {pointsPosted:N0} points would be posted."
+            : $"Post completed successfully: {posted} metering points{skipFragment}, {pointsPosted:N0} points posted.");
+
+        return 0;
+    }
+
+    /// <summary>The only delivery category batch mode posts: every El profile used it.</summary>
+    public const string BatchDeliveryCategory = "El-ekstern";
+
+    /// <summary>
+    /// Batch mode. Settl decides which metering points are posted: every parent electricity metering
+    /// point in the environment with a delivery start. The account comes from Xellent — whoever held
+    /// the metering point on the day before delivery starts in Settl.
+    /// <para>Settl can fail to mark delivery (2026-09), so metering points the list shows as not in
+    /// delivery are resolved too, through the current delivery status fallback. For those, having no
+    /// delivery start, or not having been closed as a migration in Xellent, means "never migrated":
+    /// they are skipped, where a metering point Settl does mark as in delivery fails.</para>
+    /// <paramref name="cosFrom"/>/<paramref name="cosTo"/> (inclusive, Danish dates) narrow the run to
+    /// a range of delivery starts; <paramref name="skip"/> passes over the first N metering points in
+    /// range and <paramref name="limit"/> stops after N more, in identification order — so skip/limit
+    /// pages through the run in stable batches.
+    /// <para><paramref name="offline"/> reads Settl and Xellent from the environment's snapshot (see
+    /// <see cref="RunSeedSnapshotAsync"/>) instead of asking them again; anything the snapshot lacks is
+    /// read live and added. Time series points are always read fresh, and posts always go to Settl.</para>
+    /// </summary>
+    public async Task<int> RunPostAllAsync(
+        string environment,
+        bool dryRun,
+        bool continueOnError,
+        bool skipResolutionChange = false,
+        bool skipIfExistingPoints = false,
+        DateOnly? cosFrom = null,
+        DateOnly? cosTo = null,
+        int? limit = null,
+        DateTime? windowEndDateOverride = null,
+        int? skip = null,
+        bool offline = false,
+        bool includeChildren = false,
+        CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (includeChildren)
+            _log("Include children: Yes — child metering points are posted too");
+        // Metering points a live run has posted are marked done in the environment's snapshot folder,
+        // online or offline, and every batch run leaves them out from the start.
+        _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+        if (!offline)
+        {
+            try
+            {
+                return await RunPostAllCoreAsync(environment, dryRun, continueOnError, skipResolutionChange, skipIfExistingPoints,
+                    cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken);
+            }
+            finally
+            {
+                _done = null;
+            }
+        }
+
+        _snapshot = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+        _log($"Offline: reading Settl and Xellent from the snapshot in {_snapshot.DirectoryPath}; anything missing there is read live and added.");
+        try
+        {
+            return await RunPostAllCoreAsync(environment, dryRun, continueOnError, skipResolutionChange, skipIfExistingPoints,
+                cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken);
+        }
+        finally
+        {
+            _log($"Snapshot: {_snapshot.Reused} reads from the snapshot, {_snapshot.Fetched} read live.");
+            _snapshot = null;
+            _done = null;
+        }
+    }
+
+    /// <summary>
+    /// Reads everything a batch run needs from Settl and Xellent for every metering point in the
+    /// environment and stores it in the environment's snapshot, so <c>RunPostAllAsync(offline: true)</c>
+    /// can run without asking them again. Settl: the metering point list, and per metering point its
+    /// delivery statuses, current delivery status and time series. Xellent: child relations and
+    /// contracts. Not the time series points. What the snapshot already holds is kept, so a second run
+    /// only fills in what is missing (an interrupted seed resumes); delete the folder to start over.
+    /// Reads per metering point run <paramref name="parallelism"/> at a time. A failed read is logged
+    /// and left out (the next seed tries it again); the run then exits non-zero.
+    /// <para><paramref name="refresh"/> throws the stored reads away and reads everything again. The done
+    /// marks are kept — a metering point with points in Settl stays done — and the done check adds new ones.</para>
+    /// </summary>
+    public async Task<int> RunSeedSnapshotAsync(string environment, int parallelism = 6, bool refresh = false,
+        bool includeChildren = false, CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (_settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+
+        var directory = SnapshotDirectory(environment);
+        if (refresh && Directory.Exists(directory))
+        {
+            var stale = Directory.GetFiles(directory, "*.jsonl")
+                .Where(p => !string.Equals(Path.GetFileNameWithoutExtension(p), SnapshotDone, StringComparison.Ordinal))
+                .ToList();
+            foreach (var file in stale)
+                File.Delete(file);
+            _log($"Refresh: removed {stale.Count} stored read file(s) from {directory}; done marks kept.");
+        }
+        _snapshot = new RunSnapshot(directory, reuse: true);
+        try
+        {
+            _log($"=== Snapshot seed — {environment} → {_snapshot.DirectoryPath} ===");
+            List<BatchMeteringPoint> meteringPoints;
+            try
+            {
+                (meteringPoints, _) = await LoadBatchMeteringPointsAsync(null, null, cancellationToken);
+                await using var context = BuildXellentContext();
+                var extraction = new TimeSeriesExtractionService(context, BatchDeliveryCategory);
+                _log("Xellent contracts...");
+                await GetContractsByMeteringPointAsync(extraction, meteringPoints.Select(m => m.Identification).ToList());
+                if (_settlPayerClient != null)
+                {
+                    _log("Settl payers...");
+                    await GetPayersAsync(meteringPoints.Select(m => m.Id).ToList(), parallelism, cancellationToken);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Error(ex.Message);
+            }
+
+            _log($"Settl, per metering point: {meteringPoints.Count} metering points, {parallelism} at a time...");
+            var done = 0;
+            var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+            await Parallel.ForEachAsync(meteringPoints,
+                new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = cancellationToken },
+                async (mp, ct) =>
+                {
+                    var errors = new[]
+                    {
+                        (await GetDeliveryStatusesAsync(mp.Id, ct)).Error is { } e1 ? $"delivery statuses: {e1}" : null,
+                        (await GetCurrentMeteringPointAsync(mp.Id, ct)).Error is { } e2 ? $"current delivery status: {e2}" : null,
+                        (await GetTimeSeriesListAsync(mp.Id, ct)).Error is { } e3 ? $"time series: {e3}" : null,
+                    }.OfType<string>().ToList();
+                    if (errors.Count > 0)
+                        failures.Add($"MP {mp.Identification} ({mp.Id}): {string.Join("; ", errors)}");
+                    ReportProgress("Settl reads", Interlocked.Increment(ref done), meteringPoints.Count);
+                });
+
+            // Done check: run the batch's own decisions over the snapshot, and ask Settl whether each
+            // metering point that would be posted already has points in its window.
+            _log("Done check: metering points Settl already holds points for...");
+            var runLog = _log;
+            _markDoneMode = true;
+            _doneCandidates.Clear();
+            _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+            var doneBefore = meteringPoints.Count(m => _done.Contains(SnapshotDone, m.Identification));
+            _log = _ => { };
+            try
+            {
+                await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
+                    skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
+                    cancellationToken);
+            }
+            finally
+            {
+                _log = runLog;
+                _markDoneMode = false;
+            }
+            var (doneMarked, doneFailures) = await CheckDoneCandidatesAsync(parallelism, cancellationToken);
+            foreach (var failure in doneFailures)
+                failures.Add(failure);
+            _log($"  {_doneCandidates.Count} metering point(s) would be posted; {doneMarked} of them already have points in Settl — marked done " +
+                 $"({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
+            var doneTotal = doneBefore + doneMarked;
+            var stillToPost = _doneCandidates.Count - doneMarked;
+            var migrationTotal = doneTotal + stillToPost;
+            _done.Put(SnapshotDoneSummary, "last", new DoneSummary(migrationTotal, doneTotal, DateTimeOffset.UtcNow));
+            if (migrationTotal > 0)
+                _log($"Migration: {doneTotal} of {migrationTotal} metering points done ({doneTotal * 100 / migrationTotal}%), {stillToPost} still to post");
+            _done = null;
+
+            // Xellent point counts for every candidate, in the same window the reports use, stored in the
+            // snapshot. readiness, resolution-changes and offline dry runs then read them back instead of
+            // counting in Xellent again.
+            _log("Counting points in Xellent for each metering point that would be posted...");
+            await using (var countContext = BuildXellentContext())
+            {
+                for (var i = 0; i < _doneCandidates.Count; i++)
+                {
+                    var candidate = _doneCandidates[i];
+                    ReportProgress("Xellent counts", i + 1, _doneCandidates.Count);
+                    try
+                    {
+                        var counted = await CountTimeSeriesAsync(countContext, candidate.Identification, BatchDeliveryCategory,
+                            candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
+                        // Only the ones with nothing to post need it: it is what tells "no meter yet" from
+                        // "meter, but no readings" in the reports.
+                        if (counted.Segments.Sum(PointCount) == 0)
+                            await MeterPointStatusAsync(countContext, candidate.Identification);
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or Microsoft.Data.SqlClient.SqlException)
+                    {
+                        failures.Add($"MP {candidate.Identification}: Xellent count: {ex.Message}");
+                    }
+                }
+            }
+
+            _log("");
+            _log($"Snapshot seed completed: {meteringPoints.Count} metering points, {_snapshot.Reused} reads already in the snapshot, " +
+                 $"{_snapshot.Fetched} read now, {failures.Count} metering point(s) with a failed read.");
+            foreach (var failure in failures.OrderBy(f => f, StringComparer.Ordinal))
+                _log($"  - {failure}");
+            return failures.IsEmpty ? 0 : 1;
+        }
+        finally
+        {
+            _snapshot = null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the existing CSV supplied to Settl/Systemate for missing hourly series.
+    /// Only outgoing hourly values require an hourly target; fully converted windows are omitted.
+    /// Existing source switch dates, columns, done marks and unclear-delivery handling are retained.
+    /// Default file: &lt;output&gt;/resolution-changes-&lt;env&gt;.csv.
+    /// </summary>
+    public async Task<int> RunResolutionChangesAsync(string environment, bool offline = false, string? outputPath = null,
+        bool includeChildren = false, CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (_settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+        if (offline)
+            _snapshot = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+        var runLog = _log;
+        try
+        {
+            _log($"=== Resolution changes — {environment} ===");
+            _log("Working out the window each metering point would be posted with...");
+            _markDoneMode = true;
+            _doneCandidates.Clear();
+            // No _done here: the list covers every metering point the migration touches, the ones already
+            // posted included. Only a real post run leaves done metering points out.
+            _log = _ => { };
+            try
+            {
+                await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
+                    skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
+                    cancellationToken);
+            }
+            finally
+            {
+                _log = runLog;
+                _markDoneMode = false;
+                _done = null;
+            }
+
+            await using var context = BuildXellentContext();
+
+            var changes = new List<ResolutionRow>();
+            var unclearDelivery = new List<ResolutionRow>();
+            // Metering points already posted count towards the totals but are not listed: there is
+            // nothing left to do about them.
+            var doneList = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+            var doneNotListed = 0;
+            var needed = 0;
+            var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var candidate = candidates[i];
+                ReportProgress("Resolution changes", i + 1, candidates.Count);
+
+                // Keep the existing source-based ChangeDate for rows that still need an hourly target.
+                var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
+                    candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
+                DateOnly? FirstPointOf(string resolution, DateOnly? after) => counted.Segments
+                    .Where(s => PointCount(s) > 0 && string.Equals(s.TimeResolution, resolution, StringComparison.OrdinalIgnoreCase))
+                    .Select(s => ToDanishDate(FirstPoint(s)))
+                    .Where(d => after is not { } a || d > a)
+                    .Select(d => (DateOnly?)d)
+                    .Min();
+
+                var switchDate = FirstPointOf("Hour", null) is { } firstHourly
+                    ? FirstPointOf("Quarter", firstHourly)
+                    : null;
+
+                // The other half of the list: the resolutions the points are in that Settl has no series
+                // for. Systemate has to create those, or the metering point can't be posted at all.
+                var valueResolutions = counted.Segments
+                    .Where(s => PointCount(s) > 0)
+                    .Select(OutgoingTimeSeries.Resolution)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r, StringComparer.Ordinal)
+                    .ToList();
+                var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
+                if (seriesError != null)
+                    return Error($"Settl GetTimeSeries failed for MP {candidate.Identification}: {seriesError}");
+                var settlResolutions = (series ?? [])
+                    .Select(t => SettlResolutionName(t.TimeResolution))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r, StringComparer.Ordinal)
+                    .ToList();
+                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
+
+                // Only the hourly direction: a metering point whose points are 15-minute while Settl has
+                // an hourly series is the mirror case and stays off the list, as with mirror switches.
+                if (!missing.Contains("Hour", StringComparer.OrdinalIgnoreCase))
+                    continue;
+
+                // No switch inside the window, but Xellent's resolution and Settl's series differ: the
+                // change is between the two, and it happens where the posted data stops and Settl's own
+                // begins — the delivery start, which is the window end.
+                switchDate ??= candidate.To;
+
+                // Settl states no delivery for this one (the InDelivery bug), so the window it would be
+                // posted with rests on the current delivery status. It belongs on the list, but not as
+                // something settled: it goes to its own file instead.
+                needed++;
+                if (doneList.Contains(SnapshotDone, candidate.Identification))
+                {
+                    doneNotListed++;
+                    continue;
+                }
+
+                var sourceResolutions = counted.Segments.Where(s => PointCount(s) > 0)
+                    .Select(s => s.TimeResolution).Distinct().OrderBy(r => r, StringComparer.Ordinal);
+                var change = new ResolutionRow(candidate.Identification, candidate.Type, switchDate, string.Join(" + ", sourceResolutions),
+                    string.Join(" + ", settlResolutions), string.Join(" + ", missing), candidate.From, candidate.To);
+                if (candidate.FromCurrentDeliveryStatus)
+                    unclearDelivery.Add(change);
+                else
+                    changes.Add(change);
+            }
+            var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"resolution-changes-{environment}.csv");
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
+                Directory.CreateDirectory(folder);
+            // WindowEnd is the delivery start (the window's first day not included).
+            string Csv(List<ResolutionRow> rows) =>
+                CsvLine(["MeteringPointId", "Type", "ChangeDate", "XellentResolutions", "SettlSeries", "MissingSeries", "WindowStart", "WindowEnd"]) +
+                string.Concat(rows.Select(r => CsvLine([r.MeteringPoint, r.Type, r.ChangeDate is { } d ? $"{d:yyyy-MM-dd}" : "",
+                    r.XellentResolutions, r.SettlSeries, r.MissingSeries, $"{r.From:yyyy-MM-dd}", $"{r.To:yyyy-MM-dd}"])));
+            await File.WriteAllTextAsync(path, Csv(changes), CsvEncoding, cancellationToken);
+            _log($"{needed} of {_doneCandidates.Count} metering points need a resolution decision " +
+                 $"({changes.Count(r => r.ChangeDate is not null)} of the listed ones change resolution inside their window, " +
+                 $"{changes.Count(r => r.MissingSeries.Length > 0)} are missing a Settl series)");
+            _log($"{changes.Count} listed → {path}" +
+                 (doneNotListed > 0 ? $" ({doneNotListed} already posted, left out of the list)" : ""));
+
+            var unclearPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!,
+                Path.GetFileNameWithoutExtension(path) + "-unclear-delivery.csv");
+            if (unclearDelivery.Count == 0 && File.Exists(unclearPath))
+                await File.WriteAllTextAsync(unclearPath, Csv([]), CsvEncoding, cancellationToken);
+            if (unclearDelivery.Count > 0)
+            {
+                await File.WriteAllTextAsync(unclearPath, Csv(unclearDelivery), CsvEncoding, cancellationToken);
+                _log($"{unclearDelivery.Count} more belong on the list but Settl does not state their delivery (no InDelivery=true) " +
+                     $"— not on the list above → {unclearPath}");
+            }
+            return 0;
+        }
+        finally
+        {
+            _log = runLog;
+            _snapshot = null;
+        }
+    }
+    /// <summary>
+    /// Writes one row per metering point a batch run would post: outgoing resolutions and counts,
+    /// the time series Settl has for it, what is missing, and a status — including
+    /// <c>Ready</c> for the ones with nothing wrong. The list of missing time series is what Systemate
+    /// needs; nothing is created here. Windows come from the batch run's own decisions. Metering points
+    /// already posted (done) are in it too; 6##### payers are out. <paramref name="offline"/> reads Settl and Xellent from the
+    /// snapshot. Default file: <c>&lt;output&gt;/readiness-&lt;env&gt;.csv</c>.
+    /// </summary>
+    public async Task<int> RunReadinessAsync(string environment, bool offline = false, string? outputPath = null,
+        bool includeChildren = false, CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (_settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+        if (offline)
+            _snapshot = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+        var runLog = _log;
+        try
+        {
+            _log($"=== Readiness — {environment} ===");
+            _log("Working out the window each metering point would be posted with...");
+            _markDoneMode = true;
+            _doneCandidates.Clear();
+            // No _done here: the report covers every metering point the migration touches, the ones
+            // already posted included. Only a real post run leaves done metering points out.
+            _log = _ => { };
+            try
+            {
+                await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
+                    skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
+                    cancellationToken);
+            }
+            finally
+            {
+                _log = runLog;
+                _markDoneMode = false;
+                _done = null;
+            }
+
+            _log($"Checking {_doneCandidates.Count} metering point(s)...");
+            var rows = new List<string[]>();
+            var statusCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            // Metering points already posted count towards the status totals but get no row: there is
+            // nothing left to decide about them.
+            var doneList = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+            var doneNotListed = 0;
+            await using var context = BuildXellentContext();
+            var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var candidate = candidates[i];
+                ReportProgress("Readiness", i + 1, candidates.Count);
+
+                var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
+                    candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
+                var valueResolutions = counted.Segments
+                    .Where(s => PointCount(s) > 0)
+                    .Select(OutgoingTimeSeries.Resolution)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r, StringComparer.Ordinal)
+                    .ToList();
+                var points = counted.Segments.Sum(OutgoingTimeSeries.PointCount);
+
+                var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
+                if (seriesError != null)
+                    return Error($"Settl GetTimeSeries failed for MP {candidate.Identification}: {seriesError}");
+                var settlResolutions = (series ?? [])
+                    .Select(t => SettlResolutionName(t.TimeResolution))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r, StringComparer.Ordinal)
+                    .ToList();
+                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
+
+                var reasons = new List<string>();
+                string status;
+                if (counted.SeriesWithoutAgreement.Count > 0)
+                {
+                    status = "SeriesWithoutAgreement";
+                    reasons.Add("XellentValuesOutsideAgreement");
+                }
+                else if (counted.Segments.Any(s => OutgoingTimeSeries.Validate(s) != null))
+                    status = "ConversionError";
+                else if (valueResolutions.Count == 0)
+                {
+                    // No values is only worth chasing when a meter is actually installed. Xellent status
+                    // "Oprettet" means the address has no meter yet, so there is nothing to wait for.
+                    status = await MeterPointStatusAsync(context, candidate.Identification) == MeterPointStatusCreated
+                        ? "NotInstalled"
+                        : "NoValues";
+                }
+                else if (missing.Count > 0)
+                {
+                    status = MissingSeriesStatus(missing);
+                }
+                else if (valueResolutions.Count > 1)
+                {
+                    status = "ResolutionChange";
+                }
+                else
+                {
+                    status = "Ready";
+                }
+
+                // Keep the source mismatch visible even when outgoing conversion resolves it.
+                if (counted.ValuesWithWrongResolution.Count > 0)
+                    reasons.Add("XellentResolutionMismatch");
+                if (counted.ReadingResolutionsInWindow.Count > 1)
+                    reasons.Add("XellentReadsBothResolutions");
+                if (counted.CountedPointsBeforeBoundary is > 0)
+                    reasons.Add("ValuesBeforeDeliveryBoundary");
+
+                statusCounts[status] = statusCounts.GetValueOrDefault(status) + 1;
+                if (doneList.Contains(SnapshotDone, candidate.Identification))
+                {
+                    doneNotListed++;
+                    continue;
+                }
+                rows.Add(
+                [
+                    candidate.Identification,
+                    candidate.Type,
+                    candidate.Id.ToString(),
+                    candidate.Account,
+                    $"{candidate.From:yyyy-MM-dd}",
+                    $"{candidate.To:yyyy-MM-dd}",
+                    string.Join(" + ", valueResolutions),
+                    points.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    string.Join(" + ", settlResolutions),
+                    string.Join(" + ", missing),
+                    status,
+                    string.Join(" | ", reasons),
+                    string.Join(" | ", counted.ValuesWithWrongResolution.Concat(counted.SeriesWithoutAgreement)
+                        .Concat(counted.Segments.Select(OutgoingTimeSeries.Validate).OfType<string>())),
+                ]);
+            }
+
+            var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"readiness-{environment}.csv");
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
+                Directory.CreateDirectory(folder);
+            var text = CsvLine(["MeteringPointId", "Type", "SettlId", "Account", "WindowStart", "WindowEnd", "ValueResolutions",
+                    "ValuePoints", "SettlSeries", "MissingSeries", "Status", "Reasons", "Detail"]) +
+                string.Concat(rows.Select(CsvLine));
+            await File.WriteAllTextAsync(path, text, CsvEncoding, cancellationToken);
+
+            _log("");
+            foreach (var (status, count) in statusCounts.OrderByDescending(s => s.Value))
+                _log($"  {count} {status}");
+            _log($"{rows.Count} metering point(s) → {path}" +
+                 (doneNotListed > 0 ? $" ({doneNotListed} already posted, counted above but not listed)" : ""));
+            return 0;
+        }
+        finally
+        {
+            _log = runLog;
+            _snapshot = null;
+        }
+    }
+
+    /// <summary>
+    /// Prints migration coverage from the environment snapshot. Completed metering points come from
+    /// <c>done.jsonl</c>; the remaining candidates are classified with the same value/series checks as
+    /// <see cref="RunReadinessAsync"/>. This command deliberately uses the snapshot rather than refreshing
+    /// it: run <c>snapshot</c> first when a newer view is wanted.
+    /// </summary>
+    public async Task<int> RunCoverageAsync(
+        string environment,
+        bool json = false,
+        bool byAccount = false,
+        int accountLimit = 50,
+        bool includeChildren = false,
+        CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (_settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+
+        var snapshotDirectory = SnapshotDirectory(environment);
+        if (!Directory.Exists(snapshotDirectory) ||
+            !File.Exists(Path.Combine(snapshotDirectory, SnapshotSettlList + ".jsonl")))
+            return Error($"No snapshot found for environment '{environment}' at {snapshotDirectory}. Run the snapshot command first.");
+
+        _snapshot = new RunSnapshot(snapshotDirectory, reuse: true, fetchMissing: false);
+        var runLog = _log;
+        try
+        {
+            _markDoneMode = true;
+            _doneCandidates.Clear();
+            _coverageTrace = new CoverageScopeTrace();
+            var snapshotErrors = new List<string>();
+            _log = line =>
+            {
+                if (line.Contains("snapshot has no", StringComparison.OrdinalIgnoreCase))
+                    snapshotErrors.Add(line);
+            };
+            await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true,
+                skipResolutionChange: false, skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null,
+                windowEndDateOverride: null, skip: null, cancellationToken);
+            _log = runLog;
+            _markDoneMode = false;
+            _done = null;
+            if (snapshotErrors.Count > 0)
+                return Error($"The offline snapshot is incomplete. Run the snapshot command again. {snapshotErrors[0].Trim()}");
+
+            var doneList = new RunSnapshot(snapshotDirectory, reuse: true, fetchMissing: false);
+            doneList.TryGet<DoneSummary>(SnapshotDoneSummary, "last", out var summary);
+            var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
+            var results = new List<(DoneCandidate Candidate, string Status)>();
+
+            await using var context = BuildXellentContext();
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var candidate = candidates[i];
+                ReportProgress("Coverage", i + 1, candidates.Count);
+                if (doneList.Contains(SnapshotDone, candidate.Identification))
+                {
+                    results.Add((candidate, "Completed"));
+                    continue;
+                }
+
+                var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
+                    candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
+                var valueResolutions = counted.Segments
+                    .Where(s => PointCount(s) > 0)
+                    .Select(OutgoingTimeSeries.Resolution)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
+                if (seriesError != null)
+                    return Error($"Snapshot data missing for MP {candidate.Identification}: {seriesError}");
+                var settlResolutions = (series ?? [])
+                    .Select(t => SettlResolutionName(t.TimeResolution))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
+
+                string status;
+                if (counted.SeriesWithoutAgreement.Count > 0)
+                    status = "SeriesWithoutAgreement";
+                else if (counted.Segments.Any(s => OutgoingTimeSeries.Validate(s) != null))
+                    status = "ConversionError";
+                else if (valueResolutions.Count == 0)
+                    status = await MeterPointStatusAsync(context, candidate.Identification) == MeterPointStatusCreated
+                        ? "NotInstalled"
+                        : "NoValues";
+                else if (missing.Count > 0)
+                    status = MissingSeriesStatus(missing);
+                else if (valueResolutions.Count > 1)
+                    status = "ResolutionChange";
+                else
+                    status = "Ready";
+                results.Add((candidate, status));
+            }
+
+            var completed = results.Count(r => r.Status == "Completed");
+            var ready = results.Count(r => r.Status == "Ready");
+            var exclusions = _coverageTrace.Exclusions
+                .Select(pair => new CoverageExclusionCount(pair.Key, pair.Value.Total, pair.Value.Parents, pair.Value.Children))
+                .OrderByDescending(e => e.Count)
+                .ThenBy(e => e.Reason, StringComparer.Ordinal)
+                .ToList();
+            var examined = _coverageTrace.MeteringPointsExamined;
+            var unexplained = examined - results.Count - exclusions.Sum(e => e.Count);
+            if (unexplained > 0)
+                exclusions.Add(new CoverageExclusionCount("Other selection outcome", unexplained, unexplained, 0));
+            var statusCounts = results
+                .Where(r => r.Status != "Completed")
+                .GroupBy(r => r.Status, StringComparer.Ordinal)
+                .Select(g => new CoverageStatusCount(g.Key, g.Count()))
+                .OrderByDescending(s => s.Count)
+                .ThenBy(s => s.Status, StringComparer.Ordinal)
+                .ToList();
+            var accountReports = results
+                .GroupBy(r => r.Candidate.Account, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new AccountCoverageReport(
+                    group.Key,
+                    group.Count(),
+                    group.Count(r => r.Status == "Completed"),
+                    group.Count(r => r.Status == "Ready"),
+                    group.Count(r => r.Status is not ("Completed" or "Ready"))))
+                .OrderByDescending(a => a.Remaining)
+                .ThenBy(a => a.Account, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var accountsComplete = accountReports.Count(a => a.Remaining == 0);
+            var report = new TimeSeriesCoverageReport(
+                DateTimeOffset.UtcNow,
+                environment,
+                summary?.CheckedAt,
+                includeChildren,
+                _coverageTrace.SettlSnapshotRows,
+                _coverageTrace.DuplicateSettlRows,
+                _coverageTrace.SettlRowsWithoutIdentification,
+                examined,
+                results.Count,
+                examined - results.Count,
+                completed,
+                ready,
+                results.Count - completed - ready,
+                results.Count(r => r.Candidate.Type == "Parent"),
+                results.Count(r => r.Candidate.Type == "Child"),
+                accountReports.Count,
+                accountsComplete,
+                exclusions,
+                statusCounts,
+                byAccount || json ? accountReports : null);
+
+            if (json)
+                _log(JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+            else
+                PrintCoverage(report, snapshotDirectory, accountLimit);
+            return 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error($"Offline coverage could not be calculated: {ex.Message}");
+        }
+        finally
+        {
+            _log = runLog;
+            _markDoneMode = false;
+            _snapshot = null;
+            _done = null;
+            _coverageTrace = null;
+        }
+    }
+
+    private void PrintCoverage(TimeSeriesCoverageReport report, string snapshotDirectory, int accountLimit)
+    {
+        _log($"=== Time series migration coverage — {report.Environment} ===");
+        _log($"Generated: {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
+        _log($"Source: {snapshotDirectory}");
+        _log(report.SnapshotCheckedAt is { } checkedAt
+            ? $"Snapshot checked: {checkedAt.ToLocalTime():yyyy-MM-dd HH:mm}"
+            : "Snapshot checked: unknown (done-summary missing)");
+        _log($"Children: {(report.IncludesChildren ? "included" : "excluded")}");
+        _log("");
+        _log($"Settl snapshot rows:             {report.SettlSnapshotRows,9:N0}");
+        if (report.DuplicateSettlRows > 0)
+            _log($"Duplicate Settl rows:          {report.DuplicateSettlRows,9:N0}  (not additional metering points)");
+        if (report.SettlRowsWithoutIdentification > 0)
+            _log($"Rows without identification:   {report.SettlRowsWithoutIdentification,9:N0}");
+        _log($"Unique metering points examined: {report.MeteringPointsExamined,9:N0}");
+        _log($"Metering points in scope: {report.MeteringPointsInScope,12:N0}");
+        _log($"Excluded from scope:      {report.ExcludedFromScope,12:N0}");
+        _log("");
+        _log("Excluded from scope:");
+        foreach (var exclusion in report.Exclusions)
+            _log($"  {exclusion.Count,8:N0} x {exclusion.Reason} ({exclusion.Parents:N0} parents, {exclusion.Children:N0} children)");
+        _log("");
+        _log($"Completed:                 {report.Completed,12:N0}  ({report.CoveragePercent:N2}%)");
+        _log($"Ready to migrate:          {report.Ready,12:N0}");
+        _log($"Blocked / needs decision:  {report.Blocked,12:N0}");
+        _log($"Remaining:                 {report.Remaining,12:N0}");
+        _log($"Completed or ready:        {report.Completed + report.Ready,12:N0}  ({report.ReadyOrCompletedPercent:N2}%)");
+        _log($"Parents / children:        {report.ParentMeteringPoints:N0} / {report.ChildMeteringPoints:N0}");
+        _log("");
+        _log($"Accounts in scope:         {report.AccountsInScope,12:N0}");
+        _log($"Fully completed accounts:  {report.AccountsComplete,12:N0}  ({report.AccountCoveragePercent:N2}%)");
+        _log("");
+        _log("Remaining status:");
+        foreach (var status in report.RemainingStatuses)
+            _log($"  {status.Count,8:N0} x {status.Status}");
+
+        if (report.Accounts is null)
+            return;
+        var incomplete = report.Accounts.Where(a => a.Remaining > 0).ToList();
+        var rows = accountLimit == 0 ? incomplete : incomplete.Take(accountLimit).ToList();
+        _log("");
+        _log("Accounts with remaining metering points:");
+        _log("Account                 Scope    Completed      Ready    Blocked   Coverage");
+        foreach (var account in rows)
+            _log($"{account.Account,-20} {account.MeteringPointsInScope,8:N0} {account.Completed,12:N0} " +
+                 $"{account.Ready,10:N0} {account.Blocked,10:N0} {account.CoveragePercent,9:N2}%");
+        if (accountLimit > 0 && incomplete.Count > accountLimit)
+            _log($"Showing {accountLimit:N0} of {incomplete.Count:N0} incomplete accounts. Use --account-limit 0 to show all.");
+    }
+
+    /// <summary>One row of the resolution list: a switch date (null when there is none), what the points are
+    /// in, what Settl has, and what Settl is missing.</summary>
+    private sealed record ResolutionRow(string MeteringPoint, string Type, DateOnly? ChangeDate, string XellentResolutions,
+        string SettlSeries, string MissingSeries, DateOnly From, DateOnly To);
+
+    // EXU_METERPOINTSTATUSPERIOD.METERPOINTSTATUS: "Oprettet" — the metering point exists, but no meter
+    // is installed at the address yet, so it never gets values. A delivering meter point sits at 6.
+    private const int MeterPointStatusCreated = 5;
+
+    // Which Settl series the metering point is missing, named after the resolution when it is just one.
+    private static string MissingSeriesStatus(List<string> missing) =>
+        missing.Count == 1 && missing.Contains("Hour", StringComparer.OrdinalIgnoreCase)
+            ? "MissingHourSeries"
+            : missing.Count == 1 && missing.Contains("Quarter", StringComparer.OrdinalIgnoreCase)
+                ? "MissingQuarterSeries"
+                : "MissingSeries";
+
+    // Settl states a resolution as length + unit; this run speaks of Hour and Quarter.
+    private static string SettlResolutionName(TimeResolutionInfoDto? resolution) => resolution switch
+    {
+        { Length: 1 } when string.Equals(resolution.Unit, "Hour", StringComparison.OrdinalIgnoreCase) => "Hour",
+        { Length: 15 } when string.Equals(resolution.Unit, "Minutes", StringComparison.OrdinalIgnoreCase) => "Quarter",
+        null => "unknown",
+        _ => $"{resolution.Length} {resolution.Unit}",
+    };
+
+    /// <summary>
+    /// Checks current Settl readings in the same ownership window as a migration run.
+    /// Reads every candidate, including previously marked done meters. Does not read Xellent
+    /// consumption values, post data, or update the snapshot or done marks.
+    /// Missing means no readings, not incomplete coverage. Unresolved candidates remain Unknown.
+    /// </summary>
+    public async Task<MissingReadingsScanResult> ScanMissingReadingsAsync(
+        string environment, DateOnly? cosFrom = null, DateOnly? cosTo = null,
+        int? skip = null, int? limit = null, bool includeChildren = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (_settlTimeSeriesClient == null || _settlMeteringPointClient == null)
+            throw new InvalidOperationException("Settl API clients not configured.");
+        var savedSnapshot = _snapshot;
+        var savedDone = _done;
+        var savedMode = _markDoneMode;
+        var savedChildren = _includeChildren;
+        var savedType = _meteringPointType;
+        var savedCandidates = _doneCandidates.ToList();
+        try
+        {
+            _snapshot = null;
+            _done = null;
+            _includeChildren = includeChildren;
+            _markDoneMode = true;
+            _doneCandidates.Clear();
+            _missingReadingsScan = new(StringComparer.Ordinal);
+            var exitCode = await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true,
+                skipResolutionChange: false, skipIfExistingPoints: false, cosFrom, cosTo,
+                limit, windowEndDateOverride: null, skip, cancellationToken);
+
+            // Presence checks can run independently. Stop as soon as a series has any readings.
+            var checkedEntries = new System.Collections.Concurrent.ConcurrentBag<MissingReadingsEntry>();
+            await Parallel.ForEachAsync(_doneCandidates,
+                new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = cancellationToken },
+                async (candidate, ct) =>
+                {
+                    var (present, error) = await HasLiveReadingsAsync(candidate, ct);
+                    checkedEntries.Add(new(candidate.Identification, candidate.Id, candidate.Account,
+                        candidate.From, candidate.To,
+                        error != null ? "Unknown" : present ? "Present" : "Missing", error));
+                });
+            foreach (var entry in checkedEntries)
+                _missingReadingsScan[entry.MeteringPointId] = entry;
+            var entries = _missingReadingsScan.Values.OrderBy(e => e.MeteringPointId, StringComparer.Ordinal).ToList();
+            return new(entries, exitCode != 0 || entries.Any(e => e.Status == "Unknown") ? 1 : 0);
+        }
+        finally
+        {
+            _missingReadingsScan = null;
+            _scanCurrentMeteringPoint = null;
+            _snapshot = savedSnapshot;
+            _done = savedDone;
+            _markDoneMode = savedMode;
+            _includeChildren = savedChildren;
+            _meteringPointType = savedType;
+            _doneCandidates.Clear();
+            _doneCandidates.AddRange(savedCandidates);
+        }
+    }
+
+    private async Task<(bool Present, string? Error)> HasLiveReadingsAsync(DoneCandidate candidate, CancellationToken ct)
+    {
+        if (candidate.From >= candidate.To)
+            return (false, "No historical reading period could be checked.");
+        var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, ct);
+        if (seriesError != null)
+        {
+            StopScanOnNetworkFailure(seriesError);
+            return (false, seriesError);
+        }
+        if (series == null) return (false, "Settl returned no series response.");
+        foreach (var ts in series.DistinctBy(s => s.Id))
+        {
+            for (var from = candidate.From; from < candidate.To;)
+            {
+                var to = from.AddYears(1).AddDays(-1);
+                if (to > candidate.To) to = candidate.To;
+                var (summary, error) = await _settlTimeSeriesClient!.GetPointsSummaryAsync(ts.Id, from, to, ct);
+                if (error != null)
+                {
+                    StopScanOnNetworkFailure(error);
+                    return (false, error);
+                }
+                if (summary == null) return (false, "Settl returned no readings response.");
+                if (summary.Count > 0) return (true, null);
+                from = to;
+            }
+        }
+        return (false, null);
+    }
+
+    private static void StopScanOnNetworkFailure(string error)
+    {
+        string[] networkFailures = ["network-related", "network path", "no such host", "host is unknown",
+            "name or service not known", "connection refused", "actively refused", "unable to connect",
+            "connection timed out", "connection attempt failed", "could not open a connection"];
+        if (networkFailures.Any(pattern => error.Contains(pattern, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("The readings scan stopped because the connection failed. Check the corporate network/VPN.");
+    }
+
+    private async Task<int> RunPostAllCoreAsync(
+        string environment,
+        bool dryRun,
+        bool continueOnError,
+        bool skipResolutionChange,
+        bool skipIfExistingPoints,
+        DateOnly? cosFrom,
+        DateOnly? cosTo,
+        int? limit,
+        DateTime? windowEndDateOverride,
+        int? skip,
+        CancellationToken cancellationToken)
+    {
+        ResetSkipArtifacts();
+
+        if (_settlMeteringPointClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+
+        const string deliveryCategory = BatchDeliveryCategory;
+
+        _log("=== Time Series Post — all metering points in Settl ===");
+        _log($"Delivery: {deliveryCategory}");
+        if (cosFrom != null || cosTo != null)
+            _log($"Delivery start: {(cosFrom is { } f ? f.ToString("yyyy-MM-dd") : "…")} → {(cosTo is { } t ? t.ToString("yyyy-MM-dd") : "…")}");
+        if (skip is { } sk) _log($"Skip: {sk}");
+        if (limit is { } l) _log($"Limit: {l}");
+        _log(windowEndDateOverride is null
+            ? "Per-MP window: end = resolved revision date, start = end − 3 years"
+            : $"Per-MP window override: end = {windowEndDateOverride:yyyy-MM-dd}, start = end − 3 years");
+        _log(_snapshot != null
+            ? "Data: Settl and Xellent contracts from the snapshot; time series points read from Xellent"
+            : "Data: Settl and Xellent read live");
+        if (dryRun) _log("Dry run: Yes (no mutations will be made)");
+        if (continueOnError) _log("Continue on error: Yes (--force — failed MPs are skipped, run still exits non-zero)");
+        if (skipIfExistingPoints) _log("Skip if existing points: Yes (--skip-if-existing-points)");
+        _log("");
+
+        _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
+
+        var totalPosted = new Tally();
+        var totalFailed = new Tally();
+        var totalAmbiguousRevisions = new Tally();
+        var failures = new List<string>();
+
+        // Logs the error and records it. Returns true if the run should continue to the next
+        // unit (--force), false if it should abort — mirrors DataMigration's ContinueOnError.
+        bool RecordFailure(string message)
+        {
+            if (_missingReadingsScan != null) StopScanOnNetworkFailure(message);
+            _log($"ERROR: {message}");
+            failures.Add(message.Trim());
+            if (!continueOnError)
+                return false;
+            _log("  → fejl — fortsaetter (--force)");
+            return true;
+        }
+
+        // Settl is the source of truth for which metering points exist and when delivery started.
+        List<BatchMeteringPoint> settlMeteringPoints;
+        int totalChildren;
+        try
+        {
+            (settlMeteringPoints, totalChildren) = await LoadBatchMeteringPointsAsync(cosFrom, cosTo, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error(ex.Message);
+        }
+
+        // Metering points already posted by an earlier live run are left out before anything else, and
+        // do not count toward --skip/--limit: repeating a run with --limit N takes the next N not done.
+        var totalAlreadyDone = new Tally();
+        if (_done != null)
+        {
+            foreach (var mp in settlMeteringPoints.Where(m => _done.Contains(SnapshotDone, m.Identification)))
+                totalAlreadyDone.Add(mp.ParentIdentification != null);
+            if (totalAlreadyDone.Total > 0)
+            {
+                settlMeteringPoints = settlMeteringPoints.Where(m => !_done.Contains(SnapshotDone, m.Identification)).ToList();
+                _log($"Already done: {totalAlreadyDone.Total} metering point(s) already in Settl (snapshot check or an earlier post), left out ({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
+            }
+        }
+
+        // How far the migration is: metering points done now, out of the total the last snapshot counted.
+        if (_done != null && !_markDoneMode
+            && _done.TryGet<DoneSummary>(SnapshotDoneSummary, "last", out var lastSummary) && lastSummary is { Total: > 0 })
+        {
+            var doneNow = _done.CountKeys(SnapshotDone);
+            _log($"Migration: {doneNow} of {lastSummary.Total} metering points done ({doneNow * 100 / lastSummary.Total}%) " +
+                 $"— total from the snapshot of {lastSummary.CheckedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+        }
+
+        // Metering points whose payer in Settl is in the 6##### series are not migrated.
+        try
+        {
+            settlMeteringPoints = await LeaveOutExcludedPayersAsync(settlMeteringPoints, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error(ex.Message);
+        }
+
+        // Xellent tells who held each metering point.
+        List<TimeSeriesExtractionService.AccountMeteringPoint> allContracts;
+        await using (var context = BuildXellentContext())
+        {
+            var extraction = new TimeSeriesExtractionService(context, deliveryCategory);
+            // Parents are asked for too, even when the range or the done check left them out: a child
+            // with no contract of its own is held by whoever holds its parent.
+            var contractLookups = settlMeteringPoints.Select(m => m.Identification)
+                .Concat(settlMeteringPoints.Select(m => m.ParentIdentification).OfType<string>())
+                .Distinct(StringComparer.Ordinal).ToList();
+            allContracts = (await GetContractsByMeteringPointAsync(extraction, contractLookups))
+                .SelectMany(p => p.Value).ToList();
+        }
+        _log($"  {settlMeteringPoints.Count} metering points to check " +
+             $"({settlMeteringPoints.Count(m => m.InDelivery)} in delivery, {settlMeteringPoints.Count(m => !m.InDelivery)} not)");
+        _log("");
+        var contractsByMeteringPoint = allContracts.ToLookup(p => p.MeteringPoint);
+        var totalInRange = new Tally();
+        var totalPassedOver = new Tally();
+        var totalNoDeliveryStart = new Tally();
+        var totalOutOfRange = new Tally();
+        var totalNotMigrated = new Tally();
+
+        for (var i = 0; i < settlMeteringPoints.Count; i++)
+        {
+            _scanCurrentMeteringPoint = null;
+            if (_markDoneMode)
+                ReportProgress("Done check, deciding windows", i + 1, settlMeteringPoints.Count);
+
+            if (limit is { } take && take > 0 && totalInRange.Total >= take)
+            {
+                _log($"Limit of {take} reached.");
+                break;
+            }
+
+            var (identification, mpGuid, inDelivery) = (settlMeteringPoints[i].Identification, settlMeteringPoints[i].Id, settlMeteringPoints[i].InDelivery);
+            var parentIdentification = settlMeteringPoints[i].ParentIdentification;
+            var isChild = parentIdentification != null;
+            _meteringPointType = isChild ? "Child" : "Parent";
+            // The block header says when the fallback is used; its own log line would print for every metering point checked.
+            var revisionResolution = await ResolveRevisionAsync(mpGuid, cancellationToken, quiet: true);
+            if (_missingReadingsScan != null && revisionResolution.Error is { } connectionError)
+                StopScanOnNetworkFailure(connectionError);
+            // A child metering point with no delivery status of its own is delivered under its parent:
+            // the window comes from the parent. A child that has one of its own keeps it.
+            var revisionGuid = mpGuid;
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.Error
+                && settlMeteringPoints[i].ParentId is { } parentGuidForRevision)
+            {
+                var parentResolution = await ResolveRevisionAsync(parentGuidForRevision, cancellationToken, quiet: true);
+                if (_missingReadingsScan != null && parentResolution.Error is { } parentConnectionError)
+                    StopScanOnNetworkFailure(parentConnectionError);
+                if (parentResolution.Outcome != RevisionResolutionOutcome.Error)
+                {
+                    revisionResolution = parentResolution;
+                    revisionGuid = parentGuidForRevision;
+                    inDelivery = settlMeteringPoints[i].ParentInDelivery;
+                }
+            }
+            // Not in delivery and no delivery start to fall back on: never delivered, nothing to post.
+            if (!inDelivery && revisionResolution.Outcome == RevisionResolutionOutcome.Error)
+            {
+                totalNoDeliveryStart.Add(isChild);
+                RecordCoverageExclusion("Never delivered (no delivery start)", isChild);
+                continue;
+            }
+
+            // Place the metering point before acting on it, so --skip/--limit batches never repeat each
+            // other's skips or failures. The range needs a delivery start; one Settl marks as in delivery
+            // but whose start does not resolve was already placed in range by the list.
+            if (revisionResolution.Outcome is RevisionResolutionOutcome.Resolved or RevisionResolutionOutcome.SafetySkip
+                && ToDanishDate(revisionResolution.Revision) is var placedOn
+                && ((cosFrom is { } from && placedOn < from) || (cosTo is { } to && placedOn > to)))
+            {
+                totalOutOfRange.Add(isChild);
+                RecordCoverageExclusion("Outside delivery-start range", isChild);
+                continue;
+            }
+            if (skip is { } passOver && totalPassedOver.Total < passOver)
+            {
+                totalPassedOver.Add(isChild);
+                RecordCoverageExclusion("Passed over by --skip", isChild);
+                continue;
+            }
+            totalInRange.Add(isChild);
+            if (_missingReadingsScan != null)
+            {
+                _scanCurrentMeteringPoint = identification;
+                _missingReadingsScan[identification] = new(identification, mpGuid, null, null, null,
+                    "Unknown", "The migration reading period could not be resolved.");
+            }
+            _log($"--- [{i + 1}/{settlMeteringPoints.Count}] MP {identification} ---" +
+                 (parentIdentification is { } shownParent ? $" (child of {shownParent})" : "") +
+                 (revisionGuid != mpGuid ? " (window from the parent)" : "") +
+                 (inDelivery ? "" : " (not in delivery in Settl — using the current delivery status)"));
+
+            // Records a metering point Settl does not mark as in delivery whose Xellent side does not show
+            // a migration: it was never migrated, so it is skipped rather than failed.
+            void RecordNotMigrated(string reason, string coverageReason)
+            {
+                totalNotMigrated.Add(isChild);
+                RecordCoverageExclusion(coverageReason, isChild);
+                _missingReadingsScan?.Remove(identification);
+                _log($"SKIP MP {identification}: not migrated — {reason}{TypeSuffix()}");
+                RecordSkip(TimeSeriesSkipCategory.NotMigrated, null, identification, mpGuid,
+                    revisionResolution.Revision, revisionResolution.DeliveryBoundary, reason);
+            }
+
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.Ambiguous)
+            {
+                totalAmbiguousRevisions.Add(isChild);
+                RecordCoverageExclusion("Ambiguous delivery revision", isChild);
+                _log($"SKIP MP {identification}: ambiguous delivery statuses ({revisionResolution.ActiveStatuses.Count} InDelivery=true){TypeSuffix()}");
+                RecordAmbiguousRevision(
+                    null,
+                    identification,
+                    mpGuid,
+                    revisionResolution.ActiveStatuses);
+                continue;
+            }
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.SafetySkip)
+            {
+                RecordCoverageExclusion($"Delivery safety: {revisionResolution.SkipCategory}", isChild);
+                _log($"REVISION MP {identification}: {revisionResolution.Revision:O}");
+                _log($"SKIP MP {identification}: {revisionResolution.SkipReason}{TypeSuffix()}");
+                RecordSkip(
+                    revisionResolution.SkipCategory!.Value,
+                    null,
+                    identification,
+                    mpGuid,
+                    revisionResolution.Revision,
+                    null,
+                    revisionResolution.SkipReason ?? "");
+                continue;
+            }
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.Error)
+            {
+                RecordCoverageExclusion("Delivery revision could not be resolved", isChild);
+                if (!RecordFailure($"  Revision resolution failed for MP {identification} ({mpGuid}): {revisionResolution.Error}")) return 1;
+                continue;
+            }
+
+            var revisionDate = ToDanishDate(revisionResolution.Revision);
+
+            // The migrated account is the one whose Xellent contract was still running on the day before
+            // delivery starts in Settl: at migration the contract is closed on COS − 1 (XellentDomain
+            // docs/xellent-datamodel.md) — DataMigration's reconcile picks owners the same way. "Running
+            // on" rather than "ends on", since the 2026-08-31 batch restamped some ends.
+            var periodStart = revisionDate.AddDays(-1);
+            // A child metering point with no contract of its own sits on its parent's: the account,
+            // the migration close and the hold history are then the parent's. A child that has its own
+            // contract keeps it.
+            var contractsFor = contractsByMeteringPoint[identification];
+            var contractIdentification = identification;
+            List<string> HoldersOn(IEnumerable<TimeSeriesExtractionService.AccountMeteringPoint> contracts) => contracts
+                .Where(c => c.Covers(periodStart)).Select(c => c.Account).Distinct().OrderBy(a => a, StringComparer.Ordinal).ToList();
+            var holders = HoldersOn(contractsFor);
+            if (holders.Count == 0 && parentIdentification is { } contractParent)
+            {
+                var parentHolders = HoldersOn(contractsByMeteringPoint[contractParent]);
+                if (parentHolders.Count > 0)
+                {
+                    contractsFor = contractsByMeteringPoint[contractParent];
+                    contractIdentification = contractParent;
+                    holders = parentHolders;
+                    _log($"  contract from the parent ({contractParent})");
+                }
+            }
+            if (holders.Count == 0)
+            {
+                var reason = $"no Xellent contract on {periodStart:yyyy-MM-dd} (the day before delivery starts in Settl)";
+                if (!inDelivery)
+                {
+                    RecordNotMigrated(reason, "Not migrated: missing Xellent contract");
+                    continue;
+                }
+                RecordCoverageExclusion("Missing Xellent contract", isChild);
+                _log($"SKIP MP {identification}: {reason}{TypeSuffix()}");
+                RecordSkip(TimeSeriesSkipCategory.MissingInXellent, null, identification, mpGuid,
+                    revisionResolution.Revision, revisionResolution.DeliveryBoundary, reason);
+                continue;
+            }
+            if (holders.Count > 1)
+            {
+                var reason = $"held by several accounts on {periodStart:yyyy-MM-dd} ({string.Join("/", holders)})";
+                if (!inDelivery)
+                {
+                    RecordNotMigrated(reason, "Not migrated: multiple Xellent account holders");
+                    continue;
+                }
+                RecordCoverageExclusion("Multiple Xellent account holders", isChild);
+                if (!RecordFailure($"  MP {identification}: {reason}")) return 1;
+                continue;
+            }
+            var accountNumber = holders[0];
+            if (_missingReadingsScan != null)
+                _missingReadingsScan[identification] = _missingReadingsScan[identification] with { Account = accountNumber };
+            _log($"  customer {accountNumber}");
+
+            // A migrated relationship is closed in Xellent the day before delivery starts in Settl:
+            // the account's contract ends that day, and the agreement behind it has status
+            // "Leverance ophørt" and ends that day too. Anything else is not a clean migration;
+            // post nothing. The featuretest "latest 3 years" override is not tied to the migration
+            // and is exempt — except for a metering point Settl does not mark as in delivery, where
+            // the close is the only sign it was migrated at all.
+            if ((windowEndDateOverride is null || !inDelivery)
+                && CheckMigrationClose(contractsFor, accountNumber, periodStart) is { } closeProblem)
+            {
+                if (!inDelivery)
+                {
+                    RecordNotMigrated($"customer {accountNumber}: {closeProblem}", "Not migrated: migration close validation failed");
+                    continue;
+                }
+                RecordCoverageExclusion("Migration close validation failed", isChild);
+                if (!RecordFailure($"  MP {identification} (customer {accountNumber}{(contractIdentification != identification ? $", on the parent {contractIdentification}" : "")}): {closeProblem}")) return 1;
+                continue;
+            }
+
+            DateTime endDate;
+            if (windowEndDateOverride is { } overrideEndDate)
+            {
+                endDate = overrideEndDate.Date;
+            }
+            else
+            {
+                endDate = revisionDate.ToDateTime(TimeOnly.MinValue);
+            }
+
+            var startDate = endDate.AddYears(-3);
+            // Points before the delivery boundary are dropped anyway, so the window starts there:
+            // a series whose agreement ended before the boundary is then never read from Xellent.
+            if (revisionResolution.DeliveryBoundary is { } boundary
+                && ToDanishDate(boundary).ToDateTime(TimeOnly.MinValue) is var boundaryDate
+                && boundaryDate > startDate)
+                startDate = boundaryDate;
+            // History before the account took over the metering point belongs to the previous
+            // occupant (MP 571313113140168212: 486014 lived there until 2025-02-28, 493867 from
+            // 2025-03-01), so the window starts no earlier than the account's own contract.
+            if (AccountHeldSince(contractsFor, accountNumber, periodStart) is { } heldSince
+                && heldSince.ToDateTime(TimeOnly.MinValue) > startDate)
+                startDate = heldSince.ToDateTime(TimeOnly.MinValue);
+
+            _log("");
+            _log($"  MP {identification}: end={endDate:yyyy-MM-dd}  start={startDate:yyyy-MM-dd}");
+
+            // The window must end where Settl's delivery starts — the start of the metering point's
+            // current delivery status (Settl's own page: Delivery Status → Period). Anything else
+            // means the revision came from somewhere it should not; post nothing. Not the list's
+            // delivery period: it can disagree (featuretest MP 571313115200140503, 2026-09: list
+            // period from 2023-08-02, current delivery status from 2026-03-17). A revision that already
+            // came from the current delivery status (the Settl-bug fallback) is that date by
+            // construction and is not fetched again. The featuretest "latest 3 years" override
+            // deliberately ends today and is exempt. A child whose window came from its parent is
+            // checked against the parent — that is where the delivery status is.
+            if (windowEndDateOverride is null && !revisionResolution.FromCurrentDeliveryStatus)
+            {
+                var (currentMp, currentErr) = await GetCurrentMeteringPointAsync(revisionGuid, cancellationToken);
+                if (currentErr != null)
+                {
+                    RecordCoverageExclusion("Settl delivery status lookup failed", isChild);
+                    if (!RecordFailure($"  Settl delivery status lookup failed for MP {identification} ({revisionGuid}): {currentErr}")) return 1;
+                    continue;
+                }
+                var settlDeliveryDate = currentMp?.DeliveryStatus?.Start is { } deliveryStart
+                    ? ToDanishDate(new DateTimeOffset(DateTime.SpecifyKind(deliveryStart,
+                        deliveryStart.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : deliveryStart.Kind)))
+                    : (DateOnly?)null;
+                if (settlDeliveryDate != DateOnly.FromDateTime(endDate))
+                {
+                    RecordCoverageExclusion("Window end differs from Settl delivery date", isChild);
+                    if (!RecordFailure($"  Window end {endDate:yyyy-MM-dd} for MP {identification} does not match Settl delivery date " +
+                                       $"{(settlDeliveryDate is { } d ? d.ToString("yyyy-MM-dd") : "(none)")}.")) return 1;
+                    continue;
+                }
+            }
+
+            // The snapshot seed's done check: everything above decided this metering point would be
+            // posted with this window. It is collected here and asked about afterwards, in parallel
+            // (CheckDoneCandidatesAsync).
+            if (_markDoneMode)
+            {
+                var doneFrom = DateOnly.FromDateTime(startDate);
+                if (revisionResolution.DeliveryBoundary is { } doneBoundary && ToDanishDate(doneBoundary) > doneFrom)
+                    doneFrom = ToDanishDate(doneBoundary);
+                _doneCandidates.Add(new DoneCandidate(identification, mpGuid, accountNumber, revisionResolution.Revision,
+                    doneFrom, DateOnly.FromDateTime(endDate), revisionResolution.FromCurrentDeliveryStatus, _meteringPointType));
+                continue;
+            }
+
+            // Each MP is the atomic unit: the inner post stays fail-fast (a single MP must not be
+            // left half-posted), and this loop decides whether to continue past it.
+            var postOptions = new PostOptions
+            {
+                InBatch = true,
+                MeteringPointId = identification,
+                MeteringPointGuid = mpGuid,
+                ResolvedRevision = revisionResolution.Revision,
+                ResolvedDeliveryBoundary = revisionResolution.DeliveryBoundary,
+                CustomerNumber = accountNumber,
+                StartDate = startDate,
+                EndDate = endDate,
+                DeliveryCategory = deliveryCategory,
+                Environment = environment,
+                DryRun = dryRun,
+                SkipResolutionChange = skipResolutionChange,
+                SkipIfExistingPoints = skipIfExistingPoints,
+            };
+            var rc = await RunPostCoreAsync(postOptions, cancellationToken);
+
+            // A live post that put points in Settl marks the metering point done, like the seed's check would.
+            if (rc == 0 && !dryRun && postOptions.PointsPosted > 0)
+                _done?.Put(SnapshotDone, identification, new DoneEntry(mpGuid, accountNumber, revisionResolution.Revision,
+                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), postOptions.PointsPosted, DateTimeOffset.UtcNow));
+
+            if (rc != 0)
+            {
+                failures.Add($"MP {identification} ({_meteringPointType.ToLowerInvariant()}, customer {accountNumber}) post failed");
+                totalFailed.Add(isChild);
+                if (!continueOnError)
+                {
+                    _log("");
+                    _log($"Aborting run after failure on MP {identification} ({_meteringPointType.ToLowerInvariant()}, customer {accountNumber}).");
+                    return rc;
+                }
+                _log($"  → MP {identification} ({_meteringPointType.ToLowerInvariant()}) fejlede — fortsaetter (--force)");
+                continue;
+            }
+
+            totalPosted.Add(isChild);
+        }
+
+        _log("");
+        // Format is contract to the dashboard's parser (useTimeSeriesRun.ts): plain totals, same order,
+        // ending in "N children skipped." The split per parent and child follows on its own line.
+        _log($"Run completed: {settlMeteringPoints.Count} metering points in Settl, {totalInRange.Total} processed, {totalPosted.Total} posted, " +
+             $"{totalNoDeliveryStart.Total} never delivered, {totalNotMigrated.Total} not migrated, " +
+             (cosFrom != null || cosTo != null ? $"{totalOutOfRange.Total} outside the delivery-start range, " : "") +
+             (skip is > 0 ? $"{totalPassedOver.Total} passed over (--skip), " : "") +
+             $"{totalAmbiguousRevisions.Total} ambiguous revision safety skips, {totalChildren} children " +
+             (_includeChildren ? "included." : "skipped."));
+        _log($"  Parents/children: {totalAlreadyDone} already done, {totalInRange} processed, {totalPosted} posted, " +
+             $"{totalNoDeliveryStart} never delivered, {totalNotMigrated} not migrated, " +
+             (cosFrom != null || cosTo != null ? $"{totalOutOfRange} outside the delivery-start range, " : "") +
+             (skip is > 0 ? $"{totalPassedOver} passed over (--skip), " : "") +
+             $"{totalAmbiguousRevisions} ambiguous revision safety skips.");
+        if (failures.Count > 0)
+        {
+            _log($"{failures.Count} failure(s) skipped (--force){(totalFailed.Total == failures.Count ? $" — {totalFailed}" : "")}:");
+            foreach (var f in failures)
+                _log($"  - {f}");
+            return 1;
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// The metering points a batch run (<see cref="RunPostAllAsync"/>) takes from Settl, in the order it
+    /// takes them (identification): every electricity metering point, children included. A child (Settl
+    /// relation or the Xellent relation table) carries its parent, so it can fall back to the parent's
+    /// delivery status and Xellent contract when it has none of its own. Metering points the list shows
+    /// as in delivery with a delivery
+    /// start outside the range are left out. Those the list shows as not in delivery are kept whatever
+    /// the range, because their delivery start is only known per metering point (Settl bug, 2026-09).
+    /// Throws <see cref="InvalidOperationException"/> when Settl or Xellent cannot be read.
+    /// </summary>
+    public async Task<List<BatchMeteringPoint>> ListBatchMeteringPointsAsync(
+        DateOnly? cosFrom = null, DateOnly? cosTo = null, bool includeChildren = false,
+        CancellationToken cancellationToken = default)
+    {
+        _includeChildren = includeChildren;
+        if (_settlMeteringPointClient == null)
+            throw new InvalidOperationException("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+        return (await LoadBatchMeteringPointsAsync(cosFrom, cosTo, cancellationToken)).MeteringPoints;
+    }
+
+    // The Settl list, with the Xellent relation table filling in the parent for children Settl does
+    // not relate itself.
+    private async Task<(List<BatchMeteringPoint> MeteringPoints, int Children)> LoadBatchMeteringPointsAsync(
+        DateOnly? cosFrom, DateOnly? cosTo, CancellationToken cancellationToken)
+    {
+        var (meteringPoints, allByIdentification) = await LoadSettlMeteringPointsAsync(cosFrom, cosTo, cancellationToken);
+        await using var context = BuildXellentContext();
+        if (_snapshot is not { FetchMissing: false } && !await TestConnectionAsync(context))
+            throw new InvalidOperationException("Could not connect to the Xellent database.");
+        var extraction = new TimeSeriesExtractionService(context, BatchDeliveryCategory);
+        var parentByChild = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in await GetChildrenByParentAsync(extraction, meteringPoints.Select(m => m.Identification).ToList()))
+            foreach (var child in pair.Value)
+                parentByChild[child] = pair.Key;
+
+        var fromXellent = 0;
+        for (var i = 0; i < meteringPoints.Count; i++)
+        {
+            var mp = meteringPoints[i];
+            // Settl's own relation wins; Xellent only fills in what Settl does not relate.
+            if (mp.ParentIdentification != null || !parentByChild.TryGetValue(mp.Identification, out var parentId))
+                continue;
+            fromXellent++;
+            // The parent is taken from the whole Settl list, not the filtered one: a parent left out by
+            // the delivery-start range is still the child's fallback.
+            allByIdentification.TryGetValue(parentId, out var parent);
+            meteringPoints[i] = mp with
+            {
+                ParentIdentification = parentId,
+                ParentId = parent is { } p && p.Id != Guid.Empty ? p.Id : null,
+                ParentInDelivery = parent is { } q && (q.InDelivery == true || q.DeliveryStart is not null),
+            };
+        }
+        var childCount = meteringPoints.Count(m => m.ParentIdentification != null);
+        if (_coverageTrace != null)
+            _coverageTrace.MeteringPointsExamined = allByIdentification.Count;
+        if (!_includeChildren)
+        {
+            RecordCoverageExclusion("Children excluded (use --include-children)", isChild: true, childCount);
+            if (childCount > 0)
+                _log($"  skipped {childCount} child MP(s) (--include-children takes them along)");
+            return (meteringPoints.Where(m => m.ParentIdentification == null).ToList(), childCount);
+        }
+        if (fromXellent > 0)
+            _log($"  {fromXellent} child MP(s) (Xellent relation table) included");
+        return (meteringPoints, childCount);
+    }
+
+    /// <summary>
+    /// Every electricity metering point in the Settl environment, ordered by identification, children
+    /// included. A child (Settl relation) carries its parent, so it can fall back to the parent's
+    /// delivery status when it has none of its own. Metering points the list shows as in delivery, with
+    /// a delivery start outside the range, are dropped here; the rest get their delivery start resolved
+    /// one by one later.
+    /// </summary>
+    private async Task<(List<BatchMeteringPoint> MeteringPoints, Dictionary<string, SettlListItem> AllByIdentification)>
+        LoadSettlMeteringPointsAsync(
+        DateOnly? cosFrom, DateOnly? cosTo, CancellationToken cancellationToken)
+    {
+        var list = await GetSettlListAsync(cancellationToken);
+        if (_coverageTrace != null)
+        {
+            _coverageTrace.SettlSnapshotRows = list.Count;
+            _coverageTrace.SettlRowsWithoutIdentification = list.Count(mp => string.IsNullOrEmpty(mp.Identification));
+            _coverageTrace.DuplicateSettlRows = list.Count(mp => !string.IsNullOrEmpty(mp.Identification))
+                - list.Where(mp => !string.IsNullOrEmpty(mp.Identification))
+                    .Select(mp => mp.Identification)
+                    .Distinct(StringComparer.Ordinal)
+                    .Count();
+        }
+        // The parent is looked up by GUID: the relation carries the GUID, the fallback needs its
+        // identification (Xellent contracts) and whether Settl has it in delivery.
+        var byGuid = list
+            .Where(mp => !string.IsNullOrEmpty(mp.Identification))
+            .GroupBy(mp => mp.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var byIdentification = new Dictionary<string, BatchMeteringPoint>(StringComparer.Ordinal);
+        var children = 0;
+        var skippedOutOfRange = 0;
+        foreach (var mp in list)
+        {
+            if (string.IsNullOrEmpty(mp.Identification))
+                continue;
+
+            if (mp.DeliveryStart is { } s
+                && ToDanishDate(s) is var cos
+                && ((cosFrom is { } from && cos < from) || (cosTo is { } to && cos > to)))
+            {
+                skippedOutOfRange++;
+                continue;
+            }
+            SettlListItem? parent = null;
+            if (mp.ParentId is { } parentId && parentId != Guid.Empty)
+            {
+                children++;
+                byGuid.TryGetValue(parentId, out parent);
+            }
+            byIdentification[mp.Identification] = new BatchMeteringPoint(
+                mp.Identification, mp.Id, mp.InDelivery == true || mp.DeliveryStart is not null,
+                mp.DeliveryStart is { } ds ? ToDanishDate(ds) : null,
+                parent?.Identification,
+                mp.ParentId is { } pid && pid != Guid.Empty ? pid : null,
+                parent is { } p && (p.InDelivery == true || p.DeliveryStart is not null));
+        }
+        if (children > 0 && _includeChildren)
+            _log($"  {children} child MP(s) (Settl relations) included");
+        if (skippedOutOfRange > 0)
+            _log($"  skipped {skippedOutOfRange} MP(s) with delivery start outside the range");
+
+        var allByIdentification = list
+            .Where(mp => !string.IsNullOrEmpty(mp.Identification))
+            .GroupBy(mp => mp.Identification, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        return (byIdentification.Values.OrderBy(m => m.Identification, StringComparer.Ordinal).ToList(), allByIdentification);
+    }
+
+    // ---- Reads that can come from a snapshot (see RunSnapshot) ----
+
+    private const string SnapshotSettlList = "settl-metering-points";
+    private const string SnapshotDeliveryStatuses = "settl-delivery-statuses";
+    private const string SnapshotCurrentDeliveryStatus = "settl-current-delivery-status";
+    private const string SnapshotTimeSeries = "settl-time-series";
+    private const string SnapshotXellentContracts = "xellent-contracts";
+    private const string SnapshotXellentChildren = "xellent-children";
+    // v3: dated reading resolution and conversion precision validation, retaining source counts.
+    private const string SnapshotXellentPointCounts = "xellent-point-counts-v3";
+    private const string SnapshotMeterPointStatus = "xellent-meterpoint-status";
+    private const string SnapshotDone = "done";
+    private const string SnapshotDoneSummary = "done-summary";
+    private const string SnapshotPayer = "settl-payer";
+
+    /// <summary>The seed's count of how many metering points the migration covers (done + still to post).</summary>
+    public sealed record DoneSummary(int Total, int Done, DateTimeOffset CheckedAt);
+
+    /// <summary>A metering point's current payer in Settl, as the snapshot keeps it (null: none).</summary>
+    public sealed record PayerEntry(string? PayerIdentification);
+
+    // Payers in this series (six digits starting with 6) are not migrated.
+    private static readonly System.Text.RegularExpressions.Regex ExcludedPayerPattern = new(@"^6\d{5}$");
+
+    // Leaves out metering points whose current Settl payer is in the 6##### series and lists them.
+    private async Task<List<BatchMeteringPoint>> LeaveOutExcludedPayersAsync(List<BatchMeteringPoint> meteringPoints, CancellationToken cancellationToken)
+    {
+        if (_settlPayerClient == null)
+        {
+            _log("Payer check: not available here — metering points with a 6##### payer are NOT left out.");
+            return meteringPoints;
+        }
+        var payers = await GetPayersAsync(meteringPoints.Select(m => m.Id).ToList(), 6, cancellationToken);
+        var excluded = meteringPoints
+            .Where(m => payers.TryGetValue(m.Id, out var payer) && payer is { } p && ExcludedPayerPattern.IsMatch(p))
+            .ToList();
+        if (excluded.Count == 0)
+            return meteringPoints;
+        foreach (var mp in excluded)
+        {
+            _meteringPointType = mp.ParentIdentification != null ? "Child" : "Parent";
+            RecordCoverageExclusion("Excluded payer (6#####)", mp.ParentIdentification != null);
+            RecordSkip(TimeSeriesSkipCategory.ExcludedPayer, null, mp.Identification, mp.Id, null, null, $"payer {payers[mp.Id]}");
+        }
+        _meteringPointType = "";
+        _log($"Payer 6#####: {excluded.Count} metering point(s) left out ({SkipCsvFileNames[TimeSeriesSkipCategory.ExcludedPayer]})");
+        var excludedIds = excluded.Select(m => m.Id).ToHashSet();
+        return meteringPoints.Where(m => !excludedIds.Contains(m.Id)).ToList();
+    }
+
+    /// <summary>
+    /// Each metering point's current payer identification in Settl (null when it has none), asked 100 at
+    /// a time, <paramref name="parallelism"/> requests at once; kept in the snapshot when one is active.
+    /// Throws <see cref="InvalidOperationException"/> when Settl can't be read.
+    /// </summary>
+    private async Task<Dictionary<Guid, string?>> GetPayersAsync(IReadOnlyList<Guid> meteringPointIds, int parallelism, CancellationToken cancellationToken)
+    {
+        var result = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string?>();
+        var missing = new List<Guid>();
+        foreach (var id in meteringPointIds.Distinct())
+        {
+            if (_snapshot != null && _snapshot.TryGet<PayerEntry>(SnapshotPayer, id.ToString(), out var cached) && cached != null)
+                result[id] = cached.PayerIdentification;
+            else
+                missing.Add(id);
+        }
+        if (missing.Count == 0)
+            return new Dictionary<Guid, string?>(result);
+        if (_snapshot is { FetchMissing: false })
+            throw new InvalidOperationException($"snapshot has no '{SnapshotPayer}' entry for {missing.Count} metering point(s)");
+
+        var chunks = missing.Chunk(100).ToList();
+        var done = 0;
+        await Parallel.ForEachAsync(chunks,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = cancellationToken },
+            async (chunk, ct) =>
+            {
+                var (entries, error) = await _settlPayerClient!.FindPayersForMeteringPointsAsync(chunk, null, ct);
+                if (error != null)
+                    throw new InvalidOperationException($"Settl payersForMeteringPoints failed: {error}");
+                var found = new Dictionary<Guid, string?>();
+                foreach (var entry in entries ?? [])
+                {
+                    var payer = entry.Payer?.PayerInformation?.PayerIdentifier;
+                    foreach (var mp in entry.MeteringPoints ?? [])
+                    {
+                        // Should a metering point show up under two payers, a 6##### one wins: leaving it out is the safe side.
+                        if (!found.TryGetValue(mp.MeteringPointId, out var existing) || existing is null
+                            || (payer is { } p && ExcludedPayerPattern.IsMatch(p)))
+                            found[mp.MeteringPointId] = payer;
+                    }
+                }
+                foreach (var id in chunk)
+                {
+                    found.TryGetValue(id, out var payer);
+                    result[id] = payer;
+                    _snapshot?.Put(SnapshotPayer, id.ToString(), new PayerEntry(payer));
+                }
+                _snapshot?.CountFetched();
+                ReportProgress("Settl payers", Interlocked.Add(ref done, chunk.Length), missing.Count);
+            });
+        return new Dictionary<Guid, string?>(result);
+    }
+
+    /// <summary>
+    /// A metering point that is in Settl: either the snapshot seed found points in the window a post
+    /// would use (<c>ExistingPoints</c> in the first year-chunk that has any), or a live batch post
+    /// posted them (<c>ExistingPoints</c> = points posted). Kept so runs leave it out.
+    /// </summary>
+    public sealed record DoneEntry(Guid SettlId, string Account, DateTimeOffset Revision, DateOnly WindowStart, DateOnly WindowEnd,
+        int ExistingPoints, DateTimeOffset CheckedAt);
+
+    /// <summary>Where the done marks live during a batch run or seed (the environment's snapshot folder).</summary>
+    private RunSnapshot? _done;
+
+    /// <summary>Batch runs take child metering points along only when this is set (--include-children).</summary>
+    private bool _includeChildren;
+
+    /// <summary>"Parent" or "Child" for the metering point being handled, "" where it is not known
+    /// (a profile post). Written wherever a metering point is named: CSV rows and skip logs.</summary>
+    private string _meteringPointType = "";
+
+    /// <summary>A count kept apart for parent and child metering points.</summary>
+    private struct Tally
+    {
+        public int Parents;
+        public int Children;
+        public readonly int Total => Parents + Children;
+        public void Add(bool isChild)
+        {
+            if (isChild) Children++;
+            else Parents++;
+        }
+        public override readonly string ToString() => $"{Total} ({Parents} parents, {Children} children)";
+    }
+
+    // Set during the seed's done check: the batch loop collects the metering points it would post, with
+    // their window, instead of posting them.
+    private bool _markDoneMode;
+    private readonly List<DoneCandidate> _doneCandidates = [];
+    private Dictionary<string, MissingReadingsEntry>? _missingReadingsScan;
+    private string? _scanCurrentMeteringPoint;
+
+    // Populated only by coverage. It explains every metering point that the batch candidate pass leaves
+    // outside its denominator, so the report reconciles the full Settl population to the migration scope.
+    private CoverageScopeTrace? _coverageTrace;
+
+    private sealed class CoverageScopeTrace
+    {
+        public int SettlSnapshotRows { get; set; }
+        public int DuplicateSettlRows { get; set; }
+        public int SettlRowsWithoutIdentification { get; set; }
+        public int MeteringPointsExamined { get; set; }
+        public Dictionary<string, Tally> Exclusions { get; } = new(StringComparer.Ordinal);
+    }
+
+    private void RecordCoverageExclusion(string reason, bool isChild, int count = 1)
+    {
+        if (_scanCurrentMeteringPoint is { } mp && _missingReadingsScan?.TryGetValue(mp, out var entry) == true)
+            _missingReadingsScan[mp] = entry with { Detail = reason };
+        if (_coverageTrace == null || count <= 0)
+            return;
+        var tally = _coverageTrace.Exclusions.GetValueOrDefault(reason);
+        if (isChild) tally.Children += count;
+        else tally.Parents += count;
+        _coverageTrace.Exclusions[reason] = tally;
+    }
+
+    /// <summary><paramref name="FromCurrentDeliveryStatus"/>: Settl marks no delivery status InDelivery=true for
+    /// this metering point, so the revision came from the current delivery status (the Settl bug) — delivery is
+    /// not clearly stated.</summary>
+    private sealed record DoneCandidate(string Identification, Guid Id, string Account, DateTimeOffset Revision, DateOnly From, DateOnly To,
+        bool FromCurrentDeliveryStatus, string Type);
+
+    private const string SnapshotPointsSummary = "settl-points-summary";
+
+    /// <summary>
+    /// Asks Settl, <paramref name="parallelism"/> at a time, whether any series of each candidate already
+    /// has points in its window, and marks those done. Settl answers one year at a time; the first year
+    /// with points settles it. Every answer is kept in the snapshot, so a later done check reads it
+    /// instead of asking again (the user accepts it can go stale).
+    /// </summary>
+    private async Task<(int Marked, List<string> Failures)> CheckDoneCandidatesAsync(int parallelism, CancellationToken cancellationToken)
+    {
+        var marked = 0;
+        var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var checkedCount = 0;
+        await Parallel.ForEachAsync(_doneCandidates,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = cancellationToken },
+            async (candidate, ct) =>
+            {
+                var (existing, error) = await FindExistingPointsAsync(candidate, ct);
+                if (error != null)
+                    failures.Add($"MP {candidate.Identification} ({candidate.Id}): done check: {error}");
+                else if (existing is { } count)
+                {
+                    Interlocked.Increment(ref marked);
+                    _done!.Put(SnapshotDone, candidate.Identification, new DoneEntry(candidate.Id, candidate.Account, candidate.Revision,
+                        candidate.From, candidate.To, count, DateTimeOffset.UtcNow));
+                }
+                ReportProgress("Done check, asking Settl", Interlocked.Increment(ref checkedCount), _doneCandidates.Count);
+            });
+        return (marked, failures.OrderBy(f => f, StringComparer.Ordinal).ToList());
+    }
+
+    // The points in the first year-chunk that has any, across the candidate's series; null when none do.
+    private async Task<(int? Points, string? Error)> FindExistingPointsAsync(DoneCandidate candidate, CancellationToken cancellationToken)
+    {
+        var (tsList, tsError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
+        if (tsError != null)
+            return (null, $"GetTimeSeries failed: {tsError}");
+        foreach (var ts in tsList ?? [])
+        {
+            // The same year-chunks as GetPointsSummaryInYearChunksAsync.
+            var chunkStart = candidate.From;
+            while (chunkStart < candidate.To)
+            {
+                var chunkEnd = chunkStart.AddYears(1).AddDays(-1);
+                if (chunkEnd > candidate.To)
+                    chunkEnd = candidate.To;
+                var (summary, error) = await _snapshot!.GetOrFetchAsync(SnapshotPointsSummary,
+                    $"{ts.Id}|{chunkStart:yyyy-MM-dd}|{chunkEnd:yyyy-MM-dd}",
+                    () => _settlTimeSeriesClient!.GetPointsSummaryAsync(ts.Id, chunkStart, chunkEnd, cancellationToken));
+                if (error != null)
+                    return (null, $"GetPointsSummary failed: {error}");
+                if (summary is { Count: > 0 })
+                    return (summary.Count, null);
+                chunkStart = chunkEnd;
+            }
+        }
+        return (null, null);
+    }
+
+    /// <summary>
+    /// The part of a Settl list entry the batch run uses — what a snapshot stores. Addresses, names and
+    /// the rest of the entry are left out on purpose.
+    /// </summary>
+    public sealed record SettlListItem(string Identification, Guid Id, Guid? ParentId, bool? InDelivery, DateTimeOffset? DeliveryStart);
+
+    /// <summary>The snapshot active for the current batch or seed run; null reads everything live.</summary>
+    private RunSnapshot? _snapshot;
+
+    /// <summary>Where the snapshot for an environment lives.</summary>
+    public string SnapshotDirectory(string environment) => Path.Combine(_outputBaseDirectory, "snapshot", environment);
+
+    // Every electricity metering point in Settl's paged list, children included.
+    private async Task<List<SettlListItem>> GetSettlListAsync(CancellationToken cancellationToken)
+    {
+        if (_snapshot != null && _snapshot.TryGet<List<SettlListItem>>(SnapshotSettlList, "all", out var cached) && cached != null)
+        {
+            _log($"Metering points from snapshot: {cached.Count} ({_snapshot.DirectoryPath})");
+            return cached;
+        }
+        if (_snapshot is { FetchMissing: false })
+            throw new InvalidOperationException($"snapshot has no '{SnapshotSettlList}' entry for key 'all'");
+
+        const int pageSize = 500;
+        var items = new List<SettlListItem>();
+        var skip = 0;
+        var total = 0;
+        _log("Loading metering points from Settl...");
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (page, count, err) = await _settlMeteringPointClient!.FindMeteringPointsAsync(pageSize, skip, skip == 0, cancellationToken);
+            if (err != null)
+                throw new InvalidOperationException($"Settl FindMeteringPoints failed: {err}");
+            if (skip == 0 && count > 0) total = count;
+            if (page.Count == 0) break;
+            items.AddRange(page.Select(mp => new SettlListItem(
+                mp.MeteringPointIdentification, mp.Id, mp.ParentMeteringPoint?.Id, mp.InDelivery,
+                mp.CurrentOrNextDeliveryPeriod is { } p && p.Start != default ? p.Start : null)));
+            _log($"  ...scanned {items.Count}{(total > 0 ? $"/{total}" : "")} MPs");
+            skip += pageSize;
+            if (page.Count < pageSize) break;
+            if (total > 0 && skip >= total) break;
+        }
+        if (_snapshot != null)
+        {
+            _snapshot.CountFetched();
+            _snapshot.Put(SnapshotSettlList, "all", items);
+        }
+        return items;
+    }
+
+    private async Task<(GetDeliveryStatusesResponse? DeliveryStatuses, string? Error)> GetDeliveryStatusesAsync(
+        Guid meteringPointId, CancellationToken cancellationToken)
+    {
+        if (_snapshot == null)
+            return await _settlMeteringPointClient!.GetDeliveryStatusesAsync(meteringPointId, cancellationToken);
+        var (statuses, error) = await _snapshot.GetOrFetchAsync<List<DeliveryStatusDto>>(
+            SnapshotDeliveryStatuses, meteringPointId.ToString(), async () =>
+            {
+                var (response, err) = await _settlMeteringPointClient!.GetDeliveryStatusesAsync(meteringPointId, cancellationToken);
+                if (err != null)
+                    return (null, err);
+                return response?.DeliveryStatuses is { } list
+                    ? (list, null)
+                    : (null, "returned no DeliveryStatuses list.");
+            });
+        return error != null
+            ? (null, error)
+            : (new GetDeliveryStatusesResponse { Id = meteringPointId, DeliveryStatuses = statuses }, null);
+    }
+
+    // The metering point as far as the run needs it: its current delivery status. A snapshot keeps only
+    // that section (the rest carries consumer names and addresses).
+    private async Task<(MeteringPointV4Dto? MeteringPoint, string? Error)> GetCurrentMeteringPointAsync(
+        Guid meteringPointId, CancellationToken cancellationToken)
+    {
+        if (_snapshot == null)
+            return await _settlMeteringPointClient!.GetByIdV4Async(meteringPointId, cancellationToken: cancellationToken);
+        var (status, error) = await _snapshot.GetOrFetchAsync<MeteringPointV4DeliveryStatusDto>(
+            SnapshotCurrentDeliveryStatus, meteringPointId.ToString(), async () =>
+            {
+                var (mp, err) = await _settlMeteringPointClient!.GetByIdV4Async(meteringPointId, cancellationToken: cancellationToken);
+                return (mp?.DeliveryStatus, err);
+            });
+        return error != null ? (null, error) : (new MeteringPointV4Dto { Id = meteringPointId, DeliveryStatus = status }, null);
+    }
+
+    private Task<(List<TimeSeriesInfoDto>? TimeSeries, string? Error)> GetTimeSeriesListAsync(
+        Guid meteringPointId, CancellationToken cancellationToken) =>
+        _snapshot == null
+            ? _settlMeteringPointClient!.GetTimeSeriesAsync(meteringPointId, cancellationToken)
+            : _snapshot.GetOrFetchAsync(SnapshotTimeSeries, meteringPointId.ToString(),
+                () => _settlMeteringPointClient!.GetTimeSeriesAsync(meteringPointId, cancellationToken));
+
+    private Task<Dictionary<string, List<TimeSeriesExtractionService.AccountMeteringPoint>>> GetContractsByMeteringPointAsync(
+        TimeSeriesExtractionService extraction, IReadOnlyCollection<string> meteringPoints) =>
+        GetPerMeteringPointAsync(SnapshotXellentContracts, meteringPoints, async missing =>
+            (await extraction.GetMeteringPointContractsAsync(missing))
+                .GroupBy(c => c.MeteringPoint)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal));
+
+    private Task<Dictionary<string, List<string>>> GetChildrenByParentAsync(
+        TimeSeriesExtractionService extraction, IReadOnlyCollection<string> meteringPoints) =>
+        GetPerMeteringPointAsync(SnapshotXellentChildren, meteringPoints, extraction.GetChildrenByParentAsync);
+
+    // A Xellent read per metering point: what the snapshot holds, the rest queried in one go and stored
+    // (an empty answer too — "no contracts" is an answer worth keeping).
+    private async Task<Dictionary<string, List<T>>> GetPerMeteringPointAsync<T>(
+        string kind, IReadOnlyCollection<string> meteringPoints, Func<List<string>, Task<Dictionary<string, List<T>>>> query)
+    {
+        var result = new Dictionary<string, List<T>>(StringComparer.Ordinal);
+        var missing = new List<string>();
+        foreach (var mp in meteringPoints.Distinct())
+        {
+            if (_snapshot != null && _snapshot.TryGet<List<T>>(kind, mp, out var cached) && cached != null)
+                result[mp] = cached;
+            else
+                missing.Add(mp);
+        }
+        if (missing.Count == 0)
+            return result;
+        if (_snapshot is { FetchMissing: false })
+            throw new InvalidOperationException($"snapshot has no '{kind}' entry for {missing.Count} metering point(s)");
+
+        var fetched = await query(missing);
+        _snapshot?.CountFetched(missing.Count);
+        foreach (var mp in missing)
+        {
+            var rows = fetched.TryGetValue(mp, out var list) ? list : [];
+            result[mp] = rows;
+            _snapshot?.Put(kind, mp, rows);
+        }
+        return result;
+    }
+
+    private XellentDbContext BuildXellentContext()
+    {
+        if (_contextFactory != null)
+            return _contextFactory();
+
+        var optionsBuilder = new DbContextOptionsBuilder<XellentDbContext>();
+        optionsBuilder.UseSqlServer(_connectionString, sqlOptions =>
+        {
+            sqlOptions.UseCompatibilityLevel(110);
+        });
+        return new XellentDbContext(optionsBuilder.Options);
+    }
+
+    private async Task<bool> TestConnectionAsync(XellentDbContext context)
+    {
+        _log("Testing database connection...");
+        try
+        {
+            await context.Database.CanConnectAsync();
+            _log("Connected to Xellent database");
+            _log("");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"ERROR: Failed to connect: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<(string[] MeteringPointIds, string[] Accounts)> ResolveMeteringPointsAsync(
+        XellentDbContext context,
+        string? meteringPointId,
+        string? accountNumber,
+        string deliveryCategory,
+        bool includeChildren,
+        bool quiet = false)
+    {
+        if (meteringPointId != null)
+        {
+            if (!quiet)
+                _log($"Metering Point: {meteringPointId}");
+            return ([meteringPointId], []);
+        }
+
+        var accounts = new[] { accountNumber! };
+        _log($"Account: {accountNumber}");
+
+        var extractionService = new TimeSeriesExtractionService(context, deliveryCategory, null, includeChildren);
+        var meteringPointIds = await extractionService.GetAllMeteringPointsAsync(accounts);
+        _log($"  {meteringPointIds.Length} metering points found");
+
+        return (meteringPointIds, accounts);
+    }
+
+    private async Task<List<MeteringPointTimeSeriesDto>> ExtractTimeSeriesAsync(
+        XellentDbContext context,
+        string[] accounts,
+        string[] meteringPointIds,
+        string deliveryCategory,
+        bool includeChildren,
+        DateTime startDate,
+        DateTime endDate,
+        bool quiet = false)
+    {
+        if (!quiet)
+            _log("Extracting time series data...");
+        var dataExtractionService = new TimeSeriesExtractionService(
+            context, deliveryCategory, meteringPointIds, includeChildren);
+
+        var accountsForExtraction = accounts.Length > 0 ? accounts : ["_direct_"];
+        var timeSeries = await dataExtractionService.ExtractTimeSeriesAsync(accountsForExtraction, startDate, endDate);
+
+        var parentCount = timeSeries.Count(ts => ts.ParentMeteringPointId == null);
+        var childCount = timeSeries.Count(ts => ts.ParentMeteringPointId != null);
+        if (!quiet)
+            _log($"  {timeSeries.Count} metering points ({parentCount} parents + {childCount} children)");
+
+        return timeSeries;
+    }
+
+    private static SettlTimeSeriesRequestDto BuildSegmentRequest(TimeSeriesSegmentDto segment, DateTimeOffset revision)
+    {
+        var fileDto = new TimeSeriesFileDto
+        {
+            TransactionId = Guid.NewGuid(),
+            RegistrationTime = DateTimeOffset.UtcNow,
+            Revision = revision,
+            AccountForQuantityQuality = true,
+            Points = segment.Points.Select(ts => new SettlTimeSeriesPointDto
+            {
+                Time = ts.TimeOfValue.UtcDateTime,
+                Quantity = ts.Value,
+                Quality = "Measured"
+            }).ToList()
+        };
+        return fileDto.ToApiRequest();
+    }
+
+    private async Task<RevisionResolutionResult> ResolveRevisionAsync(
+        Guid meteringPointId,
+        CancellationToken cancellationToken,
+        bool quiet = false)
+    {
+        var (response, error) = await GetDeliveryStatusesAsync(meteringPointId, cancellationToken);
+
+        if (error != null)
+            return RevisionResolutionResult.Failed($"GetDeliveryStatuses failed: {error}");
+        if (response == null)
+            return RevisionResolutionResult.Failed("GetDeliveryStatuses returned a null response.");
+        if (response.DeliveryStatuses == null)
+            return RevisionResolutionResult.Failed("GetDeliveryStatuses returned a null DeliveryStatuses list.");
+
+        var active = response.DeliveryStatuses.Where(status => status.InDelivery).ToList();
+        if (active.Count > 1)
+            return RevisionResolutionResult.Ambiguous(active);
+        if (active.Count == 0)
+            return await ResolveWithoutInDeliveryAsync(meteringPointId, response.DeliveryStatuses, cancellationToken, quiet);
+
+        var status = active[0];
+        if (status.Period == null)
+            return RevisionResolutionResult.Failed("The active delivery status has no Period.");
+        if (status.Period.Start == default)
+            return RevisionResolutionResult.Failed("The active delivery status has a default Period.Start.");
+
+        var revision = status.Period.Start;
+        var inactive = response.DeliveryStatuses.Where(deliveryStatus => !deliveryStatus.InDelivery).ToList();
+        if (inactive.Count == 0)
+            return RevisionResolutionResult.Resolved(revision, null, active);
+
+        var matchingInactive = inactive
+            .Where(deliveryStatus =>
+                deliveryStatus.Period != null &&
+                deliveryStatus.Period.End != default &&
+                deliveryStatus.Period.End == revision)
+            .ToList();
+
+        if (matchingInactive.Count == 0)
+        {
+            return RevisionResolutionResult.SafetySkipped(
+                TimeSeriesSkipCategory.DeliveryBoundaryUnresolved,
+                $"delivery boundary unresolved (no InDelivery=false period ends at revision {revision:O})",
+                revision,
+                active);
+        }
+
+        if (matchingInactive.Count > 1)
+        {
+            return RevisionResolutionResult.SafetySkipped(
+                TimeSeriesSkipCategory.DeliveryBoundaryAmbiguous,
+                $"ambiguous delivery boundary ({matchingInactive.Count} InDelivery=false periods end at revision {revision:O})",
+                revision,
+                active);
+        }
+
+        var boundaryPeriod = matchingInactive[0].Period!;
+        if (boundaryPeriod.Start == default)
+        {
+            return RevisionResolutionResult.SafetySkipped(
+                TimeSeriesSkipCategory.DeliveryBoundaryInvalid,
+                "invalid delivery boundary period (Period.Start is default)",
+                revision,
+                active);
+        }
+
+        if (boundaryPeriod.Start >= boundaryPeriod.End)
+        {
+            return RevisionResolutionResult.SafetySkipped(
+                TimeSeriesSkipCategory.DeliveryBoundaryInvalid,
+                $"invalid delivery boundary period (start {boundaryPeriod.Start:O} is not before end {boundaryPeriod.End:O})",
+                revision,
+                active);
+        }
+
+        return RevisionResolutionResult.Resolved(revision, boundaryPeriod.Start, active);
+    }
+
+    // Null when the account's relationship was closed as a migration on `dayBeforeCos`: a contract of the
+    // account that runs on that day ends on it, and the agreement behind that contract has status
+    // "Leverance ophørt" and ends on it too. Otherwise a message saying which part does not fit.
+    internal static string? CheckMigrationClose(
+        IEnumerable<TimeSeriesExtractionService.AccountMeteringPoint> contracts, string account, DateOnly dayBeforeCos)
+    {
+        var running = contracts.Where(c => c.Account == account && c.Covers(dayBeforeCos)).ToList();
+        var endingThatDay = running.Where(c => c.End == dayBeforeCos.AddDays(1)).ToList();
+        if (endingThatDay.Count == 0)
+        {
+            var ends = string.Join(", ", running.Select(c => c.End is { } e ? e.AddDays(-1).ToString("yyyy-MM-dd") : "open").Distinct());
+            return $"contract does not end on {dayBeforeCos:yyyy-MM-dd}, the day before delivery starts in Settl (ends {ends})";
+        }
+
+        if (endingThatDay.Any(c => c.AgreementStatus == TimeSeriesExtractionService.AccountMeteringPoint.DeliveryCeased
+                                   && c.AgreementLastDay == dayBeforeCos))
+            return null;
+
+        var agreements = string.Join(", ", endingThatDay
+            .Select(c => $"{c.AgreementNum} status {c.AgreementStatus}, ends {(c.AgreementLastDay is { } d ? d.ToString("yyyy-MM-dd") : "open")}")
+            .Distinct());
+        return $"agreement is not \"Leverance ophørt\" (status {TimeSeriesExtractionService.AccountMeteringPoint.DeliveryCeased}) " +
+               $"ending {dayBeforeCos:yyyy-MM-dd} ({agreements})";
+    }
+
+    // The first day of the account's unbroken hold on the metering point that runs through `day`: the
+    // start of its contract covering that day, followed back through its own contracts that end the
+    // day before (a company switch like meh → for under one customer is not a new occupant).
+    internal static DateOnly? AccountHeldSince(
+        IEnumerable<TimeSeriesExtractionService.AccountMeteringPoint> contracts, string account, DateOnly day)
+    {
+        var own = contracts.Where(c => c.Account == account).ToList();
+        var current = own.Where(c => c.Covers(day)).OrderBy(c => c.Start).FirstOrDefault();
+        if (current == null)
+            return null;
+        var since = current.Start;
+        while (own.FirstOrDefault(c => c.End == since && c.Start < since) is { } previous)
+            since = previous.Start;
+        return since;
+    }
+
+    // Settl currently fails to mark delivery as InDelivery=true (seen 2026-09: the deliveryStatuses
+    // list keeps one open InDelivery=false period). The metering point's current delivery status
+    // still carries a start, whatever its reason (Na or ChangeOfSupplier), so that start is the
+    // revision, and the InDelivery=false period running into it is the history to back-fill.
+    private async Task<RevisionResolutionResult> ResolveWithoutInDeliveryAsync(
+        Guid meteringPointId,
+        IReadOnlyList<DeliveryStatusDto> statuses,
+        CancellationToken cancellationToken,
+        bool quiet = false)
+    {
+        const string noActive = "No delivery status has InDelivery=true.";
+        var (current, error) = await GetCurrentMeteringPointAsync(meteringPointId, cancellationToken);
+        if (error != null)
+            return RevisionResolutionResult.Failed($"{noActive} Current delivery status lookup failed: {error}");
+        if (current?.DeliveryStatus is not { Start: { } start })
+            return RevisionResolutionResult.Failed($"{noActive} The metering point has no current delivery status start.");
+
+        var revision = new DateTimeOffset(DateTime.SpecifyKind(start, start.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : start.Kind));
+        var runningInto = statuses
+            .Where(s => !s.InDelivery && s.Period is { } p && p.Start != default && p.Start < revision
+                        && (p.End == default || p.End >= revision))
+            .ToList();
+        if (!quiet)
+            _log($"REVISION FALLBACK MP {meteringPointId}: no InDelivery=true in Settl; using current delivery status start {revision:O}");
+
+        var result = runningInto.Count switch
+        {
+            0 => RevisionResolutionResult.Resolved(revision, null, []),
+            1 => RevisionResolutionResult.Resolved(revision, runningInto[0].Period!.Start, []),
+            _ => RevisionResolutionResult.SafetySkipped(
+                TimeSeriesSkipCategory.DeliveryBoundaryAmbiguous,
+                $"ambiguous delivery boundary ({runningInto.Count} InDelivery=false periods run into current delivery status start {revision:O})",
+                revision,
+                [])
+        };
+        return result with { FromCurrentDeliveryStatus = true };
+    }
+
+    // Settl rejects a points summary longer than one year ("The requested period must not exceed
+    // 1 year."), while the window can be three. Ask in pieces just under a year — each piece starts
+    // on the previous one's last day, so no day is missed — and add them up: the caller only needs
+    // to know whether any points exist, plus a first/last date for the log.
+    private async Task<(SettlPointsSummaryDto? Summary, string? Error)> GetPointsSummaryInYearChunksAsync(
+        Guid timeSeriesId, DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        var total = new SettlPointsSummaryDto { Count = 0 };
+        var chunkStart = from;
+        while (chunkStart < to)
+        {
+            var chunkEnd = chunkStart.AddYears(1).AddDays(-1);
+            if (chunkEnd > to)
+                chunkEnd = to;
+            var (summary, error) = await _settlTimeSeriesClient!.GetPointsSummaryAsync(timeSeriesId, chunkStart, chunkEnd, cancellationToken);
+            if (error != null)
+                return (null, error);
+            if (summary is { Count: > 0 })
+            {
+                total.Count += summary.Count;
+                if (summary.From is { } f && (total.From is null || f < total.From))
+                    total.From = f;
+                if (summary.To is { } t && (total.To is null || t > total.To))
+                    total.To = t;
+            }
+            chunkStart = chunkEnd;
+        }
+        return (total, null);
+    }
+
+    private static DateOnly ToDanishDate(DateTimeOffset timestamp) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(timestamp, DanishTimeZone).DateTime);
+
+    // The EIP period for each segment, in segment order. A segment's base period is its agreement
+    // period cut to the window (the whole window when it has no agreement period). Segments that
+    // share a base period — e.g. an Hour and a Quarter series under the same company — split it:
+    // each later one starts, and the one before it ends, on the Danish date of its first point.
+    internal static List<(DateOnly Start, DateOnly End)> ComputeEipPeriods(
+        List<TimeSeriesSegmentDto> segments, DateOnly windowStart, DateOnly windowEnd)
+    {
+        (DateOnly Start, DateOnly End) BasePeriod(TimeSeriesSegmentDto s) =>
+            s.PeriodStart is { } start
+                ? (start > windowStart ? start : windowStart,
+                   s.PeriodEnd is { } end && end < windowEnd ? end : windowEnd)
+                : (windowStart, windowEnd);
+
+        var result = segments.Select(BasePeriod).ToList();
+        foreach (var group in segments
+                     .Select((segment, index) => (segment, index))
+                     .GroupBy(x => (x.segment.CompanyId, x.segment.PeriodStart, x.segment.PeriodEnd)))
+        {
+            var ordered = group.OrderBy(x => FirstPoint(x.segment)).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var (start, end) = result[ordered[i].index];
+                if (i > 0 && ToDanishDate(FirstPoint(ordered[i].segment)) is var ownStart && ownStart > start)
+                    start = ownStart;
+                if (i + 1 < ordered.Count && ToDanishDate(FirstPoint(ordered[i + 1].segment)) is var nextStart && nextStart < end)
+                    end = nextStart;
+                result[ordered[i].index] = (start, end);
+            }
+        }
+        return result;
+    }
+
+    // A segment's points — read, or only counted (a batch dry run).
+    private static int PointCount(TimeSeriesSegmentDto segment) => segment.CountedPoints ?? segment.Points.Count;
+
+    private static DateTimeOffset FirstPoint(TimeSeriesSegmentDto segment) =>
+        segment.CountedPoints != null ? segment.FirstCountedPoint!.Value : segment.Points[0].TimeOfValue;
+
+    // Counts instead of points for one metering point (see TimeSeriesExtractionService.CountTimeSeriesAsync).
+    // With a snapshot the counts are kept per window and boundary, so a later offline dry run needs no Xellent.
+    private async Task<MeteringPointTimeSeriesDto> CountTimeSeriesAsync(
+        XellentDbContext context, string meteringPoint, string deliveryCategory, DateTime startDate, DateTime endDate,
+        DateTimeOffset? deliveryBoundary)
+    {
+        Task<MeteringPointTimeSeriesDto> Count() =>
+            new TimeSeriesExtractionService(context, deliveryCategory)
+                .CountTimeSeriesAsync(meteringPoint, startDate, endDate, deliveryBoundary);
+        if (_snapshot == null)
+            return await Count();
+        // Old counts lack dated reading resolution and conversion validation; never reuse them.
+        var key = $"{meteringPoint}|{startDate:yyyy-MM-dd}|{endDate:yyyy-MM-dd}|{deliveryBoundary?.UtcDateTime.ToString("O") ?? "none"}" +
+                  "|dated-quarter-conversion-v1";
+        var (counted, error) = await _snapshot.GetOrFetchAsync<MeteringPointTimeSeriesDto>(
+            SnapshotXellentPointCounts, key, async () => (await Count(), null));
+        return error == null
+            ? counted!
+            : throw new InvalidOperationException(error);
+    }
+
+    /// <summary>Xellent's own status for the metering point right now, cached in the snapshot like the
+    /// point counts. Null when Xellent records none.</summary>
+    private async Task<int?> MeterPointStatusAsync(XellentDbContext context, string meteringPoint)
+    {
+        Task<int?> Read() =>
+            new TimeSeriesExtractionService(context, BatchDeliveryCategory).GetMeterPointStatusAsync(meteringPoint);
+        if (_snapshot == null)
+            return await Read();
+        var (entry, error) = await _snapshot.GetOrFetchAsync<MeterPointStatusEntry>(
+            SnapshotMeterPointStatus, meteringPoint, async () => (new MeterPointStatusEntry(await Read()), null));
+        return error == null
+            ? entry?.Status
+            : throw new InvalidOperationException(error);
+    }
+
+    /// <summary>One snapshot line: the metering point's Xellent status.</summary>
+    private sealed record MeterPointStatusEntry(int? Status);
+
+    private void ResetSkipArtifacts()
+    {
+        // The seed's done check runs the batch loop too; it must not replace a post run's skip files.
+        if (_markDoneMode)
+            return;
+        foreach (var fileName in AllSkipCsvFileNames)
+        {
+            var path = Path.Combine(_outputBaseDirectory, fileName);
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Appends one skipped metering point to the CSV for its category, creating the file on first
+    /// use. A file that never gets a row is never created, so the presence of a file already means
+    /// "this happened at least once".
+    /// </summary>
+    // Goes at the end of a log line about one metering point, so the dashboard's SKIP parser still reads
+    // the identification and the reason unchanged.
+    private string TypeSuffix() => _meteringPointType.Length == 0 ? "" : $" ({_meteringPointType.ToLowerInvariant()})";
+
+    private void RecordSkip(
+        TimeSeriesSkipCategory category,
+        string? customerNumber,
+        string meteringPointIdentification,
+        Guid? settlMeteringPointId,
+        DateTimeOffset? revision,
+        DateTimeOffset? deliveryBoundary,
+        string detail)
+    {
+        if (_markDoneMode)
+            return;
+        Directory.CreateDirectory(_outputBaseDirectory);
+        var path = Path.Combine(_outputBaseDirectory, SkipCsvFileNames[category]);
+        AppendCsvRow(path, SkipCsvHeader,
+        [
+            customerNumber ?? "",
+            meteringPointIdentification,
+            _meteringPointType,
+            settlMeteringPointId?.ToString() ?? "",
+            revision?.ToString("O") ?? "",
+            deliveryBoundary?.ToString("O") ?? "",
+            detail
+        ]);
+    }
+
+    private void RecordAmbiguousRevision(
+        string? customerNumber,
+        string meteringPointIdentification,
+        Guid settlMeteringPointId,
+        IReadOnlyList<DeliveryStatusDto> activeStatuses)
+    {
+        if (_markDoneMode)
+            return;
+        Directory.CreateDirectory(_outputBaseDirectory);
+        var path = Path.Combine(_outputBaseDirectory, AmbiguousRevisionCsvFileName);
+        var starts = string.Join(
+            " | ",
+            activeStatuses.Select(status =>
+                status.Period == null
+                    ? "MISSING_PERIOD"
+                    : status.Period.Start == default
+                        ? "DEFAULT_START"
+                        : status.Period.Start.ToString("O")));
+
+        AppendCsvRow(path, AmbiguousRevisionCsvHeader,
+        [
+            customerNumber ?? "",
+            meteringPointIdentification,
+            _meteringPointType,
+            settlMeteringPointId.ToString(),
+            activeStatuses.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            starts
+        ]);
+    }
+
+    private static string EscapeCsv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+
+    private enum RevisionResolutionOutcome
+    {
+        Resolved,
+        Ambiguous,
+        SafetySkip,
+        Error
+    }
+    private sealed record RevisionResolutionResult(
+        RevisionResolutionOutcome Outcome,
+        DateTimeOffset Revision,
+        DateTimeOffset? DeliveryBoundary,
+        IReadOnlyList<DeliveryStatusDto> ActiveStatuses,
+        string? Error,
+        string? SkipReason,
+        TimeSeriesSkipCategory? SkipCategory)
+    {
+        /// <summary>The revision is the start of the metering point's current delivery status.</summary>
+        public bool FromCurrentDeliveryStatus { get; init; }
+
+        public static RevisionResolutionResult Resolved(
+            DateTimeOffset revision,
+            DateTimeOffset? deliveryBoundary,
+            IReadOnlyList<DeliveryStatusDto> activeStatuses) =>
+            new(RevisionResolutionOutcome.Resolved, revision, deliveryBoundary, activeStatuses, null, null, null);
+
+        public static RevisionResolutionResult Ambiguous(IReadOnlyList<DeliveryStatusDto> activeStatuses) =>
+            new(RevisionResolutionOutcome.Ambiguous, default, null, activeStatuses, null, null, null);
+
+        public static RevisionResolutionResult SafetySkipped(
+            TimeSeriesSkipCategory category,
+            string reason,
+            DateTimeOffset revision,
+            IReadOnlyList<DeliveryStatusDto> activeStatuses) =>
+            new(RevisionResolutionOutcome.SafetySkip, revision, null, activeStatuses, null, reason, category);
+
+        public static RevisionResolutionResult Failed(string error) =>
+            new(RevisionResolutionOutcome.Error, default, null, [], error, null, null);
+    }
+
+    /// <summary>
+    /// Mapper Xellent's TimeResolution-enum-navn til Settl's (Length, Unit). Settl bruger
+    /// "Minutes" + length=15 for kvarter — ikke en separat "Quarter"-enum.
+    /// </summary>
+    private static (int Length, string Unit) ToSettlResolution(string xellentResolution) => xellentResolution switch
+    {
+        "Hour" => (1, "Hour"),
+        "Quarter" => (15, "Minutes"),
+        "Day" => (1, "Day"),
+        "Month" => (1, "Month"),
+        "Year" => (1, "Year"),
+        "Minute" => (1, "Minutes"),
+        _ => throw new InvalidOperationException(
+            $"Unsupported Xellent TimeResolution '{xellentResolution}' — kan ikke mappes til Settl TimeResolutionUnit.")
+    };
+
+    private List<MeteringPointTimeSeriesDto> FillGaps(
+        List<MeteringPointTimeSeriesDto> timeSeries,
+        DateTime startDate,
+        DateTime endDate)
+    {
+        var simulationService = new TimeSeriesSimulationService();
+        var totalOriginalPoints = 0;
+        var totalSimulatedPoints = 0;
+
+        _log("Filling gaps in time series data...");
+
+        for (int i = 0; i < timeSeries.Count; i++)
+        {
+            var ts = timeSeries[i];
+            var originalCount = ts.Segments.Sum(s => s.Points.Count);
+            totalOriginalPoints += originalCount;
+
+            var filled = simulationService.FillGaps(ts, startDate, endDate);
+            var filledCount = filled.Segments.Sum(s => s.Points.Count);
+            var simulatedCount = filledCount - originalCount;
+            totalSimulatedPoints += simulatedCount;
+
+            timeSeries[i] = filled;
+
+            if (simulatedCount > 0)
+            {
+                _log($"  {ts.MeteringPointId}: {originalCount} real + {simulatedCount} simulated = {filledCount} total");
+            }
+        }
+
+        _log("");
+        _log($"Gap filling complete:");
+        _log($"  Original points: {totalOriginalPoints:N0}");
+        _log($"  Simulated points: {totalSimulatedPoints:N0}");
+        _log($"  Total points: {totalOriginalPoints + totalSimulatedPoints:N0}");
+        _log("");
+
+        return timeSeries;
+    }
+
+    private int Error(string message)
+    {
+        _log($"ERROR: {message}");
+        return 1;
+    }
+
+    private static string GetModeDescription(string? meteringPointId, string? accountNumber)
+    {
+        if (meteringPointId != null)
+            return $"Single Metering Point ({meteringPointId})";
+        if (accountNumber != null)
+            return $"Single Account ({accountNumber})";
+        return "Unknown";
+    }
+}
+
+/// <summary>A metering point a batch run takes from Settl.</summary>
+/// <param name="Identification">18-digit metering point identification.</param>
+/// <param name="Id">Settl GUID.</param>
+/// <param name="InDelivery">The Settl list shows it in delivery (InDelivery=true, or a current or next
+/// delivery period). False can still be a migrated metering point — Settl bug, 2026-09.</param>
+/// <param name="DeliveryStart">Danish date the list's current or next delivery period starts; null when the
+/// list has none (then only the metering point's own delivery status tells).</param>
+/// <param name="ParentIdentification">The parent metering point's identification when this is a child
+/// (Settl relation or the Xellent relation table); null for a parent. A child that carries no delivery
+/// status or no Xellent contract of its own falls back to the parent's.</param>
+/// <param name="ParentId">The parent's Settl GUID; null when the parent is not in Settl's list.</param>
+/// <param name="ParentInDelivery">The parent's <paramref name="InDelivery"/>, used in place of the child's
+/// own when the child falls back to the parent.</param>
+public sealed record BatchMeteringPoint(
+    string Identification, Guid Id, bool InDelivery, DateOnly? DeliveryStart,
+    string? ParentIdentification = null, Guid? ParentId = null, bool ParentInDelivery = false);
+
+public class ExtractOptions
+{
+    public string? MeteringPointId { get; set; }
+    public string? AccountNumber { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public string? DeliveryCategory { get; set; }
+    public bool IncludeChildren { get; set; }
+    public bool SimulateMissing { get; set; }
+    /// <summary>Export paired original and prepared values for read-only dashboard inspection.</summary>
+    public bool IncludeOutgoingPreview { get; set; }
+    public DateTimeOffset? DeliveryBoundary { get; set; }
+}
+
+public class PostOptions
+{
+    public string? MeteringPointId { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? CustomerNumber { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public string? DeliveryCategory { get; set; }
+    public bool IncludeChildren { get; set; }
+    public string Environment { get; set; } = "staging";
+    public bool DryRun { get; set; }
+
+    /// <summary>Set by the batch run for each of its metering points: leave out the per-run setup lines
+    /// and connection test the batch already did once.</summary>
+    public bool InBatch { get; internal set; }
+
+    /// <summary>After a live run that succeeded: how many points were posted.</summary>
+    public int PointsPosted { get; internal set; }
+
+    /// <summary>
+    /// When set, skip SearchByIdentificationAsync and use this Guid directly. Used by profile-mode
+    /// where the Guid is already resolved via Settl customer lookup.
+    /// </summary>
+    public Guid? MeteringPointGuid { get; set; }
+
+    /// <summary>
+    /// The revision resolved from the single active Settl delivery status. When omitted, the runner
+    /// resolves it from <see cref="MeteringPointGuid"/> before any mutation.
+    /// </summary>
+    public DateTimeOffset? ResolvedRevision { get; set; }
+
+    /// <summary>
+    /// Optional lower point boundary resolved from the single InDelivery=false period whose end
+    /// matches <see cref="ResolvedRevision"/>. Null means the delivery-status history contains no
+    /// previous out-of-delivery period.
+    /// </summary>
+    public DateTimeOffset? ResolvedDeliveryBoundary { get; set; }
+
+    /// <summary>
+    /// Clears a previous ambiguity CSV before this call. Keep true for standalone runs; callers
+    /// that invoke RunPostAsync repeatedly as one logical run set it only on the first call.
+    /// </summary>
+    public bool ResetAmbiguityCsv { get; set; } = true;
+
+    /// <summary>When true, a per-MP failure logs a warning and the run continues with the next MP
+    /// instead of aborting. The run still returns a non-zero exit code if any MP failed.</summary>
+    public bool ContinueOnError { get; set; }
+
+    /// <summary>When true, metering points whose included outgoing segments span more than one
+    /// TimeResolution (typically Hour → Quarter) are skipped before POST. Skipped MPs are logged
+    /// but do not contribute to the failure count.</summary>
+    public bool SkipResolutionChange { get; set; }
+
+    /// <summary>When true, each metering point is pre-checked via Settl's points-summary endpoint
+    /// before POST. If any of the matched Settl TS already has points in [StartDate, EndDate],
+    /// the whole MP is skipped (no POST, no EIP) — atomic MPs are preserved. Skipped MPs are
+    /// logged but do not contribute to the failure count.</summary>
+    public bool SkipIfExistingPoints { get; set; }
+}

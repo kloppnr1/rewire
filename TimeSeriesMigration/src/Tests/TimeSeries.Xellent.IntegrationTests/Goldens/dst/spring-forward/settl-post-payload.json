@@ -1,0 +1,123 @@
+{
+  "accountForQuantityQuality": true,
+  "points": [
+    {
+      "quality": "Measured",
+      "quantity": 0.120000000000,
+      "time": "2024-03-30T23:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.120000000000,
+      "time": "2024-03-31T01:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.120000000000,
+      "time": "2024-03-31T06:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.120000000000,
+      "time": "2024-03-31T20:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T00:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T04:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T13:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T17:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T18:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.130000000000,
+      "time": "2024-03-31T21:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.140000000000,
+      "time": "2024-03-31T05:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.140000000000,
+      "time": "2024-03-31T14:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.140000000000,
+      "time": "2024-03-31T15:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.140000000000,
+      "time": "2024-03-31T19:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.150000000000,
+      "time": "2024-03-31T03:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.150000000000,
+      "time": "2024-03-31T16:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.160000000000,
+      "time": "2024-03-31T07:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.160000000000,
+      "time": "2024-03-31T10:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.170000000000,
+      "time": "2024-03-31T08:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.170000000000,
+      "time": "2024-03-31T12:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.180000000000,
+      "time": "2024-03-31T02:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.180000000000,
+      "time": "2024-03-31T11:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 0.210000000000,
+      "time": "2024-03-31T09:00:00Z"
+    }
+  ],
+  "registrationTime": "2026-01-01T00:00:00\u002B00:00",
+  "revision": "2026-01-01T00:00:00\u002B00:00",
+  "transactionId": "\u003Cguid\u003E"
+}

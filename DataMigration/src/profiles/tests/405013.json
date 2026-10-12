@@ -1,0 +1,23 @@
+{
+  "Name": "405013-account",
+  "Description": "Profile with with only Lone",
+  "StartingPayerId": 10000,
+
+  "Accounts": ["405013"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["405013"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {},
+    "ProductNum": {
+      "V LadVariP": "V Lade Variabel"
+    }
+  }
+}

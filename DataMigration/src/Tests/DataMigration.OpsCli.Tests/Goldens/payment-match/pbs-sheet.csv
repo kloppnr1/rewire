@@ -1,0 +1,7 @@
+Kundenummer;Betalingsaftale fundet på kontrakt;Kontrakttype;Kontraktslutdato;Målepunkter med egen betalingsaftale;Status;Bemærkning;Målepunkt;Nøgle der matchede i Settl;Enummer Settl;E-nummer hentet fra betalingsmetode;Migreret kontrakt;Betalingsaftale på migreret kontrakt;COS;Betalingsaftale-ID;Betalingsaftale-status (Xellent);Kandidater på målepunkt
+111111;c-match;Enkeltkontrakt;2026-06-30;1;Match;;571000000000000001;571000000000000001;E-1001;Betalingsservice;c-match;Ja;2026-07-01;111;Aktiv;1
+222222;c-joint;Underkontrakt;;2;Match (fællesfaktura);;;Fællesfaktura J-500;E-1002;FI-Kort;c-joint;Ja;2026-07-01;222;Aktiv;2
+333333;c-unmatched;Hovedkontrakt;2026-06-30;1;Uden match (Xellent);;571000000000000003;;;;c-unmatched;Ja;2026-07-01;333;Aktiv;1
+;;;;;Uden match (Settl);;571000000000000004;;E-1004;Betalingsservice;;;2026-07-01;;;
+555555;c-mismatch;Enkeltkontrakt;2026-06-30;1;Uoverensstemmelse;Afmeldt i Xellent;571000000000000005;571000000000000005;E-1005;Betalingsservice;c-mismatch;Ja;2026-07-01;555;Afmeldt;1
+947686;varme-kontrakt;Hovedkontrakt;2026-06-30;1;Match;"2 Settl-rækker på samme målepunkt; PBS fra kontrakt varme-kontrakt (Varme)";571000000000000006;571000000000000006;E-1006;Betalingsservice;el-kontrakt;Nej;2026-07-01;98765;Aktiv;1

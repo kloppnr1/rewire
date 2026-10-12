@@ -1,0 +1,24 @@
+{
+  "Name": "match-run2",
+  "Description": "Match run 2 kunder",
+  "Accounts": [
+      "446549",
+      "370643",
+      "427682"
+    ],
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern",
+    "GroupOwners": {
+      "Amka": "900000",
+      "BallingAut": "900001",
+      "Bjergsnæs": "900002"
+    }
+  },
+  "Mappings": {
+    "GroupNum": {
+      "Amka": "E_FinansielPulje_DK1_AMKA",
+      "BallingAut": "E_FinansielPulje_DK1_BallingAuto",
+      "Bjergsnæs": "E_FinansielPulje_DK1_BjergsnæsEfterskole"
+    }
+  }
+}

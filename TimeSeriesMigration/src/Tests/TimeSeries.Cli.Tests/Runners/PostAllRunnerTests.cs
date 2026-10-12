@@ -1,0 +1,1921 @@
+using DataMigration.SettlApi.Models;
+using System.Text.Json;
+using TimeSeries.Cli.Runners;
+using TimeSeries.Cli.Tests.Fixtures;
+
+namespace TimeSeries.Cli.Tests.Runners;
+
+// Batch mode takes its metering points from Settl's list and finds each one's account in Xellent:
+// whoever held it the day before delivery starts. The Settl customer is never looked up.
+public class PostAllRunnerTests : IDisposable
+{
+    // One folder per test: live runs mark posted metering points done in it, and a shared folder would
+    // carry those marks into the next test.
+    private readonly string OutputDir = Path.Combine("test-output-batch", Guid.NewGuid().ToString("N"));
+    private const string Account = "313809";
+    private const string MpId1 = "571313100000000001";
+    private const string MpId2 = "571313100000000002";
+
+    private readonly XellentTimeSeriesSeeder _xellent = new();
+    private readonly RecordingTimeSeriesClient _ts = new();
+    private readonly RecordingMeteringPointClient _mp = new();
+    private readonly RecordingCustomerClient _cust = new();
+    private readonly RecordingPayerClient _payers = new();
+
+    public void Dispose()
+    {
+        _xellent.Dispose();
+        if (Directory.Exists(OutputDir))
+            Directory.Delete(OutputDir, recursive: true);
+    }
+
+    private TimeSeriesRunner BuildRunner(string? outputDirectory = null, Action<string>? log = null) => new(
+        connectionString: "ignored",
+        outputBaseDirectory: outputDirectory ?? OutputDir,
+        defaultTimeSeriesYears: 2,
+        settlTimeSeriesClient: _ts,
+        settlMeteringPointClient: _mp,
+        settlCustomerClient: _cust,
+        contextFactory: _xellent.CreateContext,
+        log: log ?? (_ => { }),
+        settlPayerClient: _payers);
+
+    private static readonly TimeZoneInfo Danish =
+        TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Romance Standard Time" : "Europe/Copenhagen");
+
+    private static DateTimeOffset DanishMidnight(DateTime danishDate) => new(
+        TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(danishDate.Date, DateTimeKind.Unspecified), Danish), TimeSpan.Zero);
+
+    // Batch mode takes the window end from the single InDelivery=true delivery status. Tests that
+    // mean "supply starts on this Danish date" state it here.
+    private void InDeliveryFrom(DateTime danishDate)
+    {
+        var start = DanishMidnight(danishDate);
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = start } }]
+            },
+            null);
+    }
+
+    // Settl lists these metering points as in delivery.
+    private void InSettl(params (string Identification, Guid Id)[] meteringPoints) =>
+        _mp.MeteringPoints = meteringPoints
+            .Select(m => new MeteringPointInfoDto { Id = m.Id, MeteringPointIdentification = m.Identification, InDelivery = true })
+            .ToList();
+
+    private static List<TimeSeriesInfoDto> HourTs(Guid tsGuid) =>
+        [new TimeSeriesInfoDto { Id = tsGuid, TimeResolution = new TimeResolutionInfoDto { Length = 1, Unit = "Hour" } }];
+
+    /// <summary>Settl has both series for every metering point, so nothing is missing.</summary>
+    private void BothSeriesInSettl() =>
+        _mp.GetTimeSeriesResponse = _ =>
+        [
+            new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 1, Unit = "Hour" } },
+            new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } },
+        ];
+
+    [Fact]
+    public async Task MissingReadingsScan_ChecksHistoricalWindowWithoutPostingOrChangingDoneMarks()
+    {
+        var end = new DateTime(2025, 6, 15);
+        var heldSince = end.AddMonths(-2);
+        var mpGuid = Guid.NewGuid();
+        var tsGuid = Guid.NewGuid();
+        InSettl((MpId1, mpGuid));
+        InDeliveryFrom(end);
+        _xellent.SeedContract(Account, MpId1, partStart: heldSince, migratedOn: end);
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+        var donePath = Path.Combine(OutputDir, "snapshot", "test", "done.jsonl");
+        Directory.CreateDirectory(Path.GetDirectoryName(donePath)!);
+        const string priorDone = "preserve prior done evidence";
+        File.WriteAllText(donePath, priorDone);
+        var skipPath = Path.Combine(OutputDir, "skip-not-migrated.csv");
+        File.WriteAllText(skipPath, "preserve prior run");
+
+        var result = await BuildRunner().ScanMissingReadingsAsync("test");
+
+        Assert.Equal(0, result.ExitCode);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("Missing", entry.Status);
+        Assert.Equal(Account, entry.Account);
+        Assert.Equal(DateOnly.FromDateTime(heldSince), entry.WindowStart);
+        Assert.Equal(DateOnly.FromDateTime(end), entry.WindowEnd);
+        var query = Assert.Single(_ts.GetPointsCalls);
+        Assert.Equal(entry.WindowStart, query.Start);
+        Assert.Equal(entry.WindowEnd, query.End);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.Equal(priorDone, File.ReadAllText(donePath));
+        Assert.Equal("preserve prior run", File.ReadAllText(skipPath));
+    }
+
+    [Fact]
+    public async Task MissingReadingsScan_FindsReadingsInSecondSeriesAndStopsAtFirstPositiveChunk()
+    {
+        var end = new DateTime(2025, 6, 15);
+        var hour = Guid.NewGuid();
+        var quarter = Guid.NewGuid();
+        InSettl((MpId1, Guid.NewGuid()));
+        InDeliveryFrom(end);
+        _xellent.SeedContract(Account, MpId1, migratedOn: end);
+        _mp.GetTimeSeriesResponse = _ => [
+            new() { Id = hour, TimeResolution = new() { Length = 1, Unit = "Hour" } },
+            new() { Id = quarter, TimeResolution = new() { Length = 15, Unit = "Minutes" } }];
+        _ts.GetPointsResponse = (id, _, _) => (new() { Count = id == quarter ? 1 : 0 }, null);
+
+        var result = await BuildRunner().ScanMissingReadingsAsync("test");
+
+        Assert.Equal("Present", Assert.Single(result.Entries).Status);
+        Assert.Single(_ts.GetPointsCalls, c => c.TsGuid == quarter);
+        Assert.All(_ts.GetPointsCalls, c => Assert.True(c.End <= c.Start.AddYears(1)));
+        Assert.Empty(_ts.PostCalls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MissingReadingsScan_DoesNotCallFailedOrAbsentSummaryMissing(bool failed)
+    {
+        var end = new DateTime(2025, 6, 15);
+        InSettl((MpId1, Guid.NewGuid()));
+        InDeliveryFrom(end);
+        _xellent.SeedContract(Account, MpId1, migratedOn: end);
+        _ts.GetPointsResponse = (_, _, _) => (null, failed ? "Read failed" : null);
+
+        var result = await BuildRunner().ScanMissingReadingsAsync("test");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("Unknown", Assert.Single(result.Entries).Status);
+        Assert.NotNull(result.Entries[0].Detail);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+    }
+
+    [Fact]
+    public async Task MissingReadingsScan_StopsOnConnectionFailure()
+    {
+        var end = new DateTime(2025, 6, 15);
+        InSettl((MpId1, Guid.NewGuid()));
+        InDeliveryFrom(end);
+        _xellent.SeedContract(Account, MpId1, migratedOn: end);
+        _ts.GetPointsResponse = (_, _, _) => (null, "No such host is known");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BuildRunner().ScanMissingReadingsAsync("test"));
+
+        Assert.Single(_ts.GetPointsCalls);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+    }
+
+    [Fact]
+    public async Task MissingReadingsScan_KeepsAmbiguousOwnershipUnknown()
+    {
+        var end = new DateTime(2025, 6, 15);
+        InSettl((MpId1, Guid.NewGuid()));
+        InDeliveryFrom(end);
+        _xellent.SeedContract(Account, MpId1, migratedOn: end);
+        _xellent.SeedContract("other-account", MpId1, migratedOn: end);
+
+        var result = await BuildRunner().ScanMissingReadingsAsync("test");
+
+        Assert.Equal("Unknown", Assert.Single(result.Entries).Status);
+        Assert.Contains("account holders", result.Entries[0].Detail);
+        Assert.Empty(_ts.GetPointsCalls);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_DerivesWindowFromResolvedRevisionInDanishTime()
+    {
+        var mpGuid = new Guid("11111111-1111-1111-1111-111111111111");
+        var tsGuid = new Guid("22222222-2222-2222-2222-222222222222");
+        var revision = new DateTimeOffset(2023, 6, 14, 22, 0, 0, TimeSpan.Zero);
+        var expectedEnd = new DateTime(2023, 6, 15);
+        var expectedStart = expectedEnd.AddYears(-3);
+        var logs = new List<string>();
+
+        _xellent.SeedHourlyTimeSeries(MpId1, expectedStart, hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2023, 6, 15));
+        InSettl((MpId1, mpGuid));
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }]
+            },
+            null);
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Contains($"  MP {MpId1}: end=2023-06-15  start=2020-06-15", logs);
+        PostSnapshot.AssertMatchesGolden(PostSnapshot.From(_ts, _mp), "expected-posts-batch-window.json");
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_UsesExplicitWindowOverrideInsteadOfRevision()
+    {
+        var mpGuid = Guid.NewGuid();
+        var overrideEnd = new DateTime(2025, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, overrideEnd.AddYears(-3), hours: 24);
+        _xellent.SeedContract(Account, MpId1);
+        InSettl((MpId1, mpGuid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false,
+            continueOnError: false,
+            windowEndDateOverride: overrideEnd);
+
+        Assert.Equal(0, rc);
+        Assert.Single(_ts.PostCalls);
+        Assert.Single(_mp.AddEipCalls);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NeverLooksUpTheSettlCustomer()
+    {
+        // A merged (non-representative) account is not a customer in Settl, but its MP is.
+        var mpGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, mpGuid));
+        _cust.SearchByCustomerNumberResponse = _ => null;
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Empty(_cust.SearchByCustomerNumberCalls);
+        Assert.Equal(mpGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
+    }
+
+    // A child metering point (Xellent relation table) with a delivery status and a contract of its own
+    // is posted on its own, like any other metering point.
+    [Fact]
+    public async Task RunPostAllAsync_PostsChildMeteringPointsThatCarryTheirOwn()
+    {
+        var parentGuid = Guid.NewGuid();
+        var childGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract(Account, MpId2, migratedOn: supplyStart);
+        _xellent.SeedChildRelation(MpId1, MpId2);
+        InSettl((MpId1, parentGuid), (MpId2, childGuid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
+
+        Assert.Equal(0, rc);
+        Assert.Equal(2, _mp.AddEipCalls.Count);
+        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
+        Assert.Contains(childGuid, _mp.GetDeliveryStatusesCalls);
+        Assert.Contains(logs, l => l.Contains("2 (1 parents, 1 children) processed", StringComparison.Ordinal));
+    }
+
+    // Without --include-children a batch run is parents only, as it always was.
+    [Fact]
+    public async Task RunPostAllAsync_SkipsChildMeteringPointsWithoutTheFlag()
+    {
+        var parentGuid = Guid.NewGuid();
+        var childGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract(Account, MpId2, migratedOn: supplyStart);
+        _xellent.SeedChildRelation(MpId1, MpId2);
+        InSettl((MpId1, parentGuid), (MpId2, childGuid));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Single(_mp.AddEipCalls);
+        Assert.Equal(parentGuid, _mp.AddEipCalls[0].MpGuid);
+        Assert.DoesNotContain(childGuid, _mp.GetDeliveryStatusesCalls);
+        Assert.Contains(logs, l => l.EndsWith("1 children skipped.", StringComparison.Ordinal));
+    }
+
+    // A Settl child with no Xellent contract of its own is held by whoever holds its parent.
+    [Fact]
+    public async Task RunPostAllAsync_SettlChildWithoutOwnContractUsesTheParents()
+    {
+        var parentGuid = Guid.NewGuid();
+        var childGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _mp.MeteringPoints =
+        [
+            new MeteringPointInfoDto { Id = parentGuid, MeteringPointIdentification = MpId1, InDelivery = true },
+            new MeteringPointInfoDto { Id = childGuid, MeteringPointIdentification = MpId2, InDelivery = true,
+                ParentMeteringPoint = new ResLinkDto { Id = parentGuid } },
+        ];
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
+
+        Assert.Equal(0, rc);
+        Assert.Contains(parentGuid, _mp.GetDeliveryStatusesCalls);
+        Assert.Contains(childGuid, _mp.GetDeliveryStatusesCalls);
+        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
+        Assert.Contains(logs, l => l.Contains($"contract from the parent ({MpId1})", StringComparison.Ordinal));
+    }
+
+    // A child with no delivery status of its own is delivered under its parent: the window comes from there.
+    [Fact]
+    public async Task RunPostAllAsync_ChildWithoutOwnDeliveryStatusUsesTheParentsWindow()
+    {
+        var parentGuid = Guid.NewGuid();
+        var childGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        var start = DanishMidnight(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedChildRelation(MpId1, MpId2);
+        InSettl((MpId1, parentGuid), (MpId2, childGuid));
+        _mp.MeteringPoints[1].InDelivery = false;
+        // The child has no delivery statuses at all; the parent has the migration's.
+        _mp.GetDeliveryStatusesResponse = id => id == parentGuid
+            ? (new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = start } }]
+            }, null)
+            : (new GetDeliveryStatusesResponse { DeliveryStatuses = [] }, null);
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
+
+        Assert.Equal(0, rc);
+        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
+        // Both metering points get the parent's window.
+        Assert.Equal(2, logs.Count(l => l.EndsWith("end=2023-06-15  start=2020-06-15", StringComparison.Ordinal)));
+        Assert.Contains(logs, l => l.Contains("(window from the parent)", StringComparison.Ordinal));
+    }
+
+    // Settl bug (2026-09): a migrated metering point can be shown as not in delivery everywhere — the list,
+    // the delivery-status history (one open InDelivery=false period) and the metering point itself — with
+    // only the current delivery status's start telling when delivery began (featuretest MP
+    // 571313103103321037: InDelivery=false from 2023-12-31T23:00Z, reason Na).
+    private void NotInDeliveryInSettl(Guid mpGuid, DateTime? currentDeliveryStart)
+    {
+        _mp.MeteringPoints = [new MeteringPointInfoDto { Id = mpGuid, MeteringPointIdentification = MpId1, InDelivery = false }];
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = DanishMidnight(new DateTime(2020, 1, 1)) } }]
+            },
+            null);
+        _mp.GetByIdV4Response = _ => new MeteringPointV4Dto
+        {
+            DeliveryStatus = currentDeliveryStart is { } start
+                ? new MeteringPointV4DeliveryStatusDto { Start = DanishMidnight(start).UtcDateTime, InDelivery = false, StartReason = "Na" }
+                : null
+        };
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NotInDeliveryButMigrated_IsPostedFromTheCurrentDeliveryStatus()
+    {
+        var mpGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2024, 1, 1);
+        NotInDeliveryInSettl(mpGuid, supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 6, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24);
+        _xellent.SeedContract(Account, MpId1, partStart: new DateTime(2022, 1, 1), migratedOn: supplyStart);
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.True(rc == 0, string.Join(Environment.NewLine, logs.Where(l => l.Contains("ERROR"))));
+        Assert.Contains($"  MP {MpId1}: end=2024-01-01  start=2022-01-01", logs);
+        Assert.Equal(mpGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
+    }
+
+    [Fact]
+    public async Task Snapshot_SeedThenOfflineRun_PostsTheSameWithoutReadingSettl()
+    {
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+
+        try
+        {
+            Assert.Equal(0, await BuildRunner(outputDirectory).RunSeedSnapshotAsync("test"));
+            var (lists, statuses, current, series) =
+                (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetByIdV4Calls.Count, _mp.GetTimeSeriesCalls.Count);
+            Assert.True(lists > 0 && statuses == 1 && current == 1 && series == 1);
+
+            var logs = new List<string>();
+            var rc = await BuildRunner(outputDirectory, logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, offline: true);
+
+            Assert.Equal(0, rc);
+            Assert.Single(_ts.PostCalls);
+            Assert.Single(_mp.AddEipCalls);
+            // Nothing was read from Settl a second time.
+            Assert.Equal((lists, statuses, current, series),
+                (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetByIdV4Calls.Count, _mp.GetTimeSeriesCalls.Count));
+            Assert.Contains(logs, l => l.StartsWith("Snapshot: ", StringComparison.Ordinal) && l.EndsWith(" 0 read live.", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Done_SeedMarksWhatSettlAlreadyHolds_AndRunsLeaveItOut()
+    {
+        // MP1's series already has points in Settl, MP2's has none.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        var (mp1Guid, mp2Guid, ts1, ts2) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _mp.GetTimeSeriesResponse = id => HourTs(id == mp1Guid ? ts1 : ts2);
+        _ts.GetPointsResponse = (ts, _, _) => ts == ts1
+            ? (new SettlPointsSummaryDto { Count = 24 }, null)
+            : (new SettlPointsSummaryDto { Count = 0 }, null);
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var doneFile = Path.Combine(OutputDir, "snapshot", "test", "done.jsonl");
+        var doneLines = File.ReadAllLines(doneFile);
+        Assert.Single(doneLines);
+        Assert.Contains(MpId1, doneLines[0]);
+        // The done check writes no skip files, and stops at MP1's first year with points: one call for
+        // MP1, every year for MP2.
+        Assert.Empty(Directory.GetFiles(OutputDir, "*.csv"));
+        Assert.Single(_ts.GetPointsCalls, c => c.TsGuid == ts1);
+        var summaryCalls = _ts.GetPointsCalls.Count;
+
+        // A second seed reads the answers from the snapshot.
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        Assert.Equal(summaryCalls, _ts.GetPointsCalls.Count);
+
+        // A live run posts only MP2; MP1 is left out from the start. The post marks MP2 done.
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+        Assert.Equal(mp2Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.Contains(logs, l => l.StartsWith("Already done: 1 metering point(s)", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, l => l.Contains($"MP {MpId1} ---", StringComparison.Ordinal));
+        Assert.Equal(2, File.ReadAllLines(doneFile).Length);
+    }
+    [Fact]
+    public async Task Snapshot_Refresh_ReadsEverythingAgain_AndKeepsDoneMarks()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _ts.GetPointsResponse = (_, _, _) => (new SettlPointsSummaryDto { Count = 24 }, null);
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var (lists, statuses) = (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count);
+
+        // Without --refresh nothing is read again.
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        Assert.Equal((lists, statuses), (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count));
+
+        // With it, Settl is read again, and the done mark is still there.
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test", refresh: true));
+        Assert.True(_mp.FindMeteringPointsCalls > lists);
+        Assert.True(_mp.GetDeliveryStatusesCalls.Count > statuses);
+        Assert.Single(File.ReadAllLines(Path.Combine(OutputDir, "snapshot", "test", "done.jsonl")));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task HourlyValuesWhereXellentReadsQuarterHourly_AreConvertedUnlessResolutionChangesAreSkipped(bool skipResolutionChange, bool dryRun)
+    {
+        // MP 571313185621006160 (production, 2026-09-11): one hourly series with hourly values throughout,
+        // but Xellent reads the meter hourly only until 2023-04-25 and quarter-hourly from 2023-04-26.
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 4, 24, 22, 0, 0, DateTimeKind.Utc), hours: 72,
+            companyId: "for", agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false,
+            skipResolutionChange: skipResolutionChange);
+
+        // The outgoing window is mixed: 24 original hours and 48 converted hours.
+        Assert.Equal(0, rc);
+        Assert.Equal(dryRun || skipResolutionChange ? 0 : 2, _ts.PostCalls.Count);
+        if (!dryRun && !skipResolutionChange)
+            Assert.Equal(216, _ts.PostCalls.Sum(c => c.Payload.Points.Count));
+        var knownIssue = File.ReadAllLines(Path.Combine(OutputDir, "known-issue-xellent-resolution.csv"));
+        Assert.Equal(2, knownIssue.Length);
+        Assert.Contains("is Hour, its 48 values are Hour", knownIssue[1]);
+        Assert.Contains("TimeReadingPeriod is Quarter (2023-04-26 → 2025-12-31)", knownIssue[1]);
+        Assert.Equal(skipResolutionChange, File.Exists(Path.Combine(OutputDir, "skip-resolution-change.csv")));
+        if (dryRun && !skipResolutionChange)
+            Assert.Contains(logs, l => l.Contains("points=216"));
+    }
+
+    [Fact]
+    public async Task Payer6Series_IsLeftOutAndListed_AndDonenessIsReported()
+    {
+        // MP1's payer is 612345 (6##### — not migrated), MP2's is 412345. Neither is in Settl yet.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        var (mp1Guid, mp2Guid) = (Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _payers.PayerOf[mp1Guid] = "612345";
+        _payers.PayerOf[mp2Guid] = "412345";
+        var seedLogs = new List<string>();
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: seedLogs.Add).RunSeedSnapshotAsync("test"));
+        // Only MP2 counts toward the migration; nothing is done yet.
+        Assert.Contains("Migration: 0 of 1 metering points done (0%), 1 still to post", seedLogs);
+        var payerCalls = _payers.FindPayersForMeteringPointsCalls;
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, offline: true));
+        Assert.Equal(mp2Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.Contains("Payer 6#####: 1 metering point(s) left out (skip-payer-6-series.csv)", logs);
+        Assert.Contains("payer 612345", File.ReadAllText(Path.Combine(OutputDir, "skip-payer-6-series.csv")));
+        Assert.Equal(payerCalls, _payers.FindPayersForMeteringPointsCalls); // payers came from the snapshot
+        Assert.Contains(logs, l => l.StartsWith("Migration: 0 of 1 metering points done (0%)", StringComparison.Ordinal));
+
+        // The post marked MP2 done: the next run reports 1 of 1.
+        logs.Clear();
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false, offline: true));
+        Assert.Contains(logs, l => l.StartsWith("Migration: 1 of 1 metering points done (100%)", StringComparison.Ordinal));
+    }
+
+    // The known-issue meter from above: hourly values throughout, Xellent says 15-minute from 2023-04-26.
+    private void SeedHourlyValuesWhereXellentSaysQuarter(string mp, string account)
+    {
+        _xellent.SeedHourlyTimeSeries(mp, new DateTime(2023, 4, 24, 22, 0, 0, DateTimeKind.Utc), hours: 72, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(mp, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(mp, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(account, mp, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+    }
+
+    [Fact]
+    public async Task ConvertedReadingPeriod_HasSeparatePayloadAndInvoicedPeriod()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false,
+            skipResolutionChange: false);
+
+        Assert.True(rc == 0, string.Join(Environment.NewLine, logs.Where(l => l.Contains("ERROR") || l.StartsWith("SKIP"))));
+        Assert.Equal(new[] { 24, 192 }, _ts.PostCalls.Select(c => c.Payload.Points.Count));
+        Assert.Equal(72m, _ts.PostCalls.SelectMany(c => c.Payload.Points).Sum(p => p.Quantity));
+        var periods = _mp.AddEipCalls.SelectMany(c => c.Request.Periods).Select(p => p.Period!).ToList();
+        Assert.Equal((new DateOnly(2023, 1, 1), new DateOnly(2023, 4, 26)), (periods[0].Start, periods[0].End));
+        Assert.Equal((new DateOnly(2023, 4, 26), new DateOnly(2026, 1, 1)), (periods[1].Start, periods[1].End));
+        Assert.Equal(2, File.ReadAllLines(Path.Combine(OutputDir, "known-issue-xellent-resolution.csv")).Length);
+    }
+
+    [Theory]
+    [InlineData(true)]   // Settl has the hourly series the points need: nothing to decide
+    [InlineData(false)]  // Settl has only a 15-minute series: no switch, but the hourly series is missing
+    public async Task ResolutionChanges_RetainsMissingHourlySeriesForEarlierHoursWithExistingReportDate(bool settlHasHour)
+    {
+        // Every posted point is hourly; only the Xellent reading period says 15-minute. No switch.
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = settlHasHour
+            ? new TimeResolutionInfoDto { Length = 1, Unit = "Hour" }
+            : new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        if (settlHasHour)
+        {
+            Assert.Single(lines);
+            return;
+        }
+        // On the list because Settl has no hourly series for the hourly points. The change is between
+        // the posted data and Settl's own, so ChangeDate is the delivery start.
+        Assert.Equal(2, lines.Length);
+        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2026-01-01\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_QuarterPointsAgainstAnHourSeries_AreLeftOut()
+    {
+        // The mirror of the listed case: 15-minute points, Settl has only an hourly series. Off the list.
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));  // default Settl response: an hourly series only
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        Assert.Single(File.ReadAllLines(file));
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_LeavesOutSwitchesWhenBothTargetSeriesExist()
+    {
+        // MP1's points go hourly → 15-minute on 2024-06-01: a switch. MP2's go the other way,
+        // 15-minute → hourly, and is not one.
+        var supplyStart = new DateTime(2026, 1, 1);
+        var (hourly, quarterly) = (new DateTime(2023, 5, 31, 22, 0, 0, DateTimeKind.Utc), new DateTime(2024, 5, 31, 22, 0, 0, DateTimeKind.Utc));
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, hourly, hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedQuarterTimeSeries(MpId1, quarterly, quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedQuarterTimeSeries(MpId2, hourly, quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedHourlyTimeSeries(MpId2, quarterly, hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2024, 5, 31), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId2, "for", new DateTime(2023, 1, 1), new DateTime(2024, 5, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId2, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 0);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        Assert.Single(File.ReadAllLines(file));
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_LeavesOutMeteringPointsSettlDoesNotStateDeliveryFor()
+    {
+        // A real switch (hourly until 2023-04-25, quarter-hourly after), but Settl marks no delivery
+        // status InDelivery=true, so the window rests on the current delivery status. Not for Systemate.
+        var supplyStart = new DateTime(2026, 1, 1);
+        NotInDeliveryInSettl(Guid.NewGuid(), supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 4, 24, 22, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2023, 4, 25, 22, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        _mp.GetTimeSeriesResponse = _ => [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunResolutionChangesAsync("test", outputPath: file));
+
+        Assert.Single(File.ReadAllLines(file));  // header only — not on the list for Systemate
+        var unclear = File.ReadAllLines(Path.Combine(OutputDir, "changes-unclear-delivery.csv"));
+        Assert.Equal(2, unclear.Length);
+        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\"", unclear[1]);
+        Assert.Contains(logs, l => l.Contains("Settl does not state their delivery", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Readiness_GivesEveryMeteringPointAStatus_AndOpensInExcel()
+    {
+        const string mpId3 = "571313100000000003";
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        // MP1 and MP2: plain hourly values. MP3: hourly values where Xellent says 15-minute.
+        foreach (var (mp, account) in new[] { (MpId1, Account), (MpId2, "acct2") })
+        {
+            _xellent.SeedHourlyTimeSeries(mp, new DateTime(2025, 12, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+                agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+            _xellent.SeedContract(account, mp, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        }
+        SeedHourlyValuesWhereXellentSaysQuarter(mpId3, "acct3");
+        var (mp1Guid, mp2Guid, mp3Guid) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid), (mpId3, mp3Guid));
+        // Settl has an hourly series for MP1 and MP3, only a 15-minute series for MP2.
+        _mp.GetTimeSeriesResponse = id => [new TimeSeriesInfoDto
+        {
+            Id = Guid.NewGuid(),
+            TimeResolution = id == mp2Guid
+                ? new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" }
+                : new TimeResolutionInfoDto { Length = 1, Unit = "Hour" },
+        }];
+        var file = Path.Combine(OutputDir, "readiness.csv");
+
+        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        Assert.Equal(4, lines.Length);
+        var status = lines.Skip(1).ToDictionary(l => l.Split(';')[0].Trim('"'), l => l.Split(';')[10].Trim('"'));
+        Assert.Equal("Ready", status[MpId1]);
+        Assert.Equal("MissingHourSeries", status[MpId2]);
+        // MP3 now needs a quarter-hour target for the converted part of its window.
+        Assert.Equal("MissingQuarterSeries", status[mpId3]);
+        // MP2's values are hourly, Settl only has 15-minute.
+        Assert.Contains("\"Hour\";\"24\";\"Quarter\";\"Hour\"", lines.Single(l => l.StartsWith($"\"{MpId2}\"", StringComparison.Ordinal)));
+
+        // Opens straight in Excel here: BOM, semicolons, every field quoted, CRLF.
+        var bytes = File.ReadAllBytes(file);
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
+        var text = File.ReadAllText(file);
+        Assert.StartsWith("\"MeteringPointId\";\"Type\";\"SettlId\";\"Account\";\"WindowStart\";\"WindowEnd\"", text.TrimStart('﻿'));
+        Assert.All(text.TrimEnd((char)10).Split((char)10), line => Assert.EndsWith(((char)13).ToString(), line));
+    }
+
+    [Fact]
+    public async Task Readiness_TellsAMeterWithNoReadingsFromAnAddressWithNoMeter()
+    {
+        const string mpId3 = "571313100000000003";
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        // Neither has a single value. MP1 has a meter that delivers; MP3 is only created in Xellent —
+        // no meter at the address, so no readings are coming.
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedMeterPointStatus(MpId1, "for", status: 6, start: new DateTime(2023, 1, 1));
+        _xellent.SeedContract("acct3", mpId3, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedMeterPointStatus(mpId3, "for", status: 5, start: new DateTime(2023, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()), (mpId3, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [];
+        var file = Path.Combine(OutputDir, "readiness.csv");
+
+        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
+
+        var status = File.ReadAllLines(file).Skip(1)
+            .ToDictionary(l => l.Split(';')[0].Trim('"'), l => l.Split(';')[10].Trim('"'));
+        Assert.Equal("NoValues", status[MpId1]);
+        Assert.Equal("NotInstalled", status[mpId3]);
+    }
+
+    [Fact]
+    public async Task Readiness_HourlyValuesXellentReadsAsQuarter_CountAsQuarter_AndNeedOnlyQuarterSeries()
+    {
+        // All the stored values sit after Xellent switched the meter to 15-minute reading. They are
+        // converted on send, so the existing quarter-hour series is sufficient.
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ =>
+            [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "readiness.csv");
+
+        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
+
+        var row = File.ReadAllLines(file)[1].Split(';').Select(f => f.Trim('"')).ToArray();
+        Assert.Equal("Ready", row[10]);
+        Assert.Equal("", row[9]);
+        Assert.Equal("Quarter", row[6]);
+        Assert.Equal("96", row[7]);
+        Assert.Contains("XellentResolutionMismatch", row[11]);
+        Assert.Equal("Parent", row[1]);
+    }
+
+    [Fact]
+    public async Task MissingHourReport_OmitsFullyConvertedWindow()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new() { Id = Guid.NewGuid(), TimeResolution = new() { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "missing-hour.csv");
+        var unclearFile = Path.Combine(OutputDir, "missing-hour-unclear-delivery.csv");
+        Directory.CreateDirectory(OutputDir);
+        File.WriteAllText(unclearFile, "stale row from an earlier report");
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+        Assert.Single(File.ReadAllLines(file));
+        Assert.Single(File.ReadAllLines(unclearFile));
+        Assert.DoesNotContain("stale row", File.ReadAllText(unclearFile));
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: true));
+        Assert.Equal(96, Assert.Single(_ts.PostCalls).Payload.Points.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConversionPrecision_BlocksWholePoint_InLiveAndCountedBatch(bool dryRun)
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        using (var ctx = _xellent.CreateContext())
+        {
+            var last = ctx.EmsTimeseriesValues.OrderByDescending(v => v.Timeofvalue).First();
+            last.Value = 0.0001m;
+            ctx.SaveChanges();
+        }
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+        Assert.Equal(1, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: true));
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.Contains(logs, l => l.Contains($"Conversion failed for MP {MpId1}") && l.Contains("0.0001"));
+        Assert.Contains(logs, l => l.StartsWith($"OUTGOING MP {MpId1}: resolutions=Hour+Quarter, convertedHours="));
+        var readiness = Path.Combine(OutputDir, "readiness-conversion.csv");
+        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: readiness));
+        Assert.Contains("ConversionError", File.ReadAllLines(readiness)[1]);
+    }
+
+    [Fact]
+    public async Task Snapshot_StoresTheXellentPointCounts_SoTheReportsDoNotCountAgain()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+
+        var counts = Path.Combine(OutputDir, "snapshot", "test", "xellent-point-counts-v3.jsonl");
+        Assert.True(File.Exists(counts), "the seed should leave the Xellent counts in the snapshot");
+        Assert.Contains(MpId1, File.ReadAllText(counts));
+    }
+
+    [Fact]
+    public async Task Coverage_RejectsOldSourceOnlyCounts_WithoutLiveReads()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var directory = Path.Combine(OutputDir, "snapshot", "test");
+        File.Move(Path.Combine(directory, "xellent-point-counts-v3.jsonl"),
+            Path.Combine(directory, "xellent-point-counts-v2.jsonl"));
+        var calls = (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count);
+        var logs = new List<string>();
+
+        Assert.Equal(1, await BuildRunner(log: logs.Add).RunCoverageAsync("test"));
+
+        Assert.Contains(logs, line => line.Contains("snapshot has no 'xellent-point-counts-v3'"));
+        Assert.Equal(calls, (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count));
+        Assert.False(File.Exists(Path.Combine(directory, "xellent-point-counts-v3.jsonl")));
+    }
+
+    [Fact]
+    public async Task Readiness_CountsMeteringPointsAlreadyPosted_ButDoesNotListThem()
+    {
+        // MP1 already has points in Settl (done after the seed), MP2 has none.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        var (mp1Guid, mp2Guid, ts1, ts2) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        foreach (var (mp, account) in new[] { (MpId1, Account), (MpId2, "acct2") })
+        {
+            _xellent.SeedHourlyTimeSeries(mp, supplyStart.AddYears(-1), hours: 24);
+            _xellent.SeedContract(account, mp, migratedOn: supplyStart);
+        }
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _mp.GetTimeSeriesResponse = id => HourTs(id == mp1Guid ? ts1 : ts2);
+        _ts.GetPointsResponse = (ts, _, _) => ts == ts1
+            ? (new SettlPointsSummaryDto { Count = 24 }, null)
+            : (new SettlPointsSummaryDto { Count = 0 }, null);
+        var file = Path.Combine(OutputDir, "readiness.csv");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunReadinessAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        Assert.Equal(2, lines.Length);
+        Assert.StartsWith($"\"{MpId2}\"", lines[1]);
+        // Both are counted: two Ready, one row.
+        Assert.Contains(logs, l => l == "  2 Ready");
+        Assert.Contains(logs, l => l.Contains("1 already posted, counted above but not listed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Readiness_Offline_ReadsEverythingFromTheSnapshot()
+    {
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2025, 12, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var file = Path.Combine(OutputDir, "readiness.csv");
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var (lists, statuses, series) = (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count);
+
+        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", offline: true, outputPath: file));
+
+        Assert.Equal(2, File.ReadAllLines(file).Length);
+        Assert.Equal((lists, statuses, series),
+            (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count));
+    }
+
+    [Fact]
+    public async Task Coverage_UsesOnlyTheSnapshot_AndReportsCompletedAndGapCauses()
+    {
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        var (mp1Guid, mp2Guid, ts1, ts2) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        foreach (var (mp, account) in new[] { (MpId1, Account), (MpId2, "acct2") })
+        {
+            _xellent.SeedHourlyTimeSeries(mp, supplyStart.AddYears(-1), hours: 24);
+            _xellent.SeedContract(account, mp, migratedOn: supplyStart);
+        }
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _mp.GetTimeSeriesResponse = id =>
+        [
+            new TimeSeriesInfoDto
+            {
+                Id = id == mp1Guid ? ts1 : ts2,
+                TimeResolution = id == mp1Guid
+                    ? new TimeResolutionInfoDto { Length = 1, Unit = "Hour" }
+                    : new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" },
+            }
+        ];
+        _ts.GetPointsResponse = (id, _, _) => id == ts1
+            ? (new SettlPointsSummaryDto { Count = 24 }, null)
+            : (new SettlPointsSummaryDto { Count = 0 }, null);
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var liveCalls = (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count,
+            _mp.GetByIdV4Calls.Count, _mp.GetTimeSeriesCalls.Count,
+            _payers.FindPayersForMeteringPointsCalls, _ts.GetPointsCalls.Count);
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunCoverageAsync("test", json: true, byAccount: true));
+
+        Assert.Equal(liveCalls, (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count,
+            _mp.GetByIdV4Calls.Count, _mp.GetTimeSeriesCalls.Count,
+            _payers.FindPayersForMeteringPointsCalls, _ts.GetPointsCalls.Count));
+        using var json = JsonDocument.Parse(Assert.Single(logs, line => line.StartsWith('{')));
+        var root = json.RootElement;
+        Assert.Equal(2, root.GetProperty("MeteringPointsExamined").GetInt32());
+        Assert.Equal(2, root.GetProperty("MeteringPointsInScope").GetInt32());
+        Assert.Equal(0, root.GetProperty("ExcludedFromScope").GetInt32());
+        Assert.Equal(1, root.GetProperty("Completed").GetInt32());
+        Assert.Equal(0, root.GetProperty("Ready").GetInt32());
+        Assert.Equal(1, root.GetProperty("Blocked").GetInt32());
+        var status = Assert.Single(root.GetProperty("RemainingStatuses").EnumerateArray());
+        Assert.Equal("MissingHourSeries", status.GetProperty("Status").GetString());
+        Assert.Equal(2, root.GetProperty("Accounts").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Coverage_ExplainsEveryMeteringPointOutsideTheScope()
+    {
+        const string mpId3 = "571313100000000003";
+        var supplyStart = new DateTime(2026, 1, 1);
+        var revision = DanishMidnight(supplyStart);
+        var (mp1Guid, mp2Guid, mp3Guid) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _mp.MeteringPoints =
+        [
+            new MeteringPointInfoDto { Id = mp1Guid, MeteringPointIdentification = MpId1, InDelivery = true },
+            new MeteringPointInfoDto { Id = mp2Guid, MeteringPointIdentification = MpId2, InDelivery = true },
+            new MeteringPointInfoDto { Id = mp3Guid, MeteringPointIdentification = mpId3, InDelivery = false },
+        ];
+        _mp.GetDeliveryStatusesResponse = id => id == mp3Guid
+            ? (new GetDeliveryStatusesResponse { DeliveryStatuses = [] }, null)
+            : (new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses =
+                [
+                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                ]
+            }, null);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        var logs = new List<string>();
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunCoverageAsync("test", json: true));
+
+        using var json = JsonDocument.Parse(Assert.Single(logs, line => line.StartsWith('{')));
+        var root = json.RootElement;
+        Assert.Equal(3, root.GetProperty("MeteringPointsExamined").GetInt32());
+        Assert.Equal(1, root.GetProperty("MeteringPointsInScope").GetInt32());
+        Assert.Equal(2, root.GetProperty("ExcludedFromScope").GetInt32());
+        var exclusions = root.GetProperty("Exclusions").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("Reason").GetString()!, e => e.GetProperty("Count").GetInt32());
+        Assert.Equal(1, exclusions["Missing Xellent contract"]);
+        Assert.Equal(1, exclusions["Never delivered (no delivery start)"]);
+        Assert.Equal(2, exclusions.Values.Sum());
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_ListsOnlyChangesInsideThePostWindow()
+    {
+        // Delivery from 2026-01-01, so the window is 2023-01-01 → 2026-01-01 for both.
+        // MP1: hourly until 2023-04-25, quarter-hourly from 2023-04-26 — a change inside the window.
+        // MP2: hourly until 2019, quarter-hourly since 2020 — a change, but before its window.
+        var supplyStart = new DateTime(2026, 1, 1);
+        InDeliveryFrom(supplyStart);
+        // MP1: hourly points until 2023-04-25, 15-minute from 2023-04-26. MP2 switched back in 2020,
+        // so inside its window every point is 15-minute.
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 4, 24, 22, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2023, 4, 25, 22, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedQuarterTimeSeries(MpId2, new DateTime(2023, 4, 24, 22, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId2, "for", new DateTime(2015, 1, 1), new DateTime(2019, 12, 31), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId2, "for", new DateTime(2020, 1, 1), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        Assert.Equal([
+            "\"MeteringPointId\";\"Type\";\"ChangeDate\";\"XellentResolutions\";\"SettlSeries\";\"MissingSeries\";\"WindowStart\";\"WindowEnd\"",
+            $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour + Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\""], File.ReadAllLines(file));
+        Assert.DoesNotContain(Directory.GetFiles(OutputDir, "*.csv"), p => !p.EndsWith("changes.csv", StringComparison.Ordinal));
+    }
+    [Fact]
+    public async Task DryRun_CountsPoints_AndReportsWhatALiveRunPosts()
+    {
+        // 48 hours from a day before the boundary: 24 before it, 24 on or after it.
+        var supplyStart = new DateTime(2023, 6, 15);
+        var boundary = DanishMidnight(new DateTime(2023, 6, 1));
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses =
+                [
+                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = DanishMidnight(supplyStart) } },
+                    new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = boundary, End = DanishMidnight(supplyStart) } },
+                ]
+            },
+            null);
+        _xellent.SeedHourlyTimeSeries(MpId1, boundary.UtcDateTime.AddHours(-24), hours: 48);
+        _xellent.SeedContract(Account, MpId1, partStart: new DateTime(2020, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var dryLogs = new List<string>();
+        var liveLogs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: dryLogs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
+        Assert.Equal(0, await BuildRunner(log: liveLogs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Contains(dryLogs, l => l.StartsWith($"DELIVERY FILTER MP {MpId1}:", StringComparison.Ordinal) && l.EndsWith("excluded=0, included=24", StringComparison.Ordinal));
+        Assert.Contains(dryLogs, l => l.Trim().StartsWith("[dry-run] would POST 24 points", StringComparison.Ordinal));
+        Assert.Equal(24, Assert.Single(_ts.PostCalls).Payload.Points.Count);
+        // Same invoiced period whether counted or read.
+        var eipLine = dryLogs.Single(l => l.Contains("[dry-run] would add EIP", StringComparison.Ordinal));
+        var eip = Assert.Single(Assert.Single(_mp.AddEipCalls).Request.Periods).Period!;
+        Assert.Contains($"({eip.Start:yyyy-MM-dd} → {eip.End:yyyy-MM-dd},", eipLine);
+    }
+
+    [Fact]
+    public async Task Snapshot_KeepsOnlyTheDeliveryStatusOfTheMeteringPoint()
+    {
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetByIdV4Response = _ => new MeteringPointV4Dto
+        {
+            Consumer = new MeteringPointV4ConsumerDto { CustomerType = "SENTINEL-CONSUMER-DATA" },
+            DeliveryStatus = new MeteringPointV4DeliveryStatusDto { Start = new DateTime(2023, 6, 14, 22, 0, 0, DateTimeKind.Utc), InDelivery = true },
+        };
+
+        try
+        {
+            await BuildRunner(outputDirectory).RunSeedSnapshotAsync("test");
+
+            var files = Directory.GetFiles(Path.Combine(outputDirectory, "snapshot", "test"));
+            Assert.Contains(files, f => f.EndsWith("settl-current-delivery-status.jsonl", StringComparison.Ordinal));
+            Assert.DoesNotContain(files, f => File.ReadAllText(f).Contains("SENTINEL-CONSUMER-DATA", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NotInDeliveryButMigrated_FetchesTheMeteringPointOnce()
+    {
+        var mpGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2024, 1, 1);
+        NotInDeliveryInSettl(mpGuid, supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 6, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24);
+        _xellent.SeedContract(Account, MpId1, partStart: new DateTime(2022, 1, 1), migratedOn: supplyStart);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Equal([mpGuid], _mp.GetByIdV4Calls);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NotInDeliveryWithoutDeliveryStart_IsSkippedQuietly()
+    {
+        NotInDeliveryInSettl(Guid.NewGuid(), currentDeliveryStart: null);
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Empty(_ts.PostCalls);
+        Assert.DoesNotContain(logs, l => l.StartsWith("ERROR", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1 never delivered", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NotInDeliveryAndNotClosedAsAMigration_IsSkippedAsNotMigrated()
+    {
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        NotInDeliveryInSettl(Guid.NewGuid(), new DateTime(2024, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 6, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24);
+        _xellent.SeedContract(Account, MpId1); // open contract: never migrated
+        var logs = new List<string>();
+
+        try
+        {
+            var rc = await BuildRunner(outputDirectory, logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+            Assert.Equal(0, rc);
+            Assert.Empty(_ts.PostCalls);
+            Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: not migrated — customer {Account}: contract does not end on 2023-12-31", StringComparison.Ordinal));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skip-not-migrated.csv")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_DeliveryStartRangeAndLimit_NarrowTheSelection()
+    {
+        // Delivery starts (Danish): MP1 2023-06-01, MP2 2023-06-15, MP3 2023-06-15, MP4 2023-07-01.
+        // The range 2023-06-10 → 2023-06-30 keeps MP2 and MP3; the limit keeps MP2.
+        var starts = new[] { new DateTime(2023, 6, 1), new DateTime(2023, 6, 15), new DateTime(2023, 6, 15), new DateTime(2023, 7, 1) };
+        var mps = starts.Select((s, i) => new MeteringPointInfoDto
+        {
+            Id = Guid.NewGuid(),
+            MeteringPointIdentification = $"57131310000000000{i + 1}",
+            InDelivery = true,
+            CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = DanishMidnight(s) },
+        }).ToList();
+        _mp.MeteringPoints = mps;
+        _mp.GetDeliveryStatusesResponse = id => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
+            },
+            null);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: true,
+            cosFrom: new DateOnly(2023, 6, 10), cosTo: new DateOnly(2023, 6, 30), limit: 1);
+
+        // No Xellent contract is seeded, so the one selected MP is skipped as missing in Xellent.
+        Assert.Equal(0, rc);
+        Assert.Equal([mps[1].Id], _mp.GetDeliveryStatusesCalls);
+        Assert.Equal(TimeSeriesRunner.BatchDeliveryCategory, _mp.LastDeliveryCategory);
+    }
+
+    [Theory]
+    [InlineData(0, 2, new[] { 1, 2 })]
+    [InlineData(2, 2, new[] { 3, 4 })]
+    [InlineData(3, 5, new[] { 4 })]
+    public async Task RunPostAllAsync_SkipAndLimit_RunTheMeteringPointsInBatches(int skip, int limit, int[] expected)
+    {
+        // Four in-delivery MPs; one outside the delivery-start range does not count toward skip or limit.
+        var inRange = DanishMidnight(new DateTime(2023, 6, 15));
+        var mps = Enumerable.Range(1, 4).Select(n => new MeteringPointInfoDto
+        {
+            Id = Guid.NewGuid(),
+            MeteringPointIdentification = $"57131310000000000{n}",
+            InDelivery = true,
+            CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = inRange },
+        }).ToList();
+        mps.Insert(1, new MeteringPointInfoDto
+        {
+            Id = Guid.NewGuid(),
+            MeteringPointIdentification = "571313100000000001x",
+            InDelivery = true,
+            CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = DanishMidnight(new DateTime(2025, 1, 1)) },
+        });
+        _mp.MeteringPoints = mps;
+        _mp.GetDeliveryStatusesResponse = id => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
+            },
+            null);
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false,
+            cosFrom: new DateOnly(2023, 6, 1), cosTo: new DateOnly(2023, 6, 30), limit: limit, skip: skip);
+
+        // No Xellent contracts are seeded, so each processed MP is skipped as missing in Xellent.
+        Assert.Equal(0, rc);
+        var processed = logs.Where(l => l.StartsWith("SKIP MP ", StringComparison.Ordinal))
+            .Select(l => int.Parse(l.Substring("SKIP MP 57131310000000000".Length, 1)))
+            .ToArray();
+        Assert.Equal(expected, processed);
+    }
+
+    [Fact]
+    public async Task ListBatchMeteringPointsAsync_ReturnsWhatTheBatchRunTakes()
+    {
+        // MP1 in delivery in range, MP2 a Xellent child of MP1, "…03" not in delivery (kept whatever the
+        // range), "…04" in delivery outside the range, "…05" a Settl child. Only "…04" is left out;
+        // the two children are kept, each carrying MP1 as its parent.
+        var parentGuid = Guid.NewGuid();
+        _xellent.SeedContract(Account, MpId1);
+        _xellent.SeedContract(Account, MpId2);
+        _xellent.SeedChildRelation(MpId1, MpId2);
+        var start = DanishMidnight(new DateTime(2023, 6, 15));
+        _mp.MeteringPoints =
+        [
+            new MeteringPointInfoDto { Id = parentGuid, MeteringPointIdentification = MpId1, InDelivery = true, CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = start } },
+            new MeteringPointInfoDto { Id = Guid.NewGuid(), MeteringPointIdentification = MpId2, InDelivery = true, CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = start } },
+            new MeteringPointInfoDto { Id = Guid.NewGuid(), MeteringPointIdentification = "571313100000000003", InDelivery = false },
+            new MeteringPointInfoDto { Id = Guid.NewGuid(), MeteringPointIdentification = "571313100000000004", InDelivery = true,
+                CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = DanishMidnight(new DateTime(2025, 1, 1)) } },
+            new MeteringPointInfoDto { Id = Guid.NewGuid(), MeteringPointIdentification = "571313100000000005", InDelivery = true,
+                ParentMeteringPoint = new ResLinkDto { Id = parentGuid } },
+        ];
+
+        var list = await BuildRunner().ListBatchMeteringPointsAsync(new DateOnly(2023, 6, 1), new DateOnly(2023, 6, 30), includeChildren: true);
+
+        Assert.Equal(
+            [
+                new BatchMeteringPoint(MpId1, parentGuid, true, new DateOnly(2023, 6, 15)),
+                new BatchMeteringPoint(MpId2, list[1].Id, true, new DateOnly(2023, 6, 15), MpId1, parentGuid, true),
+                new BatchMeteringPoint("571313100000000003", list[2].Id, false, null),
+                new BatchMeteringPoint("571313100000000005", list[3].Id, true, null, MpId1, parentGuid, true),
+            ],
+            list);
+        Assert.Equal(TimeSeriesRunner.BatchDeliveryCategory, _mp.LastDeliveryCategory);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_OnlyContractsInTheElCategoryCountAsHolders()
+    {
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedContract(Account, MpId1, deliveryCategory: "Varme", migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        try
+        {
+            var rc = await BuildRunner(outputDirectory, logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+            Assert.Equal(0, rc);
+            Assert.Empty(_ts.PostCalls);
+            Assert.Contains($"SKIP MP {MpId1}: no Xellent contract on 2023-06-14 (the day before delivery starts in Settl) (parent)", logs);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    // Boundary-tests: bekræfter at extract-vinduet slutter ved DK-midnat (= UTC 22:00 i sommertid,
+    // UTC 23:00 i vintertid). Point seedet på begge sider af grænsen — kun dem før forsyningsstart
+    // må indgå i POST'en. Hvis konvertering DK→UTC mangler, lækker 1-2 timer ind i den nye periode.
+
+    [Fact]
+    public async Task RunPostAllAsync_ExcludesPointsAfterDkMidnight_Summer()
+    {
+        var mpGuid = new Guid("11111111-1111-1111-1111-111111111111");
+        var tsGuid = new Guid("22222222-2222-2222-2222-222222222222");
+        // DK 2023-06-15 00:00 (sommertid, UTC+2) = UTC 2023-06-14 22:00
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Unspecified);
+        InDeliveryFrom(supplyStart);
+        // 5 timer: UTC 20, 21, 22, 23, 2023-06-15 00 — kun 20+21 ligger før forsyningsstart.
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 6, 14, 20, 0, 0, DateTimeKind.Utc), hours: 5);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, mpGuid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        PostSnapshot.AssertMatchesGolden(PostSnapshot.From(_ts, _mp), "expected-posts-boundary-summer.json");
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ExcludesPointsAfterDkMidnight_Winter()
+    {
+        var mpGuid = new Guid("11111111-1111-1111-1111-111111111111");
+        var tsGuid = new Guid("22222222-2222-2222-2222-222222222222");
+        // DK 2023-12-15 00:00 (vintertid, UTC+1) = UTC 2023-12-14 23:00
+        var supplyStart = new DateTime(2023, 12, 15, 0, 0, 0, DateTimeKind.Unspecified);
+        InDeliveryFrom(supplyStart);
+        // 5 timer: UTC 21, 22, 23, 2023-12-15 00, 01 — kun 21+22 ligger før forsyningsstart.
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 12, 14, 21, 0, 0, DateTimeKind.Utc), hours: 5);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, mpGuid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        PostSnapshot.AssertMatchesGolden(PostSnapshot.From(_ts, _mp), "expected-posts-boundary-winter.json");
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_AbortsOnFirstFailure()
+    {
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract("acct1", MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        _ts.PostResponse = (_, _) => (false, "boom");
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(1, rc);
+        // Failure on MP 1 must prevent MP 2 from being processed.
+        Assert.Single(_mp.GetDeliveryStatusesCalls);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_SkipIfExistingPoints_SkipsMpsWithExistingData()
+    {
+        var mpWithDataGuid = new Guid("11111111-1111-1111-1111-111111111111");
+        var mpEmptyGuid = new Guid("44444444-4444-4444-4444-444444444444");
+        var tsWithDataGuid = new Guid("22222222-2222-2222-2222-222222222222");
+        var tsEmptyGuid = new Guid("55555555-5555-5555-5555-555555555555");
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract(Account, MpId2, migratedOn: supplyStart);
+        InSettl((MpId1, mpWithDataGuid), (MpId2, mpEmptyGuid));
+        _mp.GetTimeSeriesResponse = mpGuid => HourTs(mpGuid == mpWithDataGuid ? tsWithDataGuid : tsEmptyGuid);
+        _ts.GetPointsResponse = (tsGuid, _, _) =>
+            tsGuid == tsWithDataGuid
+                ? (new SettlPointsSummaryDto { Count = 12, From = new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero), To = new DateTimeOffset(2023, 6, 14, 0, 0, 0, TimeSpan.Zero) }, null)
+                : (new SettlPointsSummaryDto { Count = 0 }, null);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: false, skipIfExistingPoints: true);
+
+        Assert.Equal(0, rc);
+        // Only the empty MP should reach POST/EIP.
+        Assert.Single(_ts.PostCalls);
+        Assert.Single(_mp.AddEipCalls);
+        Assert.Equal(mpEmptyGuid, _mp.AddEipCalls[0].MpGuid);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_SkipIfExistingPoints_AsksSettlInPiecesOfAtMostOneYear()
+    {
+        // A three-year window; Settl rejects a points summary longer than one year.
+        var tsGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+        // Points exist only in the last piece.
+        _ts.GetPointsResponse = (_, from, _) => from >= new DateOnly(2022, 6, 1)
+            ? (new SettlPointsSummaryDto { Count = 5, From = new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero), To = new DateTimeOffset(2023, 1, 2, 0, 0, 0, TimeSpan.Zero) }, null)
+            : (new SettlPointsSummaryDto { Count = 0 }, null);
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, skipIfExistingPoints: true);
+
+        Assert.Equal(0, rc);
+        var calls = _ts.GetPointsCalls;
+        Assert.All(calls, c => Assert.True(c.End <= c.Start.AddYears(1)));
+        Assert.Equal(new DateOnly(2020, 6, 15), calls[0].Start);
+        Assert.Equal(new DateOnly(2023, 6, 15), calls[^1].End);
+        for (var i = 1; i < calls.Count; i++)
+            Assert.Equal(calls[i - 1].End, calls[i].Start);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: existing Settl TS data", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ContinueOnError_ProcessesAllAndExitsNonZero()
+    {
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract("acct1", MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        _ts.PostResponse = (_, _) => (false, "boom");
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: true);
+
+        // Non-zero overall exit because both MPs failed...
+        Assert.Equal(1, rc);
+        // ...but --force means MP 2 was still attempted after MP 1 failed.
+        Assert.Equal(2, _mp.GetDeliveryStatusesCalls.Count);
+        Assert.Equal(2, _mp.GetTimeSeriesCalls.Count);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_OlderRelationship_IsIgnored_PostedForTheHolder()
+    {
+        // acct1 held the MP until 2019; acct2 has held it since. Settl delivery starts 2023-06-15.
+        var mpGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract("acct1", MpId1, partStart: new DateTime(2010, 1, 1), partEnd: new DateTime(2019, 12, 31));
+        _xellent.SeedContract("acct2", MpId1, partStart: new DateTime(2020, 1, 1), migratedOn: supplyStart);
+        InSettl((MpId1, mpGuid));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Contains("  customer acct2", logs);
+        Assert.Single(_ts.PostCalls);
+        Assert.Single(_mp.AddEipCalls);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_HeldBySeveralAccountsOnTheDayBeforeDelivery_Fails()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract("acct1", MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(1, rc);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains($"ERROR:   MP {MpId1}: held by several accounts on 2023-06-14 (acct1/acct2)", logs);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NoContractOnTheDayBeforeDelivery_IsSkippedAsMissingInXellent()
+    {
+        // Seen on MP 571313179103608959: contract closed 2026-02-27, Settl delivery from 2026-03-01,
+        // nobody holds the MP on 2026-02-28.
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        var supplyStart = new DateTime(2026, 3, 1);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24);
+        _xellent.SeedContract(Account, MpId1, partStart: new DateTime(2024, 1, 1), partEnd: new DateTime(2026, 2, 27));
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        try
+        {
+            var rc = await BuildRunner(outputDirectory, logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+            Assert.Equal(0, rc);
+            Assert.Empty(_ts.PostCalls);
+            Assert.Contains($"SKIP MP {MpId1}: no Xellent contract on 2026-02-28 (the day before delivery starts in Settl) (parent)", logs);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skip-missing-in-xellent.csv")));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_AmbiguousRevision_SkipsOnlyAffectedMp_WritesCsv_AndContinues()
+    {
+        var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));
+        var ambiguousMpGuid = Guid.NewGuid();
+        var resolvedMpGuid = Guid.NewGuid();
+        var tsGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        var firstStart = new DateTimeOffset(2023, 6, 15, 1, 2, 3, TimeSpan.FromHours(2));
+        var resolvedRevision = new DateTimeOffset(2023, 7, 1, 4, 5, 6, TimeSpan.FromHours(-3));
+        var logs = new List<string>();
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2023, 7, 1));
+        _xellent.SeedContract(Account, MpId2, migratedOn: new DateTime(2023, 7, 1));
+        InSettl((MpId1, ambiguousMpGuid), (MpId2, resolvedMpGuid));
+        _mp.GetDeliveryStatusesResponse = id => id == ambiguousMpGuid
+            ? (
+                new GetDeliveryStatusesResponse
+                {
+                    DeliveryStatuses =
+                    [
+                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = firstStart } },
+                        new DeliveryStatusDto { InDelivery = true, Period = null }
+                    ]
+                },
+                null)
+            : (
+                new GetDeliveryStatusesResponse
+                {
+                    DeliveryStatuses =
+                    [
+                        new DeliveryStatusDto
+                        {
+                            InDelivery = true,
+                            Period = new TimePeriodDto { Start = resolvedRevision }
+                        }
+                    ]
+                },
+                null);
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        try
+        {
+            var rc = await BuildRunner(outputDirectory, logs.Add).RunPostAllAsync("test", dryRun: true,
+                continueOnError: false);
+
+            Assert.Equal(0, rc);
+            Assert.Equal(2, _mp.GetDeliveryStatusesCalls.Count);
+            Assert.Single(_mp.GetTimeSeriesCalls);
+            Assert.Equal(resolvedMpGuid, _mp.GetTimeSeriesCalls[0]);
+            Assert.Contains($"SKIP MP {MpId1}: ambiguous delivery statuses (2 InDelivery=true) (parent)", logs);
+            Assert.Contains($"REVISION MP {MpId2}: {resolvedRevision:O}", logs);
+
+            var csvPath = Path.Combine(outputDirectory, TimeSeriesRunner.AmbiguousRevisionCsvFileName);
+            var lines = File.ReadAllLines(csvPath);
+            Assert.Equal(
+                "\"CustomerNumber\";\"MeteringPointIdentification\";\"Type\";\"SettlMeteringPointId\";\"ActiveInDeliveryCount\";\"ActivePeriodStarts\"",
+                lines[0]);
+            Assert.Equal(
+                $"\"\";\"{MpId1}\";\"Parent\";\"{ambiguousMpGuid}\";\"2\";\"{firstStart:O} | MISSING_PERIOD\"",
+                lines[1]);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_UnresolvedDeliveryBoundary_SkipsOnlyAffectedMp_AndContinues()
+    {
+        var skippedMpGuid = Guid.NewGuid();
+        var resolvedMpGuid = Guid.NewGuid();
+        var tsGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var revision = new DateTimeOffset(supplyStart);
+        var logs = new List<string>();
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2024, 1, 2));
+        _xellent.SeedContract(Account, MpId2, migratedOn: new DateTime(2024, 1, 2));
+        InSettl((MpId1, skippedMpGuid), (MpId2, resolvedMpGuid));
+        _mp.GetDeliveryStatusesResponse = id => id == skippedMpGuid
+            ? (
+                new GetDeliveryStatusesResponse
+                {
+                    DeliveryStatuses =
+                    [
+                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                        new DeliveryStatusDto
+                        {
+                            InDelivery = false,
+                            Period = new TimePeriodDto { Start = revision.AddYears(-1), End = revision.AddDays(-1) }
+                        }
+                    ]
+                },
+                null)
+            : (
+                new GetDeliveryStatusesResponse
+                {
+                    DeliveryStatuses =
+                    [
+                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                    ]
+                },
+                null);
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true,
+            continueOnError: false);
+
+        Assert.Equal(0, rc);
+        Assert.Equal(2, _mp.GetDeliveryStatusesCalls.Count);
+        Assert.Single(_mp.GetTimeSeriesCalls);
+        Assert.Equal(resolvedMpGuid, _mp.GetTimeSeriesCalls[0]);
+        Assert.Contains(
+            logs,
+            line => line.StartsWith($"SKIP MP {MpId1}: delivery boundary unresolved", StringComparison.Ordinal));
+        Assert.Contains($"REVISION MP {MpId2}: {revision:O}", logs);
+    }
+
+    [Theory]
+    [InlineData("zero", false)]
+    [InlineData("zero", true)]
+    [InlineData("malformed", false)]
+    [InlineData("malformed", true)]
+    [InlineData("api", false)]
+    [InlineData("api", true)]
+    public async Task RunPostAllAsync_RevisionError_ObeysFailFastAndContinueOnError(
+        string failureKind,
+        bool continueOnError)
+    {
+        var failingMpGuid = Guid.NewGuid();
+        var succeedingMpGuid = Guid.NewGuid();
+        var tsGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        var goodRevision = new DateTimeOffset(2023, 6, 15, 0, 0, 0, TimeSpan.Zero);
+
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2023, 6, 15));
+        _xellent.SeedContract(Account, MpId2, migratedOn: new DateTime(2023, 6, 15));
+        InSettl((MpId1, failingMpGuid), (MpId2, succeedingMpGuid));
+        _mp.GetDeliveryStatusesResponse = id =>
+        {
+            if (id == succeedingMpGuid)
+            {
+                return (
+                    new GetDeliveryStatusesResponse
+                    {
+                        DeliveryStatuses =
+                        [
+                            new DeliveryStatusDto
+                            {
+                                InDelivery = true,
+                                Period = new TimePeriodDto { Start = goodRevision }
+                            }
+                        ]
+                    },
+                    null);
+            }
+
+            return failureKind switch
+            {
+                "zero" => (new GetDeliveryStatusesResponse { DeliveryStatuses = [] }, null),
+                "malformed" => (
+                    new GetDeliveryStatusesResponse
+                    {
+                        DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = null }]
+                    },
+                    null),
+                "api" => (null, "delivery endpoint failed"),
+                _ => throw new ArgumentOutOfRangeException(nameof(failureKind))
+            };
+        };
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner().RunPostAllAsync("test", dryRun: true,
+            continueOnError: continueOnError);
+
+        Assert.Equal(1, rc);
+        Assert.Equal(continueOnError ? 2 : 1, _mp.GetDeliveryStatusesCalls.Count);
+        Assert.Equal(continueOnError ? 1 : 0, _mp.GetTimeSeriesCalls.Count);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_CompanySwitch_PostsOnlyTheSeriesWhoseAgreementCoversThePeriod()
+    {
+        // Production data for MP 571313113160561482 (2026-09-10):
+        //   Xellent 'meh' series, agreement 2008-12-01 → 2023-12-31, points run on to 2024-01-01 22:00 UTC
+        //   Xellent 'for' series, agreement 2024-01-01 → 2026-02-28, points from 2023-12-31 23:00 UTC
+        //   Settl: InDelivery=false 2023-12-31T23:00Z → 2026-02-28T23:00Z, InDelivery=true from 2026-02-28T23:00Z
+        // The run used to post 'meh' with EIP 2024-01-01 → 2023-12-31, which Settl rejected.
+        var mpGuid = Guid.NewGuid();
+        var tsGuid = Guid.NewGuid();
+        var boundary = new DateTimeOffset(2023, 12, 31, 23, 0, 0, TimeSpan.Zero);
+        var revision = new DateTimeOffset(2026, 2, 28, 23, 0, 0, TimeSpan.Zero);
+        var logs = new List<string>();
+
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 12, 30, 23, 0, 0, DateTimeKind.Utc), hours: 48,
+            companyId: "meh", agreementStart: new DateTime(2008, 12, 1), agreementEnd: new DateTime(2023, 12, 31));
+        _xellent.SeedHourlyTimeSeries(MpId1, boundary.UtcDateTime, hours: 72,
+            companyId: "for", agreementStart: new DateTime(2024, 1, 1), agreementEnd: new DateTime(2026, 2, 28));
+        _xellent.SeedContract(Account, MpId1, companyId: "meh", partStart: new DateTime(2008, 12, 1), partEnd: new DateTime(2023, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2024, 1, 1), partEnd: new DateTime(2026, 2, 28));
+        InSettl((MpId1, mpGuid));
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses =
+                [
+                    new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = boundary, End = revision } },
+                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                ]
+            },
+            null);
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.True(rc == 0, string.Join(Environment.NewLine, logs.Where(l => l.Contains("ERROR") || l.Contains("failed"))));
+        Assert.Contains($"  MP {MpId1}: end=2026-03-01  start=2024-01-01", logs);
+        var post = Assert.Single(_ts.PostCalls);
+        Assert.Equal(72, post.Payload.Points.Count);
+        Assert.Equal(boundary.UtcDateTime, post.Payload.Points[0].Time);
+        Assert.Equal(revision, post.Payload.Revision);
+        var eip = Assert.Single(Assert.Single(_mp.AddEipCalls).Request.Periods);
+        Assert.Equal(new DateOnly(2024, 1, 1), eip.Period!.Start);
+        Assert.Equal(new DateOnly(2026, 3, 1), eip.Period.End);
+    }
+
+    [Theory]
+    [InlineData("ChangeOfSupplier", true)]
+    [InlineData("Na", true)]
+    [InlineData(null, false)]
+    public async Task RunPostAllAsync_NoInDeliveryTrue_FallsBackToCurrentDeliveryStatusStart(string? startReason, bool posts)
+    {
+        // Settl bug (2026-09): delivery from 2026-09-01 (Danish) is not marked InDelivery=true; the list
+        // keeps one open InDelivery=false period from 2023-12-31. The MP's current delivery status still
+        // has the start, with reason ChangeOfSupplier or Na (MP 571313113140168212). null = no current
+        // delivery status at all. Xellent closed the migrated contract on 2026-08-31.
+        var mpGuid = Guid.NewGuid();
+        var cos = new DateTimeOffset(2026, 8, 31, 22, 0, 0, TimeSpan.Zero);
+        var boundary = new DateTimeOffset(2023, 12, 31, 23, 0, 0, TimeSpan.Zero);
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2026, 8, 30, 22, 0, 0, DateTimeKind.Utc), hours: 24);
+        _xellent.SeedContract(Account, MpId1, partStart: new DateTime(2024, 1, 1), migratedOn: new DateTime(2026, 9, 1));
+        InSettl((MpId1, mpGuid));
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = boundary } }]
+            },
+            null);
+        _mp.GetByIdV4Response = _ => new MeteringPointV4Dto
+        {
+            DeliveryStatus = startReason == null
+                ? null
+                : new MeteringPointV4DeliveryStatusDto { Start = cos.UtcDateTime, InDelivery = false, StartReason = startReason }
+        };
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        if (posts)
+        {
+            Assert.Equal(0, rc);
+            Assert.Contains($"  MP {MpId1}: end=2026-09-01  start=2024-01-01", logs);
+            var eip = Assert.Single(Assert.Single(_mp.AddEipCalls).Request.Periods);
+            Assert.Equal((new DateOnly(2024, 1, 1), new DateOnly(2026, 9, 1)), (eip.Period!.Start, eip.Period.End));
+            Assert.Equal(cos, eip.Revision);
+        }
+        else
+        {
+            Assert.Equal(1, rc);
+            Assert.Empty(_ts.PostCalls);
+            Assert.Contains(logs, l => l.Contains("No delivery status has InDelivery=true.") && l.Contains("no current delivery status start"));
+        }
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_BackwardsAgreementAndPreviousOccupant_PostsOnlyTheAccountsOwnPeriod()
+    {
+        // Production data for MP 571313113140168212 (2026-09-11): one hourly series 'for' from 2024-10-07;
+        // agreement 3104600 runs 2026-07-01 → 2026-06-30 (backwards); 486014 lived there 2024-10-07 →
+        // 2025-02-28, account 493867 from 2025-03-01 → 2026-06-30; Settl delivery from 2026-07-01.
+        var supplyStart = new DateTime(2026, 7, 1);
+        InDeliveryFrom(supplyStart);
+        var seriesStart = new DateTime(2024, 10, 6, 22, 0, 0, DateTimeKind.Utc);
+        var hours = (int)(new DateTime(2026, 6, 30, 22, 0, 0, DateTimeKind.Utc) - seriesStart).TotalHours;
+        _xellent.SeedHourlyTimeSeries(MpId1, seriesStart, hours: hours,
+            companyId: "for", agreementStart: new DateTime(2026, 7, 1), agreementEnd: new DateTime(2026, 6, 30));
+        _xellent.SeedContract("486014", MpId1, companyId: "for", partStart: new DateTime(2024, 10, 7), partEnd: new DateTime(2025, 2, 28));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2025, 3, 1), partEnd: new DateTime(2026, 6, 30));
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.True(rc == 0, string.Join(Environment.NewLine, logs.Where(l => l.Contains("ERROR"))));
+        Assert.Contains($"  MP {MpId1}: end=2026-07-01  start=2025-03-01", logs);
+        var points = Assert.Single(_ts.PostCalls).Payload.Points;
+        Assert.Equal(new DateTime(2025, 2, 28, 23, 0, 0, DateTimeKind.Utc), points[0].Time);
+        var eip = Assert.Single(Assert.Single(_mp.AddEipCalls).Request.Periods);
+        Assert.Equal((new DateOnly(2025, 3, 1), new DateOnly(2026, 7, 1)), (eip.Period!.Start, eip.Period.End));
+    }
+
+    [Theory]
+    [InlineData("contract-open")]
+    [InlineData("agreement-status")]
+    [InlineData("agreement-end")]
+    public async Task RunPostAllAsync_NotClosedAsAMigration_FailsTheMeteringPoint(string problem)
+    {
+        // Delivery from 2023-06-15, so the account's contract and its agreement should both end
+        // 2023-06-14 and the agreement should be "Leverance ophørt" (5).
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        switch (problem)
+        {
+            case "contract-open":
+                _xellent.SeedContract(Account, MpId1);
+                break;
+            case "agreement-status":
+                _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart, agreementStatus: 7);
+                break;
+            case "agreement-end":
+                _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart, agreementEnd: new DateTime(2023, 5, 31));
+                break;
+        }
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(1, rc);
+        Assert.Empty(_ts.PostCalls);
+        var expected = problem == "contract-open"
+            ? "contract does not end on 2023-06-14"
+            : "agreement is not \"Leverance ophørt\"";
+        Assert.Contains(logs, l => l.StartsWith($"ERROR:   MP {MpId1} (customer {Account}): {expected}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_WindowEndDiffersFromSettlDeliveryDate_FailsTheMeteringPoint()
+    {
+        // The delivery-status list says delivery started 2023-06-15, but the metering point's current
+        // delivery status (Settl's page) says 2023-07-01.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetByIdV4Response = _ => new MeteringPointV4Dto
+        {
+            DeliveryStatus = new MeteringPointV4DeliveryStatusDto { Start = new DateTime(2023, 6, 30, 22, 0, 0, DateTimeKind.Utc), InDelivery = true }
+        };
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(1, rc);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains($"ERROR:   Window end 2023-06-15 for MP {MpId1} does not match Settl delivery date 2023-07-01.", logs);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_SeriesWithoutAgreement_FailsTheMeteringPoint()
+    {
+        var mpGuid = Guid.NewGuid();
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeriesWithoutAgreement(MpId1, supplyStart.AddYears(-1), hours: 24, companyId: "xxx");
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, mpGuid));
+        var logs = new List<string>();
+
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+
+        Assert.Equal(1, rc);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(logs, l => l.Contains("Xellent series without an agreement period") && l.Contains("/xxx"));
+    }
+}

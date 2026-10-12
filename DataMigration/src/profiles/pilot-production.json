@@ -1,0 +1,24 @@
+{
+  "Name": "pilot-production",
+  "Description": "Private pilot customers for production verification",
+  "StartingPayerId": 10000,
+
+  "Accounts": ["448928","313809","443210","373996","452220","458813","470973","484012","405013","452830"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["448928","313809","443210","373996","452220","458813","470973","484012","405013","452830"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {
+      "Verdo A/S": "E_FinansielPulje_Spot10_VerdoHoldingA/S",
+      "V LadVariP": "V Lade Variabel"
+    },
+    "ProductNum": {}
+  }
+}

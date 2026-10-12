@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.XellentDomain.Domain</PackageId>
+    <Description>Source-agnostic domain model for utility data (Customer, Contract, MeteringPoint, Product, OwnerCluster, CustomerSnapshot).</Description>
+  </PropertyGroup>
+
+</Project>

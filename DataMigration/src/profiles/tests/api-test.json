@@ -1,0 +1,16 @@
+{
+  "Name": "api-test",
+  "Description": "Single account for Settl API migration test",
+  "StartingPayerId": 10000,
+
+  "Accounts": ["457904"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["457904"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  }
+}
