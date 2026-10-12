@@ -76,6 +76,26 @@ public class ReportDeliveryPatternsRunnerTests
         Assert.True(failed.Failed);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Missing_MP_identification_does_not_break_final_export(string? identification)
+    {
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        var id = Guid.NewGuid();
+        client.MarketPoints.Add(new() { Id = id, MeteringPointIdentification = identification!, InDelivery = false });
+        client.DeliveryHistories.Add(id, (History("2026-01-01", "2026-02-01"), null));
+        using var patterns = new StringWriter();
+        using var examples = new StringWriter();
+        using var sources = new StringWriter();
+        using var progress = new StringWriter();
+        Assert.Equal(0, await new ReportDeliveryPatternsRunner(client) { ProgressOutput = progress }
+            .RunAsync("featuretest", false, patterns, examples, sources));
+        Assert.Contains(id.ToString(), patterns.ToString());
+        Assert.Contains(id.ToString(), examples.ToString());
+        Assert.Contains("(missing)", examples.ToString());
+    }
+
     private static string History(string first, string second) =>
         "{\"deliveryStatuses\":[{\"inDelivery\":true,\"period\":{\"start\":\"" + first + "T00:00:00Z\",\"end\":\"" + second + "T00:00:00Z\"},\"startReason\":\"ChangeOfSupplier\",\"stopReason\":\"Na\"},{\"inDelivery\":true,\"period\":{\"start\":\"" + second + "T00:00:00Z\",\"end\":\"9999-12-31T23:59:59Z\"},\"startReason\":\"MoveIn\",\"stopReason\":\"Na\"}]}";
 }

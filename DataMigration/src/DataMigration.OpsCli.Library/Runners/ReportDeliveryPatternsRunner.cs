@@ -62,6 +62,8 @@ public sealed class ReportDeliveryPatternsRunner(ISettlMeteringPointClient clien
             }
             progress.Update(Status());
         }
+        progress.Update(Status(), true);
+        progress.Message($"History reads complete: {completed:N0} / {selected.Count:N0}. Exporting {groups.Count:N0} patterns and examples...");
         await Row(patterns, ["PatternId", "DeliveryPattern", "MPCount", "ExampleMPs"]);
         await Row(examples, ["PatternId", "MeteringPointIdentification", "SettlId", "Environment", "MPInDelivery",
             "CurrentOrNextStartUtc", "CurrentOrNextEndUtc", "CompletedStartUtc", "CompletedEndUtc", "PeriodIndex",
@@ -73,7 +75,8 @@ public sealed class ReportDeliveryPatternsRunner(ISettlMeteringPointClient clien
             ct.ThrowIfCancellationRequested();
             var patternId = $"P{++number:D4}";
             await Row(patterns, [patternId, group.Pattern, group.Count.ToString(CultureInfo.InvariantCulture),
-                string.Join(" | ", group.Examples.Select(e => e.Point.MeteringPointIdentification))]);
+                string.Join(" | ", group.Examples.Select(e => string.IsNullOrWhiteSpace(e.Point.MeteringPointIdentification)
+                    ? $"(missing identification; Settl ID {e.Point.Id})" : e.Point.MeteringPointIdentification))]);
             foreach (var example in group.Examples)
             {
                 sourceLine++;
@@ -89,7 +92,8 @@ public sealed class ReportDeliveryPatternsRunner(ISettlMeteringPointClient clien
                 {
                     var entry = entries[index];
                     var period = Field(entry, "period");
-                    await Row(examples, [patternId, example.Point.MeteringPointIdentification, example.Point.Id.ToString(), environment,
+                    await Row(examples, [patternId, string.IsNullOrWhiteSpace(example.Point.MeteringPointIdentification)
+                            ? "(missing)" : example.Point.MeteringPointIdentification, example.Point.Id.ToString(), environment,
                         example.Point.InDelivery?.ToString().ToLowerInvariant() ?? "(missing)",
                         Date(example.Point.CurrentOrNextDeliveryPeriod?.Start), Date(example.Point.CurrentOrNextDeliveryPeriod?.End),
                         Date(example.Point.MostRecentCompletedDeliveryPeriod?.Start), Date(example.Point.MostRecentCompletedDeliveryPeriod?.End),
@@ -142,7 +146,7 @@ public sealed class ReportDeliveryPatternsRunner(ISettlMeteringPointClient clien
         JsonValueKind.String when !preserveType => value.GetString() ?? "", _ => value.GetRawText()
     };
     private static string Date(DateTimeOffset? value) => value is null || value == default(DateTimeOffset) ? "(missing)" : value.Value.ToUniversalTime().ToString("O");
-    private static Task Row(TextWriter writer, string[] values) => writer.WriteLineAsync(string.Join(';', values.Select(v => "\"" + v.Replace("\"", "\"\"") + "\"")));
+    private static Task Row(TextWriter writer, string?[] values) => writer.WriteLineAsync(string.Join(';', values.Select(v => "\"" + (v ?? "(missing)").Replace("\"", "\"\"") + "\"")));
     internal sealed record History(string Key, string Pattern, List<JsonElement> Entries, string Status, bool Failed);
     private sealed record Example(MeteringPointInfoDto Point, string? Json, History History, DateTimeOffset CapturedAt);
     private sealed class Group(string pattern)

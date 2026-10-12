@@ -2331,6 +2331,7 @@ reportDeliveryStartCommand.SetAction(async (parseResult, cancellationToken) =>
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.Error.WriteLine($"ERROR: {ex.Message}");
+        Console.Error.WriteLine(ex.StackTrace);
         Console.ResetColor();
         return 1;
     }
