@@ -39,6 +39,7 @@ public sealed class ReportDeliveryPatternsRunner(ISettlMeteringPointClient clien
         var completed = 0;
         var errors = 0;
         string Status() => $"Histories: {Volatile.Read(ref completed):N0} / {selected.Count:N0}; patterns: {groups.Count:N0}; read/parse errors: {errors:N0}";
+        progress.StartPhase();
         progress.Update(Status(), true);
         for (var offset = 0; offset < selected.Count; offset += 8)
         {

@@ -503,56 +503,73 @@ Unknown and missing values are retained, and failed/empty/missing histories have
 separate groups. Only example responses are saved; there is no 60k-row MP export.
 Without `--include-history`, the existing delivery-start CSV stays unchanged.
 
-# Duplicate Consumer 2 uncertainty report
+## Duplicate Consumer 2 cleanup rules
 
-`report-consumer2-duplicate` is read-only. It uses the exact private-person/name
-comparison from `fix-consumer2-duplicate`; the correction itself is unchanged.
+`fix-consumer2-duplicate` follows these rules:
 
-```powershell
-dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --output consumer2.csv
-dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --mp-id 571313100000000002 --limit 10 --output consumer2-scoped.csv
-```
+- Checks the **current Consumer version only**, not historical or future versions.
+- Full scans include all delivery states, including false or missing `InDelivery`,
+  and exclude child MPs. `--mp-id` instead scopes the run to the supplied MP
+  identifications or Settl GUIDs.
+- Matches only customer type `Person`, with names present for both consumers.
+  FullName, FirstName and LastName must each match. Detection ignores surrounding
+  whitespace and treats missing name fields as blank; comparison is case-sensitive.
+- Clears Consumer 2's name fields and national identification number. The update
+  operation reads the data again and checks equality before writing; other fields
+  are preserved.
+- `--dry-run` lists matches without changing Settl, using up to eight concurrent
+  reads. Live cleanup updates one MP at a time, then reads it again. A fix is counted
+  only when the duplicate is gone; failed updates or verification are reported as
+  errors.
+- `--limit` caps matching MPs, not the number scanned. The run stops once that
+  number of matches has been reached.
 
-`--mp-id` accepts identifications or Settl GUIDs, separated by spaces or commas.
-Without a filter, the report scans non-child points, including points no longer
-in delivery. `--limit` caps matching duplicates, not scanned points.
-
-Console progress shows the environment and output path, loaded pages/points, and
-checked/total points with duplicates and read errors. While waiting for Settl,
-the current operation and elapsed wait appear every five seconds. Progress uses
-stderr, separately from the CSV. The final summary identifies incomplete reads
-and an early stop caused by `--limit`.
-
-The report and cleanup dry-run read up to eight points concurrently. Results stay
-in the selected order. A small `--limit` reduces the batch size so extra matches
-are not read or reported after reaching the limit. Live cleanup updates remain
-sequential and still verify each change with a fresh read.
-
-For a read-only cleanup preview:
+For a read-only preview:
 
 ```powershell
 dotnet run --project src/DataMigration.OpsCli -- fix-consumer2-duplicate --env featuretest --dry-run
 ```
 
-The cleanup now shows checking totals, matches, errors and five-second wait
-updates in both modes. Dry-run summaries count failed reads, including during
-a full scan. They never call the consumer update operation.
+# Duplicate Consumer 2 version report
 
-Both cleanup modes scan non-child MPs in every delivery state, including false
-and missing `InDelivery` values. Delivery state does not determine eligibility
-for duplicate Consumer 2 correction; the existing private-person/name rule does.
+`report-consumer2-duplicate` is read-only. It checks historical, current and future
+Consumer versions, using the cleanup tool's existing private-person/name rule.
 
-The UTF-8 semicolon CSV contains both consumer names, MP identification, Settl ID,
-resolved environment, current/completed delivery periods, delivery state and
-whole-MP `LastUpdated`, reusing the fields already exported by
-`report-delivery-start`. It never exports CPR values or writes to Settl.
-Inactive/completed delivery produces a possible-change signal; active delivery
-without a completed period means only that these fields show no later-delivery
-signal. Missing evidence is `Unable to determine`. None proves when Settl
-changed relative to migration: delivery dates are effective dates and
-`LastUpdated` does not identify the changed field. Each row explains this uncertainty.
-There is no additional migration-reference input or approval workflow.
+~~~powershell
+dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --output consumer2.csv
+dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --mp-id 571313100000000002 --limit 10 --output consumer2-scoped.csv
+~~~
 
-A failed consumer read or lookup returns exit code 1 and logs that the report is
-incomplete. Missing delivery evidence is retained on the duplicate row with its
-uncertainty reason.
+## Report rules
+
+- Full scans include non-child MPs in every delivery state. An MP appears only
+  when at least one Consumer version has a duplicate; all its versions are shown.
+- ConsumerDates supplies the distinct version starts. The current Consumer is
+  read once, and each other dated version is checked separately. Names belong to
+  that version, not necessarily to today's consumer.
+- Each CSV row connects one Consumer version to one overlapping delivery period.
+  ConsumerStartUtc/ConsumerEndUtc, Duplicate and ConsumerEvidenceStatus describe
+  the version. DeliveryStartAsReturned/DeliveryEndAsReturned, PeriodInDelivery,
+  StartReason/StopReason describe the delivery period. OverlapStartUtc/OverlapEndUtc
+  show their intersection. Original period dates and unknown reason values are retained.
+- Intervals include their start and exclude their end. A missing/null end is open;
+  a returned year-9999 end remains as returned. Dates without an offset in typed
+  Consumer responses are interpreted as UTC.
+- A version with no overlapping period gets a row labelled No overlapping delivery
+  period. Missing, failed or inconsistent history is labelled separately; unread
+  versions have Duplicate=Unknown. Successful findings are retained, but incomplete
+  history or invalid boundaries make the run return exit code 1.
+- Counts distinguish affected MPs from duplicate versions; repeated overlap rows
+  do not increase either count. --limit caps affected MPs and retains all their
+  versions. --mp-id accepts identifications or Settl GUIDs, space/comma separated.
+- Existing InDelivery/current/completed delivery fields and LastUpdated remain
+  current MP-level evidence, not the state of a historical Consumer version.
+  ChangeSignal and UncertaintyReason retain their existing meaning. Effective dates
+  do not prove when Settl changed or whether changes happened after migration.
+- The CSV contains names but no CPR values. No Settl writes are made. Cleanup and
+  its dry-run still check only the current Consumer version.
+
+Progress goes to stderr and shows checked MPs, version reads, affected MPs,
+duplicate versions, errors and phase elapsed time. Up to eight requests run
+concurrently. Waiting for Settl is shown only once a pending batch has waited five
+seconds; fast batches no longer repeatedly display a zero-second wait.

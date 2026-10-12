@@ -19,6 +19,9 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
 
     private MeteringPointV4Dto? _lastRead;
     private readonly object _readLock = new();
+    public Dictionary<(Guid Id, DateTime Date), MeteringPointV4Dto?> DatedConsumerPoints { get; } = [];
+    public Dictionary<Guid, (MeteringPointV3HistoryResponse? History, string? Error)> ConsumerHistories { get; } = [];
+    public List<(Guid Id, DateTime? Date)> ConsumerRequests { get; } = [];
     public Dictionary<Guid, MeteringPointV4Dto?> ConsumerPoints { get; } = [];
     public Dictionary<Guid, (string? Json, string? Error)> DeliveryHistories { get; } = [];
 
@@ -39,6 +42,8 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
         lock (_readLock)
         {
             GetByIdV4Calls++;
+            ConsumerRequests.Add((meteringPointId, effectiveDate));
+            if (effectiveDate is { } date && DatedConsumerPoints.TryGetValue((meteringPointId, date), out var dated)) return (dated, dated is null ? "Fixture failure" : null);
             if (ConsumerPoints.TryGetValue(meteringPointId, out var point)) return (point, null);
             if (Reads.Count > 0) _lastRead = Reads.Dequeue();
             return (_lastRead, null);
@@ -70,11 +75,11 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Task<(MeteringPointCurrentDto? MeteringPoint, string? Error)> GetByIdAsync(Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointCurrentDto?, string?)>>();
     public Task<(string? Json, string? Error)> GetByIdRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(string?, string?)>>();
     public Task<(GetDeliveryStatusesResponse? DeliveryStatuses, string? Error)> GetDeliveryStatusesAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(GetDeliveryStatusesResponse?, string?)>>();
-    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Task.FromResult(DeliveryHistories.GetValueOrDefault(meteringPointId, (null, "Missing fixture")));
+    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Task.FromResult(DeliveryHistories.GetValueOrDefault(meteringPointId, ("{\"deliveryStatuses\":[]}", null)));
     public Task<(bool Success, string? Error)> UpdateAsync(Guid meteringPointId, MeteringPointDto dto, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(BillingMeteringPointInfoDto? MeteringPoint, string? Error)> SearchBillingByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointInfoDto?, string?)>>();
     public Task<(BillingMeteringPointHistoryResponse? History, string? Error)> GetBillingHistoryAsync(Guid billingMeteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointHistoryResponse?, string?)>>();
-    public Task<(MeteringPointV3HistoryResponse? History, string? Error)> GetMarketHistoryAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointV3HistoryResponse?, string?)>>();
+    public Task<(MeteringPointV3HistoryResponse? History, string? Error)> GetMarketHistoryAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Task.FromResult(ConsumerHistories.GetValueOrDefault(meteringPointId, (new MeteringPointV3HistoryResponse { ConsumerDates = [new DateTime(2026, 1, 1)] }, null)));
     public Task<(List<MarketBalanceAreaInfoDto>? Items, string? Error)> FindMarketBalanceAreasAsync(CancellationToken cancellationToken = default) => Unused<Task<(List<MarketBalanceAreaInfoDto>?, string?)>>();
     public Task<(List<MeteringGridAreaInfoDto>? Items, string? Error)> FindMeteringGridAreasAsync(CancellationToken cancellationToken = default) => Unused<Task<(List<MeteringGridAreaInfoDto>?, string?)>>();
     public Task<(List<BillingMeteringPointInfoDto> Items, int TotalCount, string? Error)> FindBillingMeteringPointsAsync(int limit = 100, int skip = 0, CancellationToken cancellationToken = default) => Unused<Task<(List<BillingMeteringPointInfoDto>, int, string?)>>();

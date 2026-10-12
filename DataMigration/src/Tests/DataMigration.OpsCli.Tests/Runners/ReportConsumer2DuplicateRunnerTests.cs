@@ -59,7 +59,7 @@ public class ReportConsumer2DuplicateRunnerTests
             .RunAsync("featuretest", [Guid.NewGuid().ToString()], null, output));
         Assert.Contains("Report incomplete", progress.ToString());
         Assert.Contains("Checked: 1 / 1", progress.ToString());
-        Assert.Contains("read errors: 1", progress.ToString());
+        Assert.Contains("read errors: 2", progress.ToString());
     }
 
     [Theory]
@@ -218,6 +218,7 @@ public class ReportConsumer2DuplicateRunnerTests
         Id = id, Identification = new() { MeteringPointIdentification = "571313100000000002" },
         Consumer = new()
         {
+            Start = new DateTime(2026, 1, 1),
             CustomerType = "Person",
             FirstConsumerParty = new() { Name = new() { FullName = "Test; \"Name\"" } },
             SecondConsumerParty = new() { Name = new() { FullName = " Test; \"Name\" " } }

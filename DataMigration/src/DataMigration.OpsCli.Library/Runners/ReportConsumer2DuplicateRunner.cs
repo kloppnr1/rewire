@@ -16,7 +16,7 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
     {
         if (limit is <= 0) throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be positive.");
         using var progress = new Consumer2ProgressDisplay(ProgressOutput, ProgressInterval);
-        progress.Message("Duplicate Consumer 2 report (up to 8 concurrent reads)");
+        progress.Message("Duplicate Consumer 2 report: all Consumer versions (up to 8 concurrent reads)");
         progress.Message($"Environment: {environment}");
         progress.Message(meteringPointIds.Length == 0
             ? "Scope: all non-child metering points, including inactive"
@@ -77,11 +77,16 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         progress.Message($"Loading complete: {selected.Count:N0} metering points to check.");
         await WriteRow(output, ["MeteringPointIdentification", "SettlId", "Environment", "Consumer1Name",
             "Consumer2Name", "InDelivery", "CurrentOrNextDeliveryStart", "CurrentOrNextDeliveryEnd",
-            "CompletedDeliveryStart", "CompletedDeliveryEnd", "LastUpdatedUtc", "ChangeSignal", "UncertaintyReason"]);
+            "CompletedDeliveryStart", "CompletedDeliveryEnd", "LastUpdatedUtc", "ChangeSignal", "UncertaintyReason",
+            "ConsumerStartUtc", "ConsumerEndUtc", "Duplicate", "ConsumerEvidenceStatus", "DeliveryStartAsReturned",
+            "DeliveryEndAsReturned", "PeriodInDelivery", "StartReason", "StopReason", "OverlapStartUtc", "OverlapEndUtc", "DeliveryEvidenceStatus"]);
         var matched = 0;
         var checkedCount = 0;
+        var versionReads = 0;
+        var duplicateVersions = 0;
         var stoppedAtLimit = false;
-        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Read errors: {errors:N0}";
+        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Versions read: {Volatile.Read(ref versionReads):N0}   Duplicate versions: {duplicateVersions:N0}   Read errors: {errors:N0}";
+        progress.StartPhase();
         progress.Update(CheckStatus(), force: true);
         for (var offset = 0; offset < selected.Count;)
         {
@@ -92,43 +97,60 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
             var batch = selected.GetRange(offset, size);
             var results = await progress.ReadAsync(() => Task.WhenAll(batch.Select(async candidate =>
             {
-                var (mp, error) = await client.GetByIdV4Async(candidate.Id, null, cancellationToken);
+                var versions = await ConsumerVersionEvidence.ReadAsync(client, candidate.Id,
+                    () => Interlocked.Increment(ref versionReads), cancellationToken);
+                var mp = versions.Versions.Select(v => v.Point).FirstOrDefault(p => p is not null);
                 var evidence = candidate.Evidence;
                 string? evidenceError = null;
-                if (mp is not null && FixConsumer2DuplicateRunner.FindDuplicateName(mp) is not null
-                    && evidence is null && mp.Identification?.MeteringPointIdentification is { Length: > 0 } identification)
+                ConsumerDeliveryEvidence? delivery = null;
+                if (versions.Versions.Any(v => v.Duplicate))
                 {
-                    (evidence, evidenceError) = await client.SearchByIdentificationAsync(identification, cancellationToken);
-                    if (evidence?.Id != candidate.Id) { evidence = null; evidenceError = "Market lookup did not return the same Settl ID."; }
+                    if (evidence is null && mp?.Identification?.MeteringPointIdentification is { Length: > 0 } identification)
+                    {
+                        (evidence, evidenceError) = await client.SearchByIdentificationAsync(identification, cancellationToken);
+                        if (evidence?.Id != candidate.Id) { evidence = null; evidenceError = "Market lookup did not return the same Settl ID."; }
+                    }
+                    var (json, error) = await client.GetDeliveryStatusesRawAsync(candidate.Id, cancellationToken);
+                    delivery = ConsumerDeliveryEvidence.Parse(json, error);
                 }
                 Interlocked.Increment(ref checkedCount);
-                return (candidate.Id, Mp: mp, Error: error, Evidence: evidence, EvidenceError: evidenceError);
+                return (candidate.Id, Versions: versions, Evidence: evidence, EvidenceError: evidenceError, Delivery: delivery);
             })), "consumer read / delivery-evidence lookup (up to 8 concurrent)", CheckStatus, cancellationToken);
             offset += size;
             foreach (var result in results)
             {
-                if (result.Mp is not { } mp)
-                {
-                    errors++;
-                    progress.Message($"{result.Id}: consumer read failed ({result.Error}); report incomplete.");
-                    continue;
-                }
-                if (FixConsumer2DuplicateRunner.FindDuplicateName(mp) is null) continue;
+                var messages = result.Versions.Errors.Concat(result.Delivery?.Errors ?? []).ToList();
+                errors += messages.Count;
+                foreach (var message in messages)
+                    progress.Message($"{result.Id}: {message}; report incomplete.");
+                if (!result.Versions.Versions.Any(v => v.Duplicate)) continue;
                 matched++;
+                duplicateVersions += result.Versions.Versions.Count(v => v.Duplicate);
                 var evidence = result.Evidence;
                 var (signal, reason) = Assess(evidence, result.EvidenceError);
-                await WriteRow(output, [mp.Identification?.MeteringPointIdentification ?? "", result.Id.ToString(), environment,
-                    Name(mp.Consumer!.FirstConsumerParty!.Name!), Name(mp.Consumer.SecondConsumerParty!.Name!),
-                    evidence?.InDelivery?.ToString() ?? "", Date(evidence?.CurrentOrNextDeliveryPeriod?.Start),
-                    Date(evidence?.CurrentOrNextDeliveryPeriod?.End), Date(evidence?.MostRecentCompletedDeliveryPeriod?.Start),
-                    Date(evidence?.MostRecentCompletedDeliveryPeriod?.End), Date(evidence?.LastUpdated), signal, reason]);
+                if (result.Versions.Errors.Count > 0) reason += " Consumer history incomplete: " + string.Join(" | ", result.Versions.Errors);
+                foreach (var version in result.Versions.Versions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var mp = version.Point;
+                    foreach (var overlap in result.Delivery!.For(version))
+                        await WriteRow(output, [mp?.Identification?.MeteringPointIdentification ?? evidence?.MeteringPointIdentification ?? "(missing)",
+                            result.Id.ToString(), environment, Name(mp?.Consumer?.FirstConsumerParty?.Name), Name(mp?.Consumer?.SecondConsumerParty?.Name),
+                            evidence?.InDelivery?.ToString() ?? "", Date(evidence?.CurrentOrNextDeliveryPeriod?.Start),
+                            Date(evidence?.CurrentOrNextDeliveryPeriod?.End), Date(evidence?.MostRecentCompletedDeliveryPeriod?.Start),
+                            Date(evidence?.MostRecentCompletedDeliveryPeriod?.End), Date(evidence?.LastUpdated), signal, reason,
+                            VersionDate(version.Start), mp?.Consumer is null ? "(unknown)" : version.End is null ? "(open)" : VersionDate(version.End),
+                            mp?.Consumer is null ? "Unknown" : version.Duplicate ? "Yes" : "No", version.Status,
+                            overlap.Start, overlap.End, overlap.State, overlap.StartReason, overlap.StopReason,
+                            overlap.OverlapStart, overlap.OverlapEnd, overlap.Status]);
+                }
             }
             progress.Update(CheckStatus());
         }
         progress.Update(CheckStatus(), force: true);
         if (stoppedAtLimit) progress.Message($"Stopped at --limit {limit}: remaining metering points were not checked.");
         progress.Message(errors > 0 ? "Report incomplete: some metering points could not be read." : "Complete");
-        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}.");
+        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}; versions read: {versionReads:N0}; duplicate versions: {duplicateVersions:N0}.");
         if (OutputPath is not null) progress.Message($"Report: {OutputPath}");
         progress.Message("No Settl writes.");
         return errors > 0 ? 1 : 0;
@@ -144,7 +166,8 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         return ("No later-delivery signal in these fields", $"Absence of a signal does not prove unchanged Settl data. {timing}");
     }
 
-    private static string Name(MeteringPointV4NameDto name) => name.FullName ?? $"{name.FirstName} {name.LastName}".Trim();
+    private static string Name(MeteringPointV4NameDto? name) => name is null ? "" : name.FullName ?? $"{name.FirstName} {name.LastName}".Trim();
+    private static string VersionDate(DateTime? date) => date is null ? "(missing)" : ConsumerDeliveryEvidence.Utc(date.Value).ToString("O");
     private static string Date(DateTimeOffset? date) => date is null || date == default(DateTimeOffset) ? "" : date.Value.ToUniversalTime().ToString("O");
     private static Task WriteRow(TextWriter output, string[] cells) => output.WriteLineAsync(
         string.Join(';', cells.Select(value => "\"" + value.Replace("\"", "\"\"") + "\"")));

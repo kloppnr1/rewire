@@ -176,6 +176,7 @@ public class Consumer2ConcurrencyTests
         Identification = new() { MeteringPointIdentification = id.ToString() },
         Consumer = new()
         {
+            Start = new DateTime(2026, 1, 1),
             CustomerType = "Person",
             FirstConsumerParty = new() { Name = new() { FullName = "Synthetic" } },
             SecondConsumerParty = new() { Name = new() { FullName = "Synthetic" } }
