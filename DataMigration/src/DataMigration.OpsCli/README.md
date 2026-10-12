@@ -485,7 +485,7 @@ refresh or new-customer creation occurs. HomeCharge UA follow-up flags remain vi
 # Duplicate Consumer 2 uncertainty report
 
 `report-consumer2-duplicate` is read-only. It uses the exact private-person/name
-comparison from `fix-consumer2-duplicate`; the cleanup command is unchanged.
+comparison from `fix-consumer2-duplicate`; the correction itself is unchanged.
 
 ```powershell
 dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --output consumer2.csv
@@ -495,6 +495,27 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
 `--mp-id` accepts identifications or Settl GUIDs, separated by spaces or commas.
 Without a filter, the report scans non-child points, including points no longer
 in delivery. `--limit` caps matching duplicates, not scanned points.
+
+Console progress shows the environment and output path, loaded pages/points, and
+checked/total points with duplicates and read errors. While waiting for Settl,
+the current operation and elapsed wait appear every five seconds. Progress uses
+stderr, separately from the CSV. The final summary identifies incomplete reads
+and an early stop caused by `--limit`.
+
+The report and cleanup dry-run read up to eight points concurrently. Results stay
+in the selected order. A small `--limit` reduces the batch size so extra matches
+are not read or reported after reaching the limit. Live cleanup updates remain
+sequential and still verify each change with a fresh read.
+
+For a read-only cleanup preview:
+
+```powershell
+dotnet run --project src/DataMigration.OpsCli -- fix-consumer2-duplicate --env featuretest --dry-run
+```
+
+The cleanup now shows checking totals, matches, errors and five-second wait
+updates in both modes. Dry-run summaries count failed reads, including during
+a full scan. They never call the consumer update operation.
 
 The UTF-8 semicolon CSV contains both consumer names, MP identification, Settl ID,
 resolved environment, current/completed delivery periods, delivery state and

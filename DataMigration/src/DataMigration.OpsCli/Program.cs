@@ -1335,6 +1335,7 @@ reportConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken)
         if (limit is <= 0) throw new ArgumentException("--limit must be positive.");
         using var output = new StreamWriter(parseResult.GetValue(reportC2OutputOption)!, false, new System.Text.UTF8Encoding(true));
         return await new ReportConsumer2DuplicateRunner(serviceProvider.GetRequiredService<ISettlMeteringPointClient>())
+            { OutputPath = Path.GetFullPath(parseResult.GetValue(reportC2OutputOption)!) }
             .RunAsync(settlEnv, ids, limit, output, cancellationToken);
     }
     catch (Exception ex)

@@ -54,7 +54,12 @@ public class ReportConsumer2DuplicateRunnerTests
     {
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
         using var output = new StringWriter();
-        Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [Guid.NewGuid().ToString()], null, output));
+        using var progress = new StringWriter();
+        Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
+            .RunAsync("featuretest", [Guid.NewGuid().ToString()], null, output));
+        Assert.Contains("Report incomplete", progress.ToString());
+        Assert.Contains("Checked: 1 / 1", progress.ToString());
+        Assert.Contains("read errors: 1", progress.ToString());
     }
 
     [Theory]
@@ -97,7 +102,11 @@ public class ReportConsumer2DuplicateRunnerTests
         foreach (var id in ids) client.MarketPoints.Add(new() { Id = id });
         client.Reads.Enqueue(Duplicate(ids[0]));
         using var output = new StringWriter();
-        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [], 1, output));
+        using var progress = new StringWriter();
+        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
+            .RunAsync("featuretest", [], 1, output));
+        Assert.Contains("Stopped at --limit 1", progress.ToString());
+        Assert.Contains("Checked: 1 / 2", progress.ToString());
         Assert.Equal(1, client.GetByIdV4Calls);
         Assert.Equal(2, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
     }
@@ -115,6 +124,93 @@ public class ReportConsumer2DuplicateRunnerTests
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [id.ToString()], null, output));
         Assert.Single(output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Theory]
+    [InlineData("market-list page")]
+    [InlineData("consumer read")]
+    [InlineData("metering-point lookup")]
+    [InlineData("delivery-evidence lookup")]
+    public async Task Progress_is_visible_while_a_Settl_request_is_still_pending(string operation)
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.MarketPoints.Add(new() { Id = id, MeteringPointIdentification = "571313100000000002", InDelivery = true });
+        client.Reads.Enqueue(Duplicate(id));
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task Wait(CancellationToken ct) => release.Task.WaitAsync(ct);
+        string[] scope = [];
+        switch (operation)
+        {
+            case "market-list page": client.BeforeMarketRead = Wait; break;
+            case "consumer read": client.BeforeConsumerRead = Wait; break;
+            case "metering-point lookup": client.BeforeLookup = Wait; scope = ["571313100000000002"]; break;
+            case "delivery-evidence lookup": client.BeforeLookup = Wait; scope = [id.ToString()]; break;
+        }
+        using var output = new StringWriter();
+        using var progress = new WaitingProgressWriter();
+        var run = new ReportConsumer2DuplicateRunner(client)
+        {
+            ProgressOutput = progress,
+            ProgressInterval = TimeSpan.FromMilliseconds(20),
+            OutputPath = "consumer2.csv"
+        }.RunAsync("featuretest", scope, null, output);
+        try
+        {
+            var waiting = await progress.Waiting.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(run.IsCompleted);
+            Assert.Contains(operation, waiting);
+        }
+        finally
+        {
+            release.TrySetResult();
+            Assert.Equal(0, await run.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        Assert.Contains("Environment: featuretest", progress.ToString());
+        Assert.Contains("Checked: 1 / 1", progress.ToString());
+        Assert.Contains("duplicates: 1; read errors: 0", progress.ToString());
+        Assert.Contains("Report: consumer2.csv", progress.ToString());
+        Assert.DoesNotContain("Waiting for Settl", output.ToString());
+        Assert.DoesNotContain("Checking consumers", output.ToString());
+        Assert.Equal(0, client.BlankCalls);
+    }
+
+    [Fact]
+    public async Task Cancellation_stops_a_pending_read_and_its_progress_loop()
+    {
+        var client = new StubFixConsumer2DuplicateMeteringPointClient
+        {
+            BeforeConsumerRead = ct => Task.Delay(Timeout.InfiniteTimeSpan, ct)
+        };
+        using var cancellation = new CancellationTokenSource();
+        using var output = new StringWriter();
+        using var progress = new WaitingProgressWriter();
+        var run = new ReportConsumer2DuplicateRunner(client)
+        {
+            ProgressOutput = progress,
+            ProgressInterval = TimeSpan.FromMilliseconds(20)
+        }.RunAsync("featuretest", [Guid.NewGuid().ToString()], null, output, cancellation.Token);
+        try
+        {
+            await progress.Waiting.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        Assert.DoesNotContain("Complete", progress.ToString());
+        Assert.Equal(0, client.BlankCalls);
+    }
+
+    private sealed class WaitingProgressWriter : StringWriter
+    {
+        public TaskCompletionSource<string> Waiting { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override void WriteLine(string? value)
+        {
+            base.WriteLine(value);
+            if (value?.Contains("Waiting for Settl response", StringComparison.Ordinal) == true) Waiting.TrySetResult(value);
+        }
     }
 
     private static MeteringPointV4Dto Duplicate(Guid id) => new()

@@ -18,6 +18,8 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Queue<MeteringPointV4Dto?> Reads { get; } = new();
 
     private MeteringPointV4Dto? _lastRead;
+    private readonly object _readLock = new();
+    public Dictionary<Guid, MeteringPointV4Dto?> ConsumerPoints { get; } = [];
 
     /// <summary>What <see cref="BlankDuplicateSecondConsumerNameAsync"/> reports. Defaults to success.</summary>
     public (bool Success, string? Error) BlankResult { get; set; } = (true, null);
@@ -25,14 +27,21 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public int GetByIdV4Calls { get; private set; }
     public int BlankCalls { get; private set; }
     public List<MeteringPointInfoDto> MarketPoints { get; } = [];
+    public Func<CancellationToken, Task>? BeforeConsumerRead { get; set; }
+    public Func<CancellationToken, Task>? BeforeMarketRead { get; set; }
+    public Func<CancellationToken, Task>? BeforeLookup { get; set; }
 
-    public Task<(MeteringPointV4Dto? MeteringPoint, string? Error)> GetByIdV4Async(
+    public async Task<(MeteringPointV4Dto? MeteringPoint, string? Error)> GetByIdV4Async(
         Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default)
     {
-        GetByIdV4Calls++;
-        if (Reads.Count > 0)
-            _lastRead = Reads.Dequeue();
-        return Task.FromResult<(MeteringPointV4Dto?, string?)>((_lastRead, null));
+        if (BeforeConsumerRead is not null) await BeforeConsumerRead(cancellationToken);
+        lock (_readLock)
+        {
+            GetByIdV4Calls++;
+            if (ConsumerPoints.TryGetValue(meteringPointId, out var point)) return (point, null);
+            if (Reads.Count > 0) _lastRead = Reads.Dequeue();
+            return (_lastRead, null);
+        }
     }
 
     public Task<(bool Success, string? Error)> BlankDuplicateSecondConsumerNameAsync(
@@ -47,7 +56,11 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public void SetDeliveryCategory(string deliveryCategory) => throw new NotImplementedException();
     public Task<(bool Success, string? Error)> CreateAsync(CreateMeteringPointsRequest request, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(bool Success, string? Error)> CreateV4Async(CreateMeteringPointsV4Request request, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
-    public Task<(MeteringPointInfoDto? MeteringPoint, string? Error)> SearchByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default) => Task.FromResult<(MeteringPointInfoDto?, string?)>((MarketPoints.FirstOrDefault(mp => mp.MeteringPointIdentification == meteringPointIdentification), null));
+    public async Task<(MeteringPointInfoDto? MeteringPoint, string? Error)> SearchByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default)
+    {
+        if (BeforeLookup is not null) await BeforeLookup(cancellationToken);
+        return (MarketPoints.FirstOrDefault(mp => mp.MeteringPointIdentification == meteringPointIdentification), null);
+    }
     public Task<(bool Success, string? Error)> CreateWaterAsync(CreateWaterMeteringPointRequest request, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(MeteringPointInfoDto? MeteringPoint, string? Error)> SearchWaterByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointInfoDto?, string?)>>();
     public Task<(MeteringPointInfoDto? MeteringPoint, string? Error)> GetWaterByIdAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointInfoDto?, string?)>>();
@@ -64,7 +77,11 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Task<(List<MarketBalanceAreaInfoDto>? Items, string? Error)> FindMarketBalanceAreasAsync(CancellationToken cancellationToken = default) => Unused<Task<(List<MarketBalanceAreaInfoDto>?, string?)>>();
     public Task<(List<MeteringGridAreaInfoDto>? Items, string? Error)> FindMeteringGridAreasAsync(CancellationToken cancellationToken = default) => Unused<Task<(List<MeteringGridAreaInfoDto>?, string?)>>();
     public Task<(List<BillingMeteringPointInfoDto> Items, int TotalCount, string? Error)> FindBillingMeteringPointsAsync(int limit = 100, int skip = 0, CancellationToken cancellationToken = default) => Unused<Task<(List<BillingMeteringPointInfoDto>, int, string?)>>();
-    public Task<(List<MeteringPointInfoDto> Items, int TotalCount, string? Error)> FindMeteringPointsAsync(int limit = 100, int skip = 0, bool doCount = false, CancellationToken cancellationToken = default) => Task.FromResult<(List<MeteringPointInfoDto>, int, string?)>((MarketPoints.Skip(skip).Take(limit).ToList(), MarketPoints.Count, null));
+    public async Task<(List<MeteringPointInfoDto> Items, int TotalCount, string? Error)> FindMeteringPointsAsync(int limit = 100, int skip = 0, bool doCount = false, CancellationToken cancellationToken = default)
+    {
+        if (BeforeMarketRead is not null) await BeforeMarketRead(cancellationToken);
+        return (MarketPoints.Skip(skip).Take(limit).ToList(), MarketPoints.Count, null);
+    }
     public Task<(List<MeteringPointInfoDto> Items, string? Error)> FindWaterMeteringPointsAsync(CancellationToken cancellationToken = default) => Unused<Task<(List<MeteringPointInfoDto>, string?)>>();
     public Task<(bool Success, string? Error)> UpdateAnnualConsumptionsAsync(Guid meteringPointId, double annualVolumeKwh, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(bool Success, string? Error)> UpdateEstimatedAnnualVolumeAsync(Guid meteringPointId, double annualVolumeKwh, DateOnly effectiveStart, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
