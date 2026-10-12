@@ -6,7 +6,8 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
-| 2026-10-12 | `report-consumer2-duplicate` | Detect duplicates across all Consumer versions; show all versions of affected MPs with overlapping delivery periods, separate MP/version counts and incomplete-history warnings. Shared report progress shows phase elapsed time and delays waiting labels until a batch is slow. | *(this commit)* |
+| 2026-10-12 | `report-consumer2-duplicate` | Export MPs with incomplete Consumer evidence even when no duplicate was detected; retain warnings and unknown results without increasing duplicate counts. | *(this commit)* |
+| 2026-10-12 | `report-consumer2-duplicate` | Detect duplicates across all Consumer versions; show all versions of affected MPs with overlapping delivery periods, separate MP/version counts and incomplete-history warnings. Shared report progress shows phase elapsed time and delays waiting labels until a batch is slow. | 85d1a900 |
 | 2026-10-12 | `report-delivery-start --include-history` | Retain missing MP identifications with Settl-ID example references instead of failing final CSV export; show the completed history-read count before exporting. | ef341c14 |
 | 2026-10-12 | `report-delivery-start --include-history` | Group all delivery-state/reason sequences with MP counts and three full-period/source-response examples per pattern; preserve missing/unknown states and include inactive MPs, with eight concurrent read-only requests. | 8b9ac763 |
 | 2026-10-12 | `fix-consumer2-duplicate` | Include non-child MPs with false or missing InDelivery in both dry-run and live cleanup scans; preserve duplicate detection and sequential updates. | 8b9ac763 |

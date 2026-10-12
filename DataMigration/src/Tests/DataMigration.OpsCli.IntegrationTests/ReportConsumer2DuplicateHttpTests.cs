@@ -101,13 +101,32 @@ public class ReportConsumer2DuplicateHttpTests
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
     }
 
+    [Fact]
+    public async Task Missing_consumer_start_is_exported_with_real_http_mapping_without_duplicate_count()
+    {
+        var id = Guid.NewGuid();
+        using var handler = new ReportHandler(id, missingConsumer: true);
+        using var http = new HttpClient(handler);
+        var client = new SettlMeteringPointClient(http, new OfflineAuth(),
+            Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<SettlMeteringPointClient>.Instance);
+        using var csv = new StringWriter();
+        using var progress = new StringWriter();
+        Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
+            .RunAsync("featuretest", [], null, csv));
+        Assert.Contains(id.ToString(), csv.ToString());
+        Assert.Contains("Consumer start missing or invalid.", csv.ToString());
+        Assert.Contains("duplicates: 0", progress.ToString());
+        Assert.DoesNotContain(handler.Requests, r => r.Path.EndsWith("/deliveryStatuses"));
+        Assert.All(handler.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+    }
+
     private sealed class OfflineAuth : ISettlAuthService
     {
         public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult("fixture");
         public void InvalidateToken() { }
     }
 
-    private sealed class ReportHandler(Guid id, bool inDelivery = false, bool missingIdentification = false, bool versioned = false) : HttpMessageHandler
+    private sealed class ReportHandler(Guid id, bool inDelivery = false, bool missingIdentification = false, bool versioned = false, bool missingConsumer = false) : HttpMessageHandler
     {
         public List<(HttpMethod Method, string Path)> Requests { get; } = [];
         public List<Uri> Uris { get; } = [];
@@ -146,6 +165,10 @@ public class ReportConsumer2DuplicateHttpTests
                     });
                 }
             }
+            if (missingConsumer && request.RequestUri.AbsolutePath.Contains("/v4/", StringComparison.Ordinal))
+                json = """{"id":"ID"}""";
+            if (missingConsumer && request.RequestUri.AbsolutePath.EndsWith("/history", StringComparison.Ordinal))
+                json = """{"consumerDates":[]}""";
             json = json.Replace("ID", id.ToString());
             if (missingIdentification) json = json.Replace("\"meteringPointIdentification\":\"571313100000000002\"", "\"meteringPointIdentification\":null");
             if (inDelivery) json = json.Replace("\"inDelivery\":false", "\"inDelivery\":true");

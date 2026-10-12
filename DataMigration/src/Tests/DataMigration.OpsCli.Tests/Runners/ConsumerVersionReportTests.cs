@@ -126,6 +126,39 @@ public class ConsumerVersionReportTests
         Assert.Equal(3, history.For(version).Count());
     }
 
+    [Fact]
+    public async Task Missing_consumer_start_is_exported_even_without_duplicate_and_does_not_count_as_match()
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.MarketPoints.Add(new() { Id = id, MeteringPointIdentification = "fixture" });
+        client.ConsumerPoints[id] = new() { Id = id };
+        client.ConsumerHistories[id] = (new() { ConsumerDates = [] }, null);
+        using var csv = new StringWriter();
+        using var progress = new StringWriter();
+        Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
+            .RunAsync("featuretest", [], null, csv));
+        Assert.Contains(id.ToString(), csv.ToString());
+        Assert.Contains("Consumer start missing or invalid.", csv.ToString());
+        Assert.Contains("duplicates: 0", progress.ToString());
+        Assert.Contains("duplicate versions: 0", progress.ToString());
+        Assert.Equal(0, client.BlankCalls);
+    }
+
+    [Fact]
+    public async Task Entirely_unreadable_mp_is_exported_with_unknown_duplicate_result()
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.ConsumerHistories[id] = (null, "Fixture failure");
+        using var csv = new StringWriter();
+        Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
+            .RunAsync("featuretest", [id.ToString()], null, csv));
+        Assert.Contains(id.ToString(), csv.ToString());
+        Assert.Contains("Consumer data unavailable", csv.ToString());
+        Assert.Contains("Unknown", csv.ToString());
+    }
+
     private static StubFixConsumer2DuplicateMeteringPointClient Fixture(Guid id)
     {
         var client = new StubFixConsumer2DuplicateMeteringPointClient();

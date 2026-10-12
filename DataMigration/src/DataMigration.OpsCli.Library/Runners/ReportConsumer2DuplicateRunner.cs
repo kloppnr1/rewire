@@ -123,17 +123,24 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 errors += messages.Count;
                 foreach (var message in messages)
                     progress.Message($"{result.Id}: {message}; report incomplete.");
-                if (!result.Versions.Versions.Any(v => v.Duplicate)) continue;
-                matched++;
-                duplicateVersions += result.Versions.Versions.Count(v => v.Duplicate);
+                var affected = result.Versions.Versions.Any(v => v.Duplicate);
+                if (!affected && messages.Count == 0) continue;
+                if (affected)
+                {
+                    matched++;
+                    duplicateVersions += result.Versions.Versions.Count(v => v.Duplicate);
+                }
                 var evidence = result.Evidence;
                 var (signal, reason) = Assess(evidence, result.EvidenceError);
                 if (result.Versions.Errors.Count > 0) reason += " Consumer history incomplete: " + string.Join(" | ", result.Versions.Errors);
-                foreach (var version in result.Versions.Versions)
+                var versions = result.Versions.Versions.Count > 0 ? result.Versions.Versions
+                    : [new ConsumerVersion(null, null, "Consumer data unavailable: " + string.Join(" | ", result.Versions.Errors))];
+                var delivery = result.Delivery ?? new ConsumerDeliveryEvidence([], ["Delivery history not requested: duplicate detection incomplete."]);
+                foreach (var version in versions)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var mp = version.Point;
-                    foreach (var overlap in result.Delivery!.For(version))
+                    foreach (var overlap in delivery.For(version))
                         await WriteRow(output, [mp?.Identification?.MeteringPointIdentification ?? evidence?.MeteringPointIdentification ?? "(missing)",
                             result.Id.ToString(), environment, Name(mp?.Consumer?.FirstConsumerParty?.Name), Name(mp?.Consumer?.SecondConsumerParty?.Name),
                             evidence?.InDelivery?.ToString() ?? "", Date(evidence?.CurrentOrNextDeliveryPeriod?.Start),

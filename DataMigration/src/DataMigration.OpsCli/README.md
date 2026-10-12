@@ -544,6 +544,9 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
 
 - Full scans include non-child MPs in every delivery state. An MP appears only
   when at least one Consumer version has a duplicate; all its versions are shown.
+  MPs with incomplete Consumer evidence also appear, even without a detected
+  duplicate, with the warning in ConsumerEvidenceStatus/UncertaintyReason. These
+  evidence rows do not increase the affected-MP or duplicate-version counts.
 - ConsumerDates supplies the distinct version starts. The current Consumer is
   read once, and each other dated version is checked separately. Names belong to
   that version, not necessarily to today's consumer.
