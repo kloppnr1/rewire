@@ -1318,6 +1318,33 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
 
 rootCommand.Subcommands.Add(fixConsumer2DuplicateCommand);
 
+// Separate read-only report; the existing cleanup options and behaviour are unchanged.
+var reportC2MpOption = new Option<string[]>("--mp-id") { Description = "Metering point identifications or Settl GUIDs; default: all non-child points, including inactive points", AllowMultipleArgumentsPerToken = true };
+var reportC2LimitOption = new Option<int?>("--limit") { Description = "Maximum duplicate candidates to report (positive)" };
+var reportC2OutputOption = new Option<string>("--output") { Description = "CSV output path", Required = true };
+var reportC2EnvOption = new Option<string>("--env") { Description = "Target environment" };
+var reportConsumer2DuplicateCommand = new Command("report-consumer2-duplicate", "Read-only duplicate Consumer 2 report with existing delivery change signals and uncertainty")
+{ reportC2MpOption, reportC2LimitOption, reportC2OutputOption, reportC2EnvOption };
+reportConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    try
+    {
+        var ids = (parseResult.GetValue(reportC2MpOption) ?? [])
+            .SelectMany(value => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToArray();
+        var limit = parseResult.GetValue(reportC2LimitOption);
+        if (limit is <= 0) throw new ArgumentException("--limit must be positive.");
+        using var output = new StreamWriter(parseResult.GetValue(reportC2OutputOption)!, false, new System.Text.UTF8Encoding(true));
+        return await new ReportConsumer2DuplicateRunner(serviceProvider.GetRequiredService<ISettlMeteringPointClient>())
+            .RunAsync(settlEnv, ids, limit, output, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR: {ex.Message}");
+        return 1;
+    }
+});
+rootCommand.Subcommands.Add(reportConsumer2DuplicateCommand);
+
 // === report command ===
 var reportProfileArgument = new Argument<string>("profile") { Description = "Profile name" };
 var reportOutputOption = new Option<string?>("--output") { Description = "Output directory for report.html (default: output/{profile})" };

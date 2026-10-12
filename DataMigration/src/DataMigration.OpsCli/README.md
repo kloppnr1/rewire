@@ -481,3 +481,32 @@ holds the package; `--draft-imports` still provides only supported rows for revi
 Both existing CSV reports state whether the check was enabled and show the event,
 original periods and resulting periods. Only saved snapshots are read; no production
 refresh or new-customer creation occurs. HomeCharge UA follow-up flags remain visible.
+
+# Duplicate Consumer 2 uncertainty report
+
+`report-consumer2-duplicate` is read-only. It uses the exact private-person/name
+comparison from `fix-consumer2-duplicate`; the cleanup command is unchanged.
+
+```powershell
+dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --output consumer2.csv
+dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --mp-id 571313100000000002 --limit 10 --output consumer2-scoped.csv
+```
+
+`--mp-id` accepts identifications or Settl GUIDs, separated by spaces or commas.
+Without a filter, the report scans non-child points, including points no longer
+in delivery. `--limit` caps matching duplicates, not scanned points.
+
+The UTF-8 semicolon CSV contains both consumer names, MP identification, Settl ID,
+resolved environment, current/completed delivery periods, delivery state and
+whole-MP `LastUpdated`, reusing the fields already exported by
+`report-delivery-start`. It never exports CPR values or writes to Settl.
+Inactive/completed delivery produces a possible-change signal; active delivery
+without a completed period means only that these fields show no later-delivery
+signal. Missing evidence is `Unable to determine`. None proves when Settl
+changed relative to migration: delivery dates are effective dates and
+`LastUpdated` does not identify the changed field. Each row explains this uncertainty.
+There is no additional migration-reference input or approval workflow.
+
+A failed consumer read or lookup returns exit code 1 and logs that the report is
+incomplete. Missing delivery evidence is retained on the duplicate row with its
+uncertainty reason.

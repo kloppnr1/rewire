@@ -6,6 +6,7 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
+| 2026-10-12 | `report-consumer2-duplicate` | Add a read-only duplicate Consumer 2 CSV using existing detection and market delivery signals; include inactive candidates and explain uncertainty about post-migration changes without altering cleanup (US 45871). | *(this commit)* |
 | 2026-10-07 | `export-settlement-config` | Move named customer exceptions into validated customerExceptions config: exact names or one trailing wildcard, exact/longest precedence, canonical segment/schedule targets and no hidden Hybel defaults. CLI config supplies the four Hybel rules; source blockers and original-value evidence remain, with matched pattern/mode. | This commit |
 | 2026-10-07 | `export-settlement-config` | Match Hybel Nord/Sjælland/Syd/Midt names by base or whitespace-delimited suffix, including names without A/S; reject joined regions such as Hybel Sydvest. Preserve source blockers and record HybelCustomerNamePrefix in exception evidence. | This commit |
 | 2026-10-07 | `export-settlement-config` | List exports group exact selected points under customerResults, compare individual mapped segment/schedule values without customer winner rules, and retain conflicting values and cause IDs. Four exact Hybel customer names receive Partner/HalvårBagud with original-value exception evidence; source failures remain blocking. Legacy exports retain coverage. | This commit |

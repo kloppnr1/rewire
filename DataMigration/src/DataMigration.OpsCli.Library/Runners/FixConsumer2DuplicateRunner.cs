@@ -195,7 +195,7 @@ public class FixConsumer2DuplicateRunner
     /// (<c>CustomerType == "Person"</c>) with a second party whose name deep-equals the first
     /// party's (FullName + FirstName + LastName, blank/whitespace-normalized) are candidates.
     /// </summary>
-    private static string? FindDuplicateName(MeteringPointV4Dto mp)
+    internal static string? FindDuplicateName(MeteringPointV4Dto mp)
     {
         var consumer = mp.Consumer;
         if (consumer == null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal))
