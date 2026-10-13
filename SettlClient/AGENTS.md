@@ -2,7 +2,7 @@
 
 Follow the [workspace instructions](../AGENTS.md), especially production safety,
 verification, `develop` commits, and the CI-only producer-to-consumer package flow.
-Leave changes uncommitted unless the user asks for a commit.
+When the user is working in this repo, commit each finished change to `develop` as soon as its checks pass. Push only when the user asks.
 
 Read [the repo knowledge entry point](docs/ai/start.md) before changing API routes,
 request models, migration translators, or public interfaces. Keep shared contract

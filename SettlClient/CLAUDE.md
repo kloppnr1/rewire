@@ -11,30 +11,60 @@ CustomerSupport:
   orchestrator (`SettlClient`, translators under `Internal/`).
 
 See the workspace CLAUDE.md (`source/repos`) for the full repo map, NuGet floating-ref
-flow, branch standard (develop→master), and verification rules. This file holds the
-**Settl API contract knowledge** that is this repo's responsibility to keep accurate.
+flow, production safety and verification rules. This file holds the traps; the full
+route and body reference lives in the docs below.
+
+## Read first
+
+Read `docs/ai/start.md` before changing API routes, request models, migration translators
+or public interfaces. It is the knowledge entry point and links to the source for each
+claim. Put new contract knowledge there, not here.
+
+## Working rules
+
+- Commit to `develop`, never `master`. When the user is working in this repo, commit each finished change as soon as its gates are green; push only when she asks. Expert agents still do not commit.
+- Code changes: `dotnet build NewSettlement.SettlClient.slnx`, then
+  `dotnet test src/Tests/DataMigration.SettlClient.Tests/DataMigration.SettlClient.Tests.csproj`.
+  Docs-only changes need link and source checks, not a build.
+- This repo is a library, not a CLI host. A consumer can only be verified after CI has
+  published the package. Never pack locally to test cross-repo.
+- Read versions from `Directory.Build.props` and the csproj package references, not from
+  prose. Own packages are in the 0.7.x series; both XellentDomain references float on
+  `0.8.*-*`.
+- A method that compiles is not a verified runtime contract. Say so when a route or body
+  has not been checked against Settl.
 
 ## Settl API versioning per entity — use the right version per operation
 
-The Settl Billing API is **not** uniformly versioned. Each entity mixes versions:
+Versions belong to operations, not entities. Customer and Payer are on the Billing base
+URL; the metering-point master is on the **Market** base URL (Billing has its own
+`/api/v1/meteringPoints` for billing configuration).
 
 | Entity | Create | Read / search / list | Update (core) |
 |--------|--------|----------------------|---------------|
 | Customer | `POST /api/v2/customers` | `GET /api/v2/customers/{id}` + `/api/v2/customers?...` | **`PUT /api/v3/customers/{id}`** |
 | Payer | `POST /api/v1/Payers` | `GET /api/v1/Payers/{id}` | `PUT /api/v1/Payers/{id}` |
-| MeteringPoint (master) | **`POST /api/v4/meteringPoints`** | `GET /api/v3/meteringPoints/{id}` | `PUT /api/v3/meteringPoints/{id}` |
+| MeteringPoint (master) | **`POST /api/v4/meteringPoints`** | `GET /api/v3/meteringPoints/{id}` | **Open — see below** |
+
+**Metering-point master update is unresolved.** `UpdateAsync` and
+`UpdateEstimatedAnnualVolumeAsync` still send a wrapped `PUT /api/v3/meteringPoints/{id}`.
+A later live check (featuretest, 2026-09-09, recorded in `BlankDuplicateSecondConsumerNameAsync`)
+found that route has GET only, and that method uses the bulk `PATCH /api/v3/meteringPoints`
+instead. Settle which route Settl supports for the exact operation before adding or running
+a metering-point mutation. Do not copy the PUT pattern.
 
 **The metering-point trap:** the v3 create route is **gone** — `POST /api/v3/meteringPoints` answers
-**404** (it briefly answered 405 while Settl was migrating). Create must go to v4, while read and
-master-update stay on v3. Verified against featuretest 2026-08-12: `POST /api/v4/meteringPoints`
+**404** (it briefly answered 405 while Settl was migrating). Create must go to v4 (`CreateV4Async`;
+the old `CreateAsync` is still on the interface but dead), while read stays on v3. Verified against featuretest 2026-08-12: `POST /api/v4/meteringPoints`
 returns 201 on an empty list, and `GET /api/v4/meteringPoints` is 404 — v4 has only POST and
 `/{id}`. The v4 create body differs from v3
 in exactly two places: the list is called `MeteringPointCreateObjectDtos` (not `MeteringPoints`), and
 `InstallationAddress` is called `InstallationAddressCreateObject`. That address section carries Settl's
 DAR switches: `EnrichAddress` (Settl derives municipality code, street code and DAR identifier from the
 rest of the address) and `SkipAddressValidation` (create even when no DAR entry matches exactly).
-Validation is enabled on featuretest only, not in production. Both are per-run settings on
-`SettlMigrationContext` — default enrich on, skip off.
+Both are per-run settings on `SettlMigrationContext` — default enrich on, skip off. Which
+environment validates addresses today is not known; check before relying on it. Water uses
+its own create/search methods, not the v4 electricity body.
 
 **The customer trap:** create/read/search are **v2**, but the core UPDATE is **v3**. A
 read-modify-write update must read the v3 master (`GetRawByIdV3Async`) and PUT v3
@@ -55,10 +85,13 @@ pattern (verified non-destructive on featuretest):
 **Body shape asymmetry** (mirrors the create asymmetry):
 - **Customer = WRAPPED** — `{ Customer: {<full v3 customer>}, TransactionId }`.
 - **Payer = FLAT** — entity fields at top level (incl. `CustomerId` → link preserved)
-  + `TransactionId`.
-- **MeteringPoint = WRAPPED** — `{ MeteringPoint: {...}, TransactionId }`.
+  + `TransactionId`. A wrapped `{ Payer: ... }` body can destroy the customer link.
+  For billing changes use `UpdatePayerBillingAsync`; the typed DTOs omit some billing
+  fields, so a typed read/write loses data.
+- **MeteringPoint** — the code sends `{ MeteringPoint: {...}, TransactionId }`, but the
+  route itself is in doubt (see the open point above). Not a verified pattern.
 
-Used by DataMigration's `reconcile-apply` core writers and `UpdateEstimatedAnnualVolumeAsync`.
+Used by DataMigration's `reconcile-apply` core writers.
 
 ## Customer body: v2 ≡ v3 except one field (swagger-verified 2026-06-15)
 
@@ -112,3 +145,4 @@ the same associations indefinitely.
 
 Swagger source for the contract facts above: `docs/settl-openapi/2026-06-15/`
 (`Billing-Internal.json`, `Market-Internal.json`) — a point-in-time Settl OpenAPI snapshot.
+It is not proof of today's endpoints.
