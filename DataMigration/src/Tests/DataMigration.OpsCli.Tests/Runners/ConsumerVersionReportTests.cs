@@ -24,8 +24,8 @@ public class ConsumerVersionReportTests
         Assert.Equal(3, rows.Length);
         Assert.Equal(3, client.GetByIdV4Calls);
         Assert.Equal(1, client.ConsumerRequests.Count(r => r.Date is null));
-        Assert.Contains("2026-01-01T00:00:00.0000000+00:00", rows[1]);
-        Assert.Contains("2026-12-01T00:00:00.0000000+00:00", rows[2]);
+        Assert.Contains("2026-01-01T01:00:00.0000000+01:00", rows[1]);
+        Assert.Contains("2026-12-01T01:00:00.0000000+01:00", rows[2]);
         Assert.Equal("1", Cells(rows[1])[8]);
         Assert.Equal("3", Cells(rows[2])[8]);
         Assert.Contains("duplicates: 1; read errors: 0; versions read: 3; duplicate versions: 2", progress.ToString());
@@ -180,8 +180,8 @@ public class ConsumerVersionReportTests
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
         Assert.All(rows, row => Assert.Equal(17, row.Length));
         Assert.Equal(new[] { "MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
-            "DeliveryStartUtc", "DeliveryEndUtc", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
-            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartUtc", "ConsumerEndUtc",
+            "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
+            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
             "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning" }, rows[0]);
         Assert.Equal(4, rows.Length);
         Assert.Equal("0", rows[1][8]);
@@ -190,8 +190,8 @@ public class ConsumerVersionReportTests
         Assert.Equal("Yes", rows[2][14]);
         Assert.Empty(rows[2][15]);
         Assert.Equal("0", rows[3][8]);
-        Assert.Equal("2025-12-01T00:00:00.0000000+00:00", rows[1][3]);
-        Assert.Equal("2026-01-01T00:00:00.0000000+00:00", rows[1][4]);
+        Assert.Equal("2025-12-01T01:00:00.0000000+01:00", rows[1][3]);
+        Assert.Equal("2026-01-01T01:00:00.0000000+01:00", rows[1][4]);
         Assert.Equal("FutureReason", rows[3][6]);
         Assert.Equal("42", rows[3][7]);
         Assert.Equal("(open)", rows[3][4]);

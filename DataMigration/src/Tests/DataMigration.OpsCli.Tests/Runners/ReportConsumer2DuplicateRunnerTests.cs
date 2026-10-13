@@ -82,7 +82,7 @@ public class ReportConsumer2DuplicateRunnerTests
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [id.ToString()], null, output));
         Assert.Contains("ConsumerVersionCount", output.ToString());
-        Assert.Contains("DeliveryStartUtc", output.ToString());
+        Assert.Contains("DeliveryStartDk", output.ToString());
     }
 
     [Fact]

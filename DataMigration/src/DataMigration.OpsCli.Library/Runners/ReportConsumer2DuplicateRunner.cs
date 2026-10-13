@@ -76,8 +76,8 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         var selected = candidates.DistinctBy(c => c.Id).ToList();
         progress.Message($"Loading complete: {selected.Count:N0} metering points to check.");
         await WriteRow(output, ["MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
-            "DeliveryStartUtc", "DeliveryEndUtc", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
-            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartUtc", "ConsumerEndUtc",
+            "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
+            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
             "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning"]);
         var matched = 0;
         var checkedCount = 0;
@@ -131,6 +131,8 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 var deliveryWarnings = (result.Delivery?.Errors ?? []).Concat(result.PrefixError is null ? [] : new[] { result.PrefixError });
                 var deliveryWarning = string.Join(" | ", deliveryWarnings.Distinct());
                 var periods = result.Delivery?.Periods ?? [];
+                var firstPeriod = periods.Count > 0 && periods.All(p => p.Start is not null)
+                    && periods.Count(p => p.Start == periods[0].Start) == 1 ? periods[0] : null;
                 foreach (var period in periods)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -142,8 +144,8 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                         period.State, period.StartReason, period.StopReason,
                         correlation.Count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown",
                         Name(mp?.Consumer?.FirstConsumerParty?.Name), Name(mp?.Consumer?.SecondConsumerParty?.Name),
-                        version is null ? "" : VersionDate(version.Start), version is null ? "" : version.End is null ? "(open)" : VersionDate(version.End),
-                        mp?.Consumer is null ? "Unknown" : version!.Duplicate ? "Yes" : "No",
+                        version is null ? "" : VersionDate(version.Start), version is null ? "" : version.End is null ? "(open)" : VersionDate(version.End, true),
+                        firstPeriod is null ? "Unknown" : ReferenceEquals(period, firstPeriod) ? "No" : mp?.Consumer is null ? "Unknown" : version!.Duplicate ? "Yes" : "No",
                         correlation.AnyDuplicate is null ? "Unknown" : correlation.AnyDuplicate.Value ? "Yes" : "No", correlation.Warning, deliveryWarning]);
                 }
                 if (periods.Count == 0)
@@ -163,9 +165,9 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
     }
 
     private static string Name(MeteringPointV4NameDto? name) => name is null ? "" : name.FullName ?? $"{name.FirstName} {name.LastName}".Trim();
-    private static string VersionDate(DateTime? date) => date is null ? "(missing)" : ConsumerDeliveryEvidence.Utc(date.Value).ToString("O");
+    private static string VersionDate(DateTime? date, bool end = false) => date is null ? "(missing)" : ConsumerReportDates.Format(ConsumerDeliveryEvidence.Utc(date.Value), end);
     private static string DeliveryDate(DateTimeOffset? date, string raw, bool end) => date is { } value
-        ? value.ToUniversalTime().ToString("O")
+        ? ConsumerReportDates.Format(value, end)
         : raw is "null" or "(missing)" ? end ? "(open)" : "(missing)" : "(invalid)";
     private static Task WriteRow(TextWriter output, string[] cells) => output.WriteLineAsync(
         string.Join(';', cells.Select(value => "\"" + value.Replace("\"", "\"\"") + "\"")));

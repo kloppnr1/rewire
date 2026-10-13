@@ -559,8 +559,10 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   including one that started earlier. Periods include their start and exclude
   their end: a Consumer ending at delivery start or starting at delivery end does
   not count. The newest effective version is the one with the latest start.
-- Consumer1Name, Consumer2Name, ConsumerStartUtc, ConsumerEndUtc and
-  DuplicateConsumer2 describe that newest version only. An earlier version can
+- Consumer1Name, Consumer2Name, ConsumerStartDk, ConsumerEndDk and
+  DuplicateConsumer2 describe that newest version only, except the first chronological delivery period always
+  shows DuplicateConsumer2=No. This exception does not affect AnyDuplicateConsumer2,
+  MP inclusion or duplicate totals. An earlier version can
   have a duplicate even when the newest shows No. MP/version totals and --limit
   still use duplicate detection across all Consumer versions.
 - AnyDuplicateConsumer2 is Yes when any Consumer version effective during the
@@ -569,16 +571,20 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   confirmed duplicate shows Unknown. A confirmed Yes survives other read errors.
 - A complete history with no effective Consumer shows count 0 and blank Consumer
   names/dates. Incomplete Consumer history or invalid delivery dates show count
-  Unknown, blank Consumer values and DuplicateConsumer2=Unknown, with the warning.
+  Unknown, blank Consumer values and DuplicateConsumer2=Unknown (No on the
+  first period), with the warning.
 - DeliveryWarning and ConsumerWarning are blank when valid. A missing delivery
   history retains one diagnostic row with blank delivery values and a warning.
 - The CSV has 17 columns. RowType, environment, current delivery summaries, LastUpdated,
   change signals and calculated overlaps have been removed. Include the
   environment in the output filename, for example consumer2-production.csv.
-- Missing/null ends show (open); year-9999 ends retain their date after UTC conversion.
+- All four date columns use Danish time with daylight-saving offsets (+01:00 or
+  +02:00), and names ending Dk. Null and year-9999 ends show (open).
   Consumer dates without an offset are interpreted as UTC. Missing or inconsistent
   evidence returns exit code 1 while retaining successful findings. An unread
-  Consumer has DuplicateConsumer2=Unknown.
+  Consumer has DuplicateConsumer2=Unknown, except the first period shows No.
+  If missing or tied starts prevent identifying the first period, the newest-version
+  duplicate flags show Unknown with a delivery warning.
 - Counts distinguish affected MPs from duplicate versions. --limit caps affected
   MPs, checks all their Consumer versions and exports all their delivery periods. --mp-id accepts
   identifications or Settl GUIDs, space/comma separated.
