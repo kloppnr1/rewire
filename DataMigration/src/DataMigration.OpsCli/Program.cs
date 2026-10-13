@@ -1323,7 +1323,7 @@ var reportC2MpOption = new Option<string[]>("--mp-id") { Description = "Metering
 var reportC2LimitOption = new Option<int?>("--limit") { Description = "Maximum duplicate candidates to report (positive)" };
 var reportC2OutputOption = new Option<string>("--output") { Description = "CSV output path", Required = true };
 var reportC2EnvOption = new Option<string>("--env") { Description = "Target environment" };
-var reportConsumer2DuplicateCommand = new Command("report-consumer2-duplicate", "Read-only duplicate Consumer 2 report across all Consumer versions and overlapping delivery periods")
+var reportConsumer2DuplicateCommand = new Command("report-consumer2-duplicate", "Read-only duplicate Consumer 2 report across all Consumer versions; flags the delivery prefix false (Na -> Na), then true (ChangeOfSupplier -> Na)")
 { reportC2MpOption, reportC2LimitOption, reportC2OutputOption, reportC2EnvOption };
 reportConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
 {

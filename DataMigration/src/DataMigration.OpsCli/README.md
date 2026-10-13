@@ -542,33 +542,46 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
 
 ## Report rules
 
-- Full scans include non-child MPs in every delivery state. An MP appears only
-  when at least one Consumer version has a duplicate; all its versions are shown.
-  MPs with incomplete Consumer evidence also appear, even without a detected
-  duplicate, with the warning in ConsumerEvidenceStatus/UncertaintyReason. These
-  evidence rows do not increase the affected-MP or duplicate-version counts.
-- ConsumerDates supplies the distinct version starts. The current Consumer is
-  read once, and each other dated version is checked separately. Names belong to
-  that version, not necessarily to today's consumer.
-- Each CSV row connects one Consumer version to one overlapping delivery period.
-  ConsumerStartUtc/ConsumerEndUtc, Duplicate and ConsumerEvidenceStatus describe
-  the version. DeliveryStartAsReturned/DeliveryEndAsReturned, PeriodInDelivery,
-  StartReason/StopReason describe the delivery period. OverlapStartUtc/OverlapEndUtc
-  show their intersection. Original period dates and unknown reason values are retained.
-- Intervals include their start and exclude their end. A missing/null end is open;
-  a returned year-9999 end remains as returned. Dates without an offset in typed
-  Consumer responses are interpreted as UTC.
-- A version with no overlapping period gets a row labelled No overlapping delivery
-  period. Missing, failed or inconsistent history is labelled separately; unread
-  versions have Duplicate=Unknown. Successful findings are retained, but incomplete
-  history or invalid boundaries make the run return exit code 1.
-- Counts distinguish affected MPs from duplicate versions; repeated overlap rows
-  do not increase either count. --limit caps affected MPs and retains all their
-  versions. --mp-id accepts identifications or Settl GUIDs, space/comma separated.
-- Existing InDelivery/current/completed delivery fields and LastUpdated remain
-  current MP-level evidence, not the state of a historical Consumer version.
-  ChangeSignal and UncertaintyReason retain their existing meaning. Effective dates
-  do not prove when Settl changed or whether changes happened after migration.
+- Check all MPs regardless of delivery pattern. DeliveryPatternMatch is Yes when
+  the oldest two periods, ordered by start time, are false (Na -> Na), then
+  true (ChangeOfSupplier -> Na). Later periods are unrestricted. Other histories
+  show No; failed or ambiguous histories show Unknown and a warning. Consumer
+  checks continue in every case. Incomplete evidence returns exit code 1.
+- Full scans check non-child MPs in every delivery state. The CSV includes MPs
+  with at least one duplicate Consumer version or incomplete Consumer/delivery
+  evidence. Clean MPs are omitted regardless of their pattern flag.
+- ConsumerDates supplies distinct version starts. The current Consumer is read
+  once; each other dated version is checked separately using the existing rule.
+- Each CSV row is one delivery period from /deliveryStatuses. DeliveryStatusDates
+  and dated delivery-status versions are not used. All periods of included MPs
+  appear, ordered by start time, including periods before/after Consumer dates.
+- ConsumerVersionCount counts every Consumer version effective during the period,
+  including one that started earlier. Periods include their start and exclude
+  their end: a Consumer ending at delivery start or starting at delivery end does
+  not count. The newest effective version is the one with the latest start.
+- Consumer1Name, Consumer2Name, ConsumerStartUtc, ConsumerEndUtc and
+  DuplicateConsumer2 describe that newest version only. An earlier version can
+  have a duplicate even when the newest shows No. MP/version totals and --limit
+  still use duplicate detection across all Consumer versions.
+- AnyDuplicateConsumer2 is Yes when any Consumer version effective during the
+  delivery period has a confirmed duplicate, even if the newest shows No. It is
+  No when the complete evidence has no duplicate; incomplete evidence without a
+  confirmed duplicate shows Unknown. A confirmed Yes survives other read errors.
+- A complete history with no effective Consumer shows count 0 and blank Consumer
+  names/dates. Incomplete Consumer history or invalid delivery dates show count
+  Unknown, blank Consumer values and DuplicateConsumer2=Unknown, with the warning.
+- DeliveryWarning and ConsumerWarning are blank when valid. A missing delivery
+  history retains one diagnostic row with blank delivery values and a warning.
+- The CSV has 17 columns. RowType, environment, current delivery summaries, LastUpdated,
+  change signals and calculated overlaps have been removed. Include the
+  environment in the output filename, for example consumer2-production.csv.
+- Missing/null ends show (open); year-9999 ends retain their date after UTC conversion.
+  Consumer dates without an offset are interpreted as UTC. Missing or inconsistent
+  evidence returns exit code 1 while retaining successful findings. An unread
+  Consumer has DuplicateConsumer2=Unknown.
+- Counts distinguish affected MPs from duplicate versions. --limit caps affected
+  MPs, checks all their Consumer versions and exports all their delivery periods. --mp-id accepts
+  identifications or Settl GUIDs, space/comma separated.
 - The CSV contains names but no CPR values. No Settl writes are made. Cleanup and
   its dry-run still check only the current Consumer version.
 

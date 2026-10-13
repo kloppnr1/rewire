@@ -12,7 +12,7 @@ public class ConsumerVersionReportTests
     private static readonly DateTime December = new(2026, 12, 1);
 
     [Fact]
-    public async Task Historical_and_future_duplicates_include_clean_current_version_and_every_overlap()
+    public async Task Historical_and_future_duplicates_include_all_versions_and_every_delivery_period_once()
     {
         var id = Guid.NewGuid();
         var client = Fixture(id);
@@ -21,12 +21,13 @@ public class ConsumerVersionReportTests
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
             .RunAsync("featuretest", [], 1, csv));
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(5, rows.Length);
+        Assert.Equal(3, rows.Length);
         Assert.Equal(3, client.GetByIdV4Calls);
         Assert.Equal(1, client.ConsumerRequests.Count(r => r.Date is null));
-        Assert.Contains("\"No\"", rows[3]);
-        Assert.Contains("2026-06-01T00:00:00.0000000+00:00", rows[3]);
-        Assert.Contains("2026-12-01T00:00:00.0000000+00:00", rows[4]);
+        Assert.Contains("2026-01-01T00:00:00.0000000+00:00", rows[1]);
+        Assert.Contains("2026-12-01T00:00:00.0000000+00:00", rows[2]);
+        Assert.Equal("1", Cells(rows[1])[8]);
+        Assert.Equal("3", Cells(rows[2])[8]);
         Assert.Contains("duplicates: 1; read errors: 0; versions read: 3; duplicate versions: 2", progress.ToString());
         Assert.Equal(0, client.BlankCalls);
     }
@@ -44,7 +45,7 @@ public class ConsumerVersionReportTests
         Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }
             .RunAsync("featuretest", [], null, csv));
         Assert.Contains("\"Unknown\"", csv.ToString());
-        Assert.Contains("2026-12-01", csv.ToString());
+        Assert.Contains("Consumer correlation incomplete", csv.ToString());
         Assert.Contains("\"Yes\"", csv.ToString());
         Assert.Contains("Report incomplete", progress.ToString());
     }
@@ -59,7 +60,7 @@ public class ConsumerVersionReportTests
         using var csv = new StringWriter();
         Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
             .RunAsync("featuretest", [], null, csv));
-        Assert.Contains("Consumer history incomplete", csv.ToString());
+        Assert.Contains("Consumer history missing or failed", csv.ToString());
         Assert.Contains("\"Yes\"", csv.ToString());
     }
 
@@ -155,9 +156,48 @@ public class ConsumerVersionReportTests
         Assert.Equal(1, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
             .RunAsync("featuretest", [id.ToString()], null, csv));
         Assert.Contains(id.ToString(), csv.ToString());
-        Assert.Contains("Consumer data unavailable", csv.ToString());
+        Assert.Contains("Consumer correlation incomplete", csv.ToString());
         Assert.Contains("Unknown", csv.ToString());
     }
+
+    [Fact]
+    public async Task Independent_rows_keep_delivery_periods_outside_consumer_dates_and_blank_valid_warnings()
+    {
+        var id = Guid.NewGuid();
+        var client = Fixture(id);
+        client.ConsumerPoints[id] = Point(id, June, December, true);
+        client.ConsumerHistories[id] = (new() { ConsumerDates = [June] }, null);
+        client.DeliveryHistories[id] = ("""
+            {"deliveryStatuses":[
+              {"inDelivery":false,"period":{"start":"2025-12-01T01:00:00+01:00","end":"2026-01-01T01:00:00+01:00"},"startReason":"Na","stopReason":"Na"},
+              {"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":"2026-12-01T00:00:00Z"},"startReason":"ChangeOfSupplier","stopReason":"Na"},
+              {"inDelivery":false,"period":{"start":"2026-12-01T00:00:00Z","end":null},"startReason":"FutureReason","stopReason":42}]}
+            """, null);
+        using var csv = new StringWriter();
+        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
+            .RunAsync("featuretest", [], null, csv));
+        var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
+        Assert.All(rows, row => Assert.Equal(17, row.Length));
+        Assert.Equal(new[] { "MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
+            "DeliveryStartUtc", "DeliveryEndUtc", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
+            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartUtc", "ConsumerEndUtc",
+            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning" }, rows[0]);
+        Assert.Equal(4, rows.Length);
+        Assert.Equal("0", rows[1][8]);
+        Assert.Equal("1", rows[2][8]);
+        Assert.Equal("Yes", rows[2][13]);
+        Assert.Equal("Yes", rows[2][14]);
+        Assert.Empty(rows[2][15]);
+        Assert.Equal("0", rows[3][8]);
+        Assert.Equal("2025-12-01T00:00:00.0000000+00:00", rows[1][3]);
+        Assert.Equal("2026-01-01T00:00:00.0000000+00:00", rows[1][4]);
+        Assert.Equal("FutureReason", rows[3][6]);
+        Assert.Equal("42", rows[3][7]);
+        Assert.Equal("(open)", rows[3][4]);
+    }
+
+    private static string[] Cells(string row) => row.Split(';').Select(cell => cell.Trim('"')).ToArray();
 
     private static StubFixConsumer2DuplicateMeteringPointClient Fixture(Guid id)
     {
@@ -169,8 +209,8 @@ public class ConsumerVersionReportTests
         client.DatedConsumerPoints[(id, December)] = Point(id, December, null, true);
         client.DeliveryHistories[id] = ("""
             {"deliveryStatuses":[
-              {"inDelivery":false,"period":{"start":"2026-01-01T00:00:00Z","end":"2026-03-01T00:00:00Z"}},
-              {"inDelivery":true,"period":{"start":"2026-03-01T00:00:00Z","end":null},"startReason":"FutureReason","stopReason":42}]}
+              {"inDelivery":false,"period":{"start":"2026-01-01T00:00:00Z","end":"2026-03-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},
+              {"inDelivery":true,"period":{"start":"2026-03-01T00:00:00Z","end":null},"startReason":"ChangeOfSupplier","stopReason":"Na"}]}
             """, null);
         return client;
     }

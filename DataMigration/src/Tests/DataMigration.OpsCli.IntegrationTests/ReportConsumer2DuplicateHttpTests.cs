@@ -25,8 +25,8 @@ public class ReportConsumer2DuplicateHttpTests
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [], null, output));
         Assert.Equal(4, handler.Requests.Count);
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
-        Assert.Contains("Possible delivery change", output.ToString());
-        Assert.Contains("2026-10-01", output.ToString());
+        Assert.Contains("DeliveryPatternMatch", output.ToString());
+        Assert.Contains("2025-12-01", output.ToString());
         Assert.Contains(id.ToString(), output.ToString());
         Assert.DoesNotContain("1234567890", output.ToString());
     }
@@ -57,7 +57,7 @@ public class ReportConsumer2DuplicateHttpTests
     public async Task Pattern_report_preserves_unknown_history_values_in_actual_raw_client_response(bool missingIdentification)
     {
         var id = Guid.NewGuid();
-        using var handler = new ReportHandler(id, missingIdentification: missingIdentification);
+        using var handler = new ReportHandler(id, missingIdentification: missingIdentification, prefixHistory: false);
         using var http = new HttpClient(handler);
         var client = new SettlMeteringPointClient(http, new OfflineAuth(),
             Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<SettlMeteringPointClient>.Instance);
@@ -92,8 +92,8 @@ public class ReportConsumer2DuplicateHttpTests
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
             .RunAsync("featuretest", [], null, output));
-        Assert.Equal(4, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.Contains("\"No\"", output.ToString());
+        Assert.Equal(3, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Contains("ConsumerVersionCount", output.ToString());
         Assert.Contains("2026-12-01", output.ToString());
         Assert.Contains(handler.Uris, uri => Uri.UnescapeDataString(uri.Query) == "?EffectiveDate=2026-01-01T00:00:00Z");
         Assert.Contains(handler.Uris, uri => Uri.UnescapeDataString(uri.Query) == "?EffectiveDate=2026-12-01T00:00:00Z");
@@ -116,7 +116,49 @@ public class ReportConsumer2DuplicateHttpTests
         Assert.Contains(id.ToString(), csv.ToString());
         Assert.Contains("Consumer start missing or invalid.", csv.ToString());
         Assert.Contains("duplicates: 0", progress.ToString());
-        Assert.DoesNotContain(handler.Requests, r => r.Path.EndsWith("/deliveryStatuses"));
+        Assert.Contains(handler.Requests, r => r.Path.EndsWith("/deliveryStatuses"));
+        Assert.True(handler.Requests.FindIndex(r => r.Path.EndsWith("/deliveryStatuses")) < handler.Requests.FindIndex(r => r.Path.Contains("/v4/")));
+        Assert.All(handler.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+    }
+
+    [Fact]
+    public async Task Nonmatching_history_still_checks_consumers_and_flags_no()
+    {
+        var id = Guid.NewGuid();
+        using var handler = new ReportHandler(id, prefixHistory: false);
+        using var http = new HttpClient(handler);
+        var client = new SettlMeteringPointClient(http, new OfflineAuth(),
+            Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<SettlMeteringPointClient>.Instance);
+        using var csv = new StringWriter();
+        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
+            .RunAsync("featuretest", [], null, csv));
+        Assert.Contains(handler.Requests, r => r.Path.Contains("/v4/"));
+        Assert.Contains(handler.Requests, r => r.Path.EndsWith("/history"));
+        Assert.Contains("DeliveryPatternMatch", csv.ToString());
+        Assert.Contains("\"No\"", csv.ToString());
+        Assert.All(handler.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+    }
+
+    [Fact]
+    public async Task Older_duplicate_flags_period_even_when_newest_consumer_is_clean()
+    {
+        var id = Guid.NewGuid();
+        using var handler = new ReportHandler(id, versioned: true, futureDuplicate: false);
+        using var http = new HttpClient(handler);
+        var client = new SettlMeteringPointClient(http, new OfflineAuth(),
+            Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<SettlMeteringPointClient>.Instance);
+        using var csv = new StringWriter();
+        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
+            .RunAsync("featuretest", [], null, csv));
+        var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
+        Assert.Equal(3, rows.Length);
+        Assert.All(rows, row => Assert.Equal(17, row.Length));
+        Assert.Equal("3", rows[2][8]);
+        Assert.Equal("Different", rows[2][10]);
+        Assert.StartsWith("2026-12-01", rows[2][11]);
+        Assert.Equal("No", rows[2][13]);
+        Assert.Equal("Yes", rows[2][14]);
         Assert.All(handler.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
     }
 
@@ -126,7 +168,7 @@ public class ReportConsumer2DuplicateHttpTests
         public void InvalidateToken() { }
     }
 
-    private sealed class ReportHandler(Guid id, bool inDelivery = false, bool missingIdentification = false, bool versioned = false, bool missingConsumer = false) : HttpMessageHandler
+    private sealed class ReportHandler(Guid id, bool inDelivery = false, bool missingIdentification = false, bool versioned = false, bool missingConsumer = false, bool prefixHistory = true, bool futureDuplicate = true) : HttpMessageHandler
     {
         public List<(HttpMethod Method, string Path)> Requests { get; } = [];
         public List<Uri> Uris { get; } = [];
@@ -140,6 +182,12 @@ public class ReportConsumer2DuplicateHttpTests
                 : """{"items":[{"id":"ID","meteringPointIdentification":"571313100000000002","inDelivery":false,"lastUpdated":"2026-10-01T10:00:00Z","mostRecentCompletedDeliveryPeriod":{"start":"2026-01-01T00:00:00Z","end":"2026-09-01T00:00:00Z"}}]}""";
             if (request.RequestUri.AbsolutePath.EndsWith("/deliveryStatuses", StringComparison.Ordinal))
                 json = """{"deliveryStatuses":[{"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":"9999-12-31T23:59:59Z"},"startReason":"FutureReason","stopReason":42}]}""";
+            if (prefixHistory && request.RequestUri.AbsolutePath.EndsWith("/deliveryStatuses", StringComparison.Ordinal))
+                json = """
+                    {"deliveryStatuses":[
+                      {"inDelivery":false,"period":{"start":"2025-12-01T00:00:00Z","end":"2026-01-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},
+                      {"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":"9999-12-31T23:59:59Z"},"startReason":"ChangeOfSupplier","stopReason":"Na"}]}
+                    """;
             if (request.RequestUri.AbsolutePath.EndsWith("/history", StringComparison.Ordinal))
                 json = """{"consumerDates":["2026-01-01T00:00:00Z"]}""";
             if (versioned)
@@ -160,7 +208,7 @@ public class ReportConsumer2DuplicateHttpTests
                         {
                             start = start + "T00:00:00Z", end, customerType = "Person",
                             firstConsumerParty = new { name = new { fullName = "Fixture" } },
-                            secondConsumerParty = new { name = new { fullName = historical || future ? "Fixture" : "Different" } }
+                            secondConsumerParty = new { name = new { fullName = historical || future && futureDuplicate ? "Fixture" : "Different" } }
                         }
                     });
                 }

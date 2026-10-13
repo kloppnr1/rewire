@@ -54,8 +54,8 @@ public class Consumer2ConcurrencyTests
         if (report)
         {
             var rows = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Skip(1).ToArray();
-            Assert.Equal(10, rows.Length);
-            for (var i = 0; i < ids.Length; i++) Assert.Contains(ids[i].ToString(), rows[i]);
+            Assert.Equal(20, rows.Length);
+            for (var i = 0; i < ids.Length; i++) Assert.All(rows.Skip(i * 2).Take(2), row => Assert.Contains(ids[i].ToString(), row));
         }
         else
         {

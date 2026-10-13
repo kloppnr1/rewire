@@ -7,10 +7,10 @@ namespace DataMigration.OpsCli.Tests.Runners;
 public class ReportConsumer2DuplicateRunnerTests
 {
     [Theory]
-    [InlineData(false, "Possible delivery change")]
-    [InlineData(true, "No later-delivery signal in these fields")]
-    [InlineData(null, "Unable to determine")]
-    public async Task Report_includes_inactive_candidates_and_uncertainty_without_writes(bool? inDelivery, string signal)
+    [InlineData(false)]
+    [InlineData(true)]
+    [InlineData(null)]
+    public async Task Report_includes_all_delivery_states_without_writes(bool? inDelivery)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -20,19 +20,10 @@ public class ReportConsumer2DuplicateRunnerTests
         var result = await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [], null, output);
         Assert.Equal(0, result);
         Assert.Equal(0, client.BlankCalls);
-        Assert.Contains(signal, output.ToString());
-        Assert.Contains("do not establish whether changes happened after migration", output.ToString());
-        Assert.Contains("featuretest", output.ToString());
+        Assert.Contains("DeliveryPatternMatch", output.ToString());
+        Assert.DoesNotContain("Environment", output.ToString());
         Assert.Contains("Test; \"Name\"", output.ToString().Replace("\"\"", "\""));
         Assert.DoesNotContain("1234567890", output.ToString());
-    }
-
-    [Fact]
-    public void Completed_period_is_a_signal_even_when_currently_in_delivery()
-    {
-        var assessment = ReportConsumer2DuplicateRunner.Assess(new() { InDelivery = true, MostRecentCompletedDeliveryPeriod = new() });
-        Assert.Equal("Possible delivery change", assessment.Signal);
-        Assert.Contains("effective dates", assessment.Reason);
     }
 
     [Fact]
@@ -65,7 +56,7 @@ public class ReportConsumer2DuplicateRunnerTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Scoped_identification_and_guid_read_market_evidence(bool useGuid)
+    public async Task Scoped_identification_and_guid_keep_identification(bool useGuid)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -74,15 +65,15 @@ public class ReportConsumer2DuplicateRunnerTests
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("production-hev",
             [useGuid ? id.ToString() : "571313100000000002"], null, output));
-        Assert.Contains("Possible delivery change", output.ToString());
-        Assert.Contains("production-hev", output.ToString());
+        Assert.Contains("DeliveryPatternMatch", output.ToString());
+        Assert.DoesNotContain("production-hev", output.ToString());
         Assert.Equal(0, client.BlankCalls);
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Missing_or_mismatched_market_evidence_keeps_duplicate_with_warning(bool mismatched)
+    public async Task Missing_or_mismatched_market_summary_does_not_hide_duplicate(bool mismatched)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -90,8 +81,8 @@ public class ReportConsumer2DuplicateRunnerTests
         client.Reads.Enqueue(Duplicate(id));
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [id.ToString()], null, output));
-        Assert.Contains("Unable to determine", output.ToString());
-        Assert.DoesNotContain("Possible delivery change", output.ToString());
+        Assert.Contains("ConsumerVersionCount", output.ToString());
+        Assert.Contains("DeliveryStartUtc", output.ToString());
     }
 
     [Fact]
@@ -108,7 +99,7 @@ public class ReportConsumer2DuplicateRunnerTests
         Assert.Contains("Stopped at --limit 1", progress.ToString());
         Assert.Contains("Checked: 1 / 2", progress.ToString());
         Assert.Equal(1, client.GetByIdV4Calls);
-        Assert.Equal(2, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(3, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
     }
 
     [Theory]
@@ -130,7 +121,6 @@ public class ReportConsumer2DuplicateRunnerTests
     [InlineData("market-list page")]
     [InlineData("consumer read")]
     [InlineData("metering-point lookup")]
-    [InlineData("delivery-evidence lookup")]
     public async Task Progress_is_visible_while_a_Settl_request_is_still_pending(string operation)
     {
         var id = Guid.NewGuid();
@@ -145,7 +135,6 @@ public class ReportConsumer2DuplicateRunnerTests
             case "market-list page": client.BeforeMarketRead = Wait; break;
             case "consumer read": client.BeforeConsumerRead = Wait; break;
             case "metering-point lookup": client.BeforeLookup = Wait; scope = ["571313100000000002"]; break;
-            case "delivery-evidence lookup": client.BeforeLookup = Wait; scope = [id.ToString()]; break;
         }
         using var output = new StringWriter();
         using var progress = new WaitingProgressWriter();

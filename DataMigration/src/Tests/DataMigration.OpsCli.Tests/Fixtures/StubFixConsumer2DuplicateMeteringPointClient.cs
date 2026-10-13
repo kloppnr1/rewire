@@ -23,6 +23,12 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Dictionary<Guid, (MeteringPointV3HistoryResponse? History, string? Error)> ConsumerHistories { get; } = [];
     public List<(Guid Id, DateTime? Date)> ConsumerRequests { get; } = [];
     public Dictionary<Guid, MeteringPointV4Dto?> ConsumerPoints { get; } = [];
+    public const string PrefixHistory = """
+        {"deliveryStatuses":[
+          {"inDelivery":false,"period":{"start":"2025-12-01T00:00:00Z","end":"2026-01-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},
+          {"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":null},"startReason":"ChangeOfSupplier","stopReason":"Na"}]}
+        """;
+    public List<Guid> DeliveryRequests { get; } = [];
     public Dictionary<Guid, (string? Json, string? Error)> DeliveryHistories { get; } = [];
 
     /// <summary>What <see cref="BlankDuplicateSecondConsumerNameAsync"/> reports. Defaults to success.</summary>
@@ -75,7 +81,11 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public Task<(MeteringPointCurrentDto? MeteringPoint, string? Error)> GetByIdAsync(Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default) => Unused<Task<(MeteringPointCurrentDto?, string?)>>();
     public Task<(string? Json, string? Error)> GetByIdRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(string?, string?)>>();
     public Task<(GetDeliveryStatusesResponse? DeliveryStatuses, string? Error)> GetDeliveryStatusesAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(GetDeliveryStatusesResponse?, string?)>>();
-    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default) => Task.FromResult(DeliveryHistories.GetValueOrDefault(meteringPointId, ("{\"deliveryStatuses\":[]}", null)));
+    public Task<(string? Json, string? Error)> GetDeliveryStatusesRawAsync(Guid meteringPointId, CancellationToken cancellationToken = default)
+    {
+        lock (_readLock) DeliveryRequests.Add(meteringPointId);
+        return Task.FromResult(DeliveryHistories.GetValueOrDefault(meteringPointId, (PrefixHistory, null)));
+    }
     public Task<(bool Success, string? Error)> UpdateAsync(Guid meteringPointId, MeteringPointDto dto, CancellationToken cancellationToken = default) => Unused<Task<(bool, string?)>>();
     public Task<(BillingMeteringPointInfoDto? MeteringPoint, string? Error)> SearchBillingByIdentificationAsync(string meteringPointIdentification, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointInfoDto?, string?)>>();
     public Task<(BillingMeteringPointHistoryResponse? History, string? Error)> GetBillingHistoryAsync(Guid billingMeteringPointId, CancellationToken cancellationToken = default) => Unused<Task<(BillingMeteringPointHistoryResponse?, string?)>>();
