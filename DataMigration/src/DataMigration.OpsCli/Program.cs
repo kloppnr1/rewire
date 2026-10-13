@@ -136,6 +136,7 @@ services.AddHttpClient<ISettlAuthService, SettlAuthService>();
 services.AddHttpClient<ISettlCustomerClient, SettlCustomerClient>();
 services.AddHttpClient<ISettlPayerClient, SettlPayerClient>();
 services.AddHttpClient<ISettlMeteringPointClient, SettlMeteringPointClient>();
+services.AddHttpClient<IConsumerVersionCleanup, ConsumerVersionCleanup>();
 services.AddHttpClient<ISettlContractClient, SettlContractClient>();
 services.AddHttpClient<ISettlSettlementGroupClient, SettlSettlementGroupClient>();
 services.AddHttpClient<ISettlPriceListClient, SettlPriceListClient>();
@@ -1270,13 +1271,13 @@ var fixC2dMpIdOption = new Option<string[]>("--mp-id")
     Description = "Metering point identification(s) or Settl GUID(s) to scope the run to. Comma-separate or repeat. Defaults to a full env-wide scan.",
     AllowMultipleArgumentsPerToken = true
 };
-var fixC2dLimitOption = new Option<int?>("--limit") { Description = "Maximum matching MPs to fix in one run. Applied after filtering to private + duplicate-name candidates." };
-var fixC2dDryRunOption = new Option<bool>("--dry-run") { Description = "Print MPs that match the duplicate-name condition, skip Settl mutations" };
+var fixC2dLimitOption = new Option<int?>("--limit") { Description = "Maximum MPs with eligible duplicate Consumer versions to fix in one run." };
+var fixC2dDryRunOption = new Option<bool>("--dry-run") { Description = "Print dated Consumer versions selected by the report rules, skip Settl mutations" };
 var fixC2dEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production, production-hev, production-vhel)" };
 
 var fixConsumer2DuplicateCommand = new Command(
     "fix-consumer2-duplicate",
-    "For private metering points where Consumer.FirstConsumerParty.Name deep-equals Consumer.SecondConsumerParty.Name, " +
+    "Use the report rules to select duplicate Consumer versions per delivery period, then " +
     "blank Name + NationalIdentificationNumber on the second party. VatIdentificationNumber and everything else is untouched.")
 {
     fixC2dMpIdOption, fixC2dLimitOption, fixC2dDryRunOption, fixC2dEnvOption
@@ -1299,7 +1300,7 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
 
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
 
-        var runner = new FixConsumer2DuplicateRunner(meteringPointClient, Console.WriteLine);
+        var runner = new FixConsumer2DuplicateRunner(meteringPointClient, Console.WriteLine, serviceProvider.GetRequiredService<IConsumerVersionCleanup>());
         return await runner.RunAsync(new FixConsumer2DuplicateRunOptions
         {
             MeteringPointIds = mpIds,

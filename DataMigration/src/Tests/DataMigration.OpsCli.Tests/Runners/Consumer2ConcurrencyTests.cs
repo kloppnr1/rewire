@@ -104,6 +104,7 @@ public class Consumer2ConcurrencyTests
             client.Reads.Enqueue(Point(id));
             var cleared = Point(id);
             cleared.Consumer!.SecondConsumerParty!.Name = new() { FullName = "" };
+            client.Reads.Enqueue(Point(id)); // eligibility recheck
             client.Reads.Enqueue(cleared);
         }
         var started = 0;
@@ -128,7 +129,7 @@ public class Consumer2ConcurrencyTests
             release.TrySetResult();
             Assert.Equal(0, await run.WaitAsync(TimeSpan.FromSeconds(5)));
         }
-        Assert.Equal(4, client.GetByIdV4Calls);
+        Assert.Equal(6, client.GetByIdV4Calls);
         Assert.Equal(2, client.BlankCalls);
     }
 
@@ -154,7 +155,7 @@ public class Consumer2ConcurrencyTests
         using var progress = new StringWriter();
         Assert.Equal(1, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }.RunAsync(new() { DryRun = true }));
         Assert.Contains(logs, line => line.Contains("Read errors: 1", StringComparison.Ordinal));
-        Assert.Equal(8, client.GetByIdV4Calls);
+        Assert.Equal(9, client.GetByIdV4Calls);
         Assert.Equal(0, client.BlankCalls);
     }
 

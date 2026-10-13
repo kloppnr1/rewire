@@ -507,7 +507,12 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
 
 `fix-consumer2-duplicate` follows these rules:
 
-- Checks the **current Consumer version only**, not historical or future versions.
+- Reads Settl histories directly and uses the report's shared rules: for each delivery
+  period, select its newest effective Consumer version, then assess the duplicate.
+  The first delivery period is excluded. A clean newest version never falls back to
+  an older duplicate. Pattern match and AnyDuplicateConsumer2 do not select fixes.
+- Each selected Consumer version is updated once, even when selected by several
+  periods. No report file is read. Incomplete evidence is reported and the MP skipped.
 - Full scans include all delivery states, including false or missing `InDelivery`,
   and exclude child MPs. `--mp-id` instead scopes the run to the supplied MP
   identifications or Settl GUIDs.
@@ -515,12 +520,12 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
   FullName, FirstName and LastName must each match. Detection ignores surrounding
   whitespace and treats missing name fields as blank; comparison is case-sensitive.
 - Clears Consumer 2's name fields and national identification number. The update
-  operation reads the data again and checks equality before writing; other fields
-  are preserved.
+  operation rechecks selection and equality before writing at the existing Consumer
+  start date. MarketUpdate is omitted from both request levels; other fields are preserved.
 - `--dry-run` lists matches without changing Settl, using up to eight concurrent
-  reads. Live cleanup updates one MP at a time, then reads it again. A fix is counted
-  only when the duplicate is gone; failed updates or verification are reported as
-  errors.
+  reads and displays the selected Consumer dates in Danish time. Live cleanup updates
+  sequentially and verifies both cleared fields on the same dated version. Read, write
+  and verification failures are reported, including failures during full scans.
 - `--limit` caps matching MPs, not the number scanned. The run stops once that
   number of matches has been reached.
 
@@ -591,7 +596,7 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   MPs, checks all their Consumer versions and exports all their delivery periods. --mp-id accepts
   identifications or Settl GUIDs, space/comma separated.
 - The CSV contains names but no CPR values. No Settl writes are made. Cleanup and
-  its dry-run still check only the current Consumer version.
+  its dry-run reuse the same per-period selection rules, reading fresh Settl data.
 
 Progress goes to stderr and shows checked MPs, version reads, affected MPs,
 duplicate versions, errors and phase elapsed time. Up to eight requests run

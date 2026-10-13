@@ -44,7 +44,7 @@ public class ReportConsumer2DuplicateHttpTests
         using var progress = new StringWriter();
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }
             .RunAsync(new() { DryRun = true }));
-        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(4, handler.Requests.Count);
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
         Assert.Contains(logs, line => line.Contains("would blank", StringComparison.Ordinal));
         Assert.Contains("Checked: 1 / 1", progress.ToString());

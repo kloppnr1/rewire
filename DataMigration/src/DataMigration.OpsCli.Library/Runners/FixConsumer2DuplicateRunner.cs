@@ -13,62 +13,38 @@ public class FixConsumer2DuplicateRunOptions
     public string[] MeteringPointIds { get; set; } = [];
 
     /// <summary>Cap on how many matching MPs get fixed in one run. Applied after filtering to
-    /// private + duplicate-name candidates, regardless of whether the candidate set came from
+    /// the report delivery-period rules, regardless of whether the candidate set came from
     /// <see cref="MeteringPointIds"/> or a full scan.</summary>
     public int? Limit { get; set; }
 
     public bool DryRun { get; set; }
 }
 
-/// <summary>
-/// Business rule: for private metering points (<c>Consumer.CustomerType == "Person"</c>) in Settl,
-/// when <c>Consumer.FirstConsumerParty.Name</c> deep-equals <c>Consumer.SecondConsumerParty.Name</c>,
-/// blank <c>Name</c> and <c>NationalIdentificationNumber</c> on the second party.
-///
-/// <para>Candidate detection reads <see cref="ISettlMeteringPointClient.GetByIdV4Async"/> (the only
-/// typed read path that carries <c>Consumer.CustomerType</c> and both consumer parties' names — the
-/// v3 <c>GetByIdAsync</c>/<c>MeteringPointCurrentDto</c> path used by <c>report-meteringpoints</c>
-/// does not expose Consumer detail at all).</para>
-///
-/// <para>The actual mutation goes through <see cref="ISettlMeteringPointClient.BlankDuplicateSecondConsumerNameAsync"/>
-/// (package <c>NewSettlement.SettlClient.Api</c> ≥ 0.7.49), which does a raw-JSON round-trip PUT —
-/// the v3 master PUT is a full replace, so a partial typed body would drop unmodelled sections
-/// (<c>SystemService</c>, <c>DistributionSystemOperator</c>, <c>Renewable</c>, most of
-/// <c>Consumer</c>). That method owns the equality check itself and is a safe no-op when the names
-/// don't match or there's no second party, so it is called unconditionally per candidate — the
-/// filtering here only decides which MPs to report/attempt, not whether the write is safe.</para>
-///
-/// <para><b>No caching anywhere in this path.</b> <see cref="ISettlMeteringPointClient"/> is wired
-/// up in <c>Program.cs</c> via a plain <c>AddHttpClient</c> typed client — <c>BulkCachingMeteringPointClient</c>
-/// (in <c>DataMigration.Migration.Library</c>, used only by MigrationCli's <c>create</c>) is never
-/// applied here, and even there it only caches <c>SearchByIdentificationAsync</c>; <c>GetByIdV4Async</c>
-/// and <c>BlankDuplicateSecondConsumerNameAsync</c> are pass-through everywhere. Every read in this
-/// runner, including the post-write verification below, is a fresh HTTP round-trip. A reported
-/// "fixed" is therefore never trusted on the write call's own success flag alone — the runner
-/// re-reads immediately after the write and only counts a fix once the duplicate is actually gone,
-/// because a success response does not by itself prove the effective document changed the way
-/// expected (version/effective-date mismatches or a concurrent write can leave old data in place or
-/// bring it back).</para>
-/// </summary>
+/// <summary>Uses the report decision for each delivery period; writes each selected Consumer version once.</summary>
 public class FixConsumer2DuplicateRunner
 {
     private readonly ISettlMeteringPointClient _meteringPointClient;
     private readonly Action<string> _log;
+    private readonly IConsumerVersionCleanup? _cleanup;
     public TextWriter ProgressOutput { get; init; } = Console.Error;
     internal TimeSpan ProgressInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     public FixConsumer2DuplicateRunner(
         ISettlMeteringPointClient meteringPointClient,
-        Action<string>? log = null)
+        Action<string>? log = null, IConsumerVersionCleanup? cleanup = null)
     {
         _meteringPointClient = meteringPointClient;
         _log = log ?? Console.WriteLine;
+        _cleanup = cleanup ?? meteringPointClient as IConsumerVersionCleanup;
     }
 
     public async Task<int> RunAsync(FixConsumer2DuplicateRunOptions options, CancellationToken cancellationToken = default)
     {
+        if (options.Limit is <= 0) throw new ArgumentOutOfRangeException(nameof(options.Limit));
+        if (!options.DryRun && _cleanup is null) throw new InvalidOperationException("Dated Consumer cleanup client is not configured.");
         using var progress = new Consumer2ProgressDisplay(ProgressOutput, ProgressInterval);
         void Log(string message) { progress.Dispose(); _log(message); }
+        var errors = 0;
         Log(options.DryRun ? "Duplicate Consumer 2 dry-run (up to 8 concurrent reads; no writes)"
             : "Duplicate Consumer 2 cleanup (sequential updates)");
         List<Guid> candidateIds;
@@ -91,6 +67,7 @@ public class FixConsumer2DuplicateRunner
                     "metering-point lookup", () => "Resolving selected metering points...", cancellationToken);
                 if (mp == null)
                 {
+                    errors++;
                     Log($"  {raw}: not found in Settl ({err}) — skipping");
                     continue;
                 }
@@ -113,137 +90,89 @@ public class FixConsumer2DuplicateRunner
             candidateIds = selection.MeteringPointIds;
         }
 
+        candidateIds = candidateIds.Distinct().ToList();
         var matched = 0;
         var fixedCount = 0;
-        var errors = 0;
         var checkedCount = 0;
-
-        string Status() => $"Checked: {Volatile.Read(ref checkedCount):N0} / {candidateIds.Count:N0}   Matched: {matched:N0}   Fixed: {fixedCount:N0}   Errors: {errors:N0}";
-        progress.Update(Status(), force: true);
-        if (options.DryRun)
+        var versionReads = 0;
+        string Status() => $"Checked: {Volatile.Read(ref checkedCount):N0} / {candidateIds.Count:N0}   Matched: {matched:N0}   Fixed versions: {fixedCount:N0}   Errors: {errors:N0}   Versions read: {Volatile.Read(ref versionReads):N0}";
+        async Task<(ConsumerVersionEvidence Versions, ConsumerDeliveryEvidence Delivery)> Read(Guid id)
         {
-            for (var offset = 0; offset < candidateIds.Count;)
+            var (json, error) = await _meteringPointClient.GetDeliveryStatusesRawAsync(id, cancellationToken);
+            var versions = await ConsumerVersionEvidence.ReadAsync(_meteringPointClient, id,
+                () => Interlocked.Increment(ref versionReads), cancellationToken);
+            return (versions, ConsumerDeliveryEvidence.Parse(json, error));
+        }
+        progress.StartPhase();
+        for (var offset = 0; offset < candidateIds.Count;)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (options.Limit.HasValue && matched >= options.Limit.Value)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (options.Limit.HasValue && matched >= options.Limit.Value)
+                Log($"--limit {options.Limit.Value} reached - stopping scan; remaining points were not checked");
+                break;
+            }
+            var size = Math.Min(options.DryRun ? 8 : 1, candidateIds.Count - offset);
+            if (options.Limit.HasValue) size = Math.Min(size, options.Limit.Value - matched);
+            var results = await progress.ReadAsync(() => Task.WhenAll(candidateIds.GetRange(offset, size).Select(async id =>
+            {
+                var evidence = await Read(id);
+                Interlocked.Increment(ref checkedCount);
+                return (Id: id, evidence.Versions, evidence.Delivery);
+            })), "delivery-history / consumer reads", Status, cancellationToken);
+            offset += size;
+            foreach (var result in results)
+            {
+                var warnings = result.Versions.Errors.Concat(result.Delivery.Errors).Distinct().ToList();
+                if (result.Delivery.Periods.Count == 0) warnings.Add("No delivery periods returned.");
+                var decisions = ConsumerDuplicateSelection.For(result.Delivery, result.Versions);
+                if (decisions.Any(d => d.Duplicate is null)) warnings.Add("Consumer selection is incomplete.");
+                if (warnings.Count > 0)
                 {
-                    Log($"--limit {options.Limit.Value} reached - stopping scan; remaining points were not checked");
-                    break;
+                    errors++;
+                    Log($"  {result.Id}: skipped: {string.Join(" | ", warnings)}");
+                    continue;
                 }
-                var size = Math.Min(8, candidateIds.Count - offset);
-                if (options.Limit.HasValue) size = Math.Min(size, options.Limit.Value - matched);
-                var batch = candidateIds.GetRange(offset, size);
-                var results = await progress.ReadAsync(() => Task.WhenAll(batch.Select(async id =>
+                var targets = decisions.Where(d => d.Duplicate == true).Select(d => d.Correlation.Latest!)
+                    .DistinctBy(v => ConsumerDeliveryEvidence.Utc(v.Start!.Value)).ToArray();
+                if (targets.Length == 0) continue;
+                matched++;
+                foreach (var target in targets)
                 {
-                    var (mp, error) = await _meteringPointClient.GetByIdV4Async(id, null, cancellationToken);
-                    Interlocked.Increment(ref checkedCount);
-                    return (Id: id, Mp: mp, Error: error);
-                })), "consumer reads (up to 8 concurrent)", Status, cancellationToken);
-                offset += size;
-                foreach (var result in results)
-                {
-                    if (result.Mp is not { } mp)
+                    var start = ConsumerDeliveryEvidence.Utc(target.Start!.Value).UtcDateTime;
+                    var identification = target.Point?.Identification?.MeteringPointIdentification ?? result.Id.ToString();
+                    var label = $"{identification} ({result.Id}): Consumer {ConsumerReportDates.Format(new DateTimeOffset(start))}";
+                    if (options.DryRun)
                     {
-                        errors++;
-                        Log($"  {result.Id}: GetByIdV4 failed: {result.Error}");
+                        Log($"  {label} - would blank second party Name + NationalIdentificationNumber");
                         continue;
                     }
-                    var duplicateName = FindDuplicateName(mp);
-                    if (duplicateName is null) continue;
-                    matched++;
-                    var identification = mp.Identification?.MeteringPointIdentification ?? result.Id.ToString();
-                    Log($"  {identification} ({result.Id}): duplicate name '{duplicateName}' on FirstConsumerParty/SecondConsumerParty - would blank second party Name + NationalIdentificationNumber");
-                }
-                progress.Update(Status());
-            }
-        }
-
-        if (!options.DryRun)
-        {
-            foreach (var id in candidateIds)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (options.Limit.HasValue && matched >= options.Limit.Value)
-                {
-                    Log($"--limit {options.Limit.Value} reached — stopping scan");
-                    break;
-                }
-
-                var (mp, err) = await progress.ReadAsync(
-                    () => _meteringPointClient.GetByIdV4Async(id, null, cancellationToken), "consumer read", Status, cancellationToken);
-                checkedCount++;
-                progress.Update(Status());
-                if (mp == null)
-                {
-                    if (options.MeteringPointIds.Length > 0)
+                    // Re-read the histories so a newly added version cannot silently change selection.
+                    var fresh = await progress.ReadAsync(() => Read(result.Id), "rechecking Consumer selection", Status, cancellationToken);
+                    var stillSelected = fresh.Versions.Errors.Count == 0 && fresh.Delivery.Errors.Count == 0
+                        && ConsumerDuplicateSelection.For(fresh.Delivery, fresh.Versions).Any(d => d.Duplicate == true
+                            && ConsumerDeliveryEvidence.Utc(d.Correlation.Latest!.Start!.Value).UtcDateTime == start);
+                    if (!stillSelected)
                     {
-                        Log($"  {id}: GetByIdV4 failed: {err}");
                         errors++;
+                        Log($"  {label}: skipped: selection changed or evidence is incomplete.");
+                        continue;
                     }
-                    continue;
+                    var (success, error) = await progress.ReadAsync(() => _cleanup!.BlankAsync(result.Id, start, cancellationToken),
+                        "dated Consumer update and verification", Status, cancellationToken);
+                    if (!success) { errors++; Log($"  {label}: FAILED - {error}"); }
+                    else { fixedCount++; Log($"  {label}: fixed - verified on the same dated version"); }
                 }
-
-                var duplicateName = FindDuplicateName(mp);
-                if (duplicateName == null)
-                    continue;
-
-                matched++;
-                var identification = mp.Identification?.MeteringPointIdentification ?? id.ToString();
-
-                var (success, fixErr) = await progress.ReadAsync(
-                    () => _meteringPointClient.BlankDuplicateSecondConsumerNameAsync(id, cancellationToken), "consumer update", Status, cancellationToken);
-                if (!success)
-                {
-                    Log($"  {identification} ({id}): FAILED — {fixErr}");
-                    errors++;
-                    continue;
-                }
-
-                // BlankDuplicateSecondConsumerNameAsync reporting success only means the PATCH round-trip
-                // did not error — it does not prove the effective document actually lost the duplicate
-                // (e.g. a version/effective-date mismatch between the write and a later re-read, or a
-                // concurrent write racing this one, can leave the duplicate in place or reintroduce it on
-                // a new dated version). Re-read fresh — never from any cache — right after the write and
-                // fail loudly instead of reporting "fixed" on unverified trust.
-                var (verifyMp, verifyErr) = await progress.ReadAsync(
-                    () => _meteringPointClient.GetByIdV4Async(id, null, cancellationToken), "post-write verification", Status, cancellationToken);
-                if (verifyMp == null)
-                {
-                    Log($"  {identification} ({id}): PATCH reported success but post-write verification read failed: {verifyErr} — treating as FAILED");
-                    errors++;
-                    continue;
-                }
-
-                var stillDuplicate = FindDuplicateName(verifyMp);
-                if (stillDuplicate != null)
-                {
-                    Log($"  {identification} ({id}): PATCH reported success but a fresh re-read still shows duplicate name '{stillDuplicate}' — treating as FAILED, NOT counted as fixed");
-                    errors++;
-                    continue;
-                }
-
-                Log($"  {identification} ({id}): fixed — second party '{duplicateName}' blanked (verified on fresh re-read)");
-                fixedCount++;
             }
-
+            progress.Update(Status());
         }
-
         progress.Update(Status(), force: true);
         Log("--- Summary ---");
         Log($"  Checked:  {checkedCount}");
         Log($"  Matched:  {matched}");
-        if (options.DryRun)
-        {
-            Log($"  Read errors: {errors}");
-            Log($"  (dry-run — no writes)");
-        }
-        else
-        {
-            Log($"  Fixed:    {fixedCount}");
-            Log($"  Errors:   {errors}");
-        }
-
+        Log($"  Fixed versions: {fixedCount}");
+        Log($"  {(options.DryRun ? "Read errors" : "Errors")}: {errors}");
+        if (options.DryRun) Log("  (dry-run - no writes)");
         return errors > 0 ? 1 : 0;
     }
 

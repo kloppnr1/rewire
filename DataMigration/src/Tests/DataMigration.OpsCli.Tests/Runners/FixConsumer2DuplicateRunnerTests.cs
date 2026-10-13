@@ -12,6 +12,7 @@ public class FixConsumer2DuplicateRunnerTests
         Identification = new MeteringPointV4IdentificationDto { MeteringPointIdentification = "571313100000000002" },
         Consumer = new MeteringPointV4ConsumerDto
         {
+            Start = new DateTime(2026, 1, 1),
             CustomerType = "Person",
             FirstConsumerParty = new MeteringPointV4ConsumerPartyDto { Name = new MeteringPointV4NameDto { FullName = "test" } },
             SecondConsumerParty = new MeteringPointV4ConsumerPartyDto { Name = new MeteringPointV4NameDto { FullName = "test" } },
@@ -24,6 +25,7 @@ public class FixConsumer2DuplicateRunnerTests
         Identification = new MeteringPointV4IdentificationDto { MeteringPointIdentification = "571313100000000002" },
         Consumer = new MeteringPointV4ConsumerDto
         {
+            Start = new DateTime(2026, 1, 1),
             CustomerType = "Person",
             FirstConsumerParty = new MeteringPointV4ConsumerPartyDto { Name = new MeteringPointV4NameDto { FullName = "test" } },
             SecondConsumerParty = new MeteringPointV4ConsumerPartyDto { Name = new MeteringPointV4NameDto { FullName = "" } },
@@ -36,6 +38,7 @@ public class FixConsumer2DuplicateRunnerTests
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
         client.Reads.Enqueue(DuplicateMp(id)); // detect read
+        client.Reads.Enqueue(DuplicateMp(id)); // eligibility recheck
         client.Reads.Enqueue(BlankedMp(id));   // post-write verify read
         client.BlankResult = (true, null);
 
@@ -48,7 +51,7 @@ public class FixConsumer2DuplicateRunnerTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(1, client.BlankCalls);
-        Assert.Equal(2, client.GetByIdV4Calls); // detect + verify
+        Assert.Equal(3, client.GetByIdV4Calls); // detect + verify
     }
 
     [Fact]
@@ -89,12 +92,13 @@ public class FixConsumer2DuplicateRunnerTests
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
         client.MarketPoints.Add(new() { Id = id, InDelivery = inDelivery });
         client.Reads.Enqueue(DuplicateMp(id));
+        client.Reads.Enqueue(DuplicateMp(id)); // eligibility recheck
         client.Reads.Enqueue(BlankedMp(id));
         using var progress = new StringWriter();
         var logs = new List<string>();
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }
             .RunAsync(new() { DryRun = dryRun }));
-        Assert.Equal(dryRun ? 1 : 2, client.GetByIdV4Calls);
+        Assert.Equal(dryRun ? 1 : 3, client.GetByIdV4Calls);
         Assert.Equal(dryRun ? 0 : 1, client.BlankCalls);
         Assert.Contains(logs, line => line.Contains("Matched:  1", StringComparison.Ordinal));
     }

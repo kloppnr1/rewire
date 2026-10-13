@@ -131,12 +131,11 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 var deliveryWarnings = (result.Delivery?.Errors ?? []).Concat(result.PrefixError is null ? [] : new[] { result.PrefixError });
                 var deliveryWarning = string.Join(" | ", deliveryWarnings.Distinct());
                 var periods = result.Delivery?.Periods ?? [];
-                var firstPeriod = periods.Count > 0 && periods.All(p => p.Start is not null)
-                    && periods.Count(p => p.Start == periods[0].Start) == 1 ? periods[0] : null;
-                foreach (var period in periods)
+                foreach (var selection in ConsumerDuplicateSelection.For(result.Delivery!, result.Versions))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var correlation = DeliveryConsumerCorrelation.For(period, result.Versions);
+                    var period = selection.Period;
+                    var correlation = selection.Correlation;
                     var version = correlation.Latest;
                     var mp = version?.Point;
                     await WriteRow(output, [identification, result.Id.ToString(), pattern,
@@ -145,7 +144,7 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                         correlation.Count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown",
                         Name(mp?.Consumer?.FirstConsumerParty?.Name), Name(mp?.Consumer?.SecondConsumerParty?.Name),
                         version is null ? "" : VersionDate(version.Start), version is null ? "" : version.End is null ? "(open)" : VersionDate(version.End, true),
-                        firstPeriod is null ? "Unknown" : ReferenceEquals(period, firstPeriod) ? "No" : mp?.Consumer is null ? "Unknown" : version!.Duplicate ? "Yes" : "No",
+                        selection.Duplicate is null ? "Unknown" : selection.Duplicate.Value ? "Yes" : "No",
                         correlation.AnyDuplicate is null ? "Unknown" : correlation.AnyDuplicate.Value ? "Yes" : "No", correlation.Warning, deliveryWarning,
                         mp?.Consumer is null ? "" : mp.Consumer.MarketUpdate ? "true" : "false"]);
                 }

@@ -1,0 +1,112 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using DataMigration.OpsCli.Runners;
+using DataMigration.OpsCli.Services;
+using DataMigration.SettlApi.Clients;
+using DataMigration.SettlApi.Configuration;
+using DataMigration.SettlApi.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace DataMigration.OpsCli.IntegrationTests;
+
+public class ConsumerVersionCleanupHttpTests
+{
+    [Theory]
+    [InlineData("cleared", 0)]
+    [InlineData("retained-id", 1)]
+    [InlineData("retained-name", 1)]
+    [InlineData("wrong-version", 1)]
+    [InlineData("write-error", 1)]
+    public async Task Actual_cleanup_uses_report_selection_and_minimal_dated_patch(string outcome, int expectedExit)
+    {
+        using var handler = new Handler(outcome);
+        using var http = new HttpClient(handler);
+        var options = Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid", SubscriptionKey = "fixture" });
+        var auth = new Auth();
+        var read = new SettlMeteringPointClient(http, auth, options, NullLogger<SettlMeteringPointClient>.Instance);
+        var write = new ConsumerVersionCleanup(http, auth, options, NullLogger<ConsumerVersionCleanup>.Instance);
+        var logs = new List<string>();
+        var runner = new FixConsumer2DuplicateRunner(read, logs.Add, write) { ProgressOutput = TextWriter.Null };
+        Assert.Equal(0, await runner.RunAsync(new() { MeteringPointIds = [handler.Id.ToString()], DryRun = true }));
+        Assert.Null(handler.Payload);
+        Assert.Contains(logs, l => l.Contains("would blank"));
+        Assert.Equal(expectedExit, await runner.RunAsync(new() { MeteringPointIds = [handler.Id.ToString()] }));
+        using var payload = JsonDocument.Parse(Assert.IsType<string>(handler.Payload));
+        var root = payload.RootElement;
+        Assert.False(root.TryGetProperty("MarketUpdate", out _));
+        Assert.Equal(2, root.EnumerateObject().Count());
+        var patch = Assert.Single(root.GetProperty("MeteringPointPatches").EnumerateArray());
+        Assert.False(patch.TryGetProperty("MarketUpdate", out _));
+        Assert.Equal(3, patch.EnumerateObject().Count());
+        Assert.Equal(handler.Id, patch.GetProperty("Id").GetGuid());
+        Assert.Equal(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), patch.GetProperty("PatchTime").GetDateTimeOffset());
+        var party = patch.GetProperty("ConsumerPatch").GetProperty("SecondConsumerParty");
+        Assert.Equal("", party.GetProperty("NationalIdentificationNumber").GetString());
+        Assert.All(party.GetProperty("Name").EnumerateObject(), p => Assert.Equal(JsonValueKind.Null, p.Value.ValueKind));
+        Assert.Equal(1, handler.Writes);
+        Assert.DoesNotContain("1234567890", string.Join("\n", logs));
+        if (expectedExit == 0) Assert.Contains(logs, l => l.Contains("fixed - verified"));
+        else Assert.DoesNotContain(logs, l => l.Contains("fixed - verified"));
+    }
+
+    [Fact]
+    public async Task Wrong_prewrite_version_never_sends_patch()
+    {
+        using var handler = new Handler("wrong-before");
+        using var http = new HttpClient(handler);
+        var writer = new ConsumerVersionCleanup(http, new Auth(), Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<ConsumerVersionCleanup>.Instance);
+        var result = await writer.BlankAsync(handler.Id, new(2026, 1, 1), default);
+        Assert.False(result.Success);
+        Assert.Equal(0, handler.Writes);
+    }
+
+    private sealed class Auth : ISettlAuthService
+    {
+        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult("offline");
+        public void InvalidateToken() { }
+    }
+
+    private sealed class Handler(string outcome) : HttpMessageHandler
+    {
+        internal Guid Id { get; } = Guid.NewGuid();
+        internal string? Payload { get; private set; }
+        internal int Writes { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Assert.Equal("offline.invalid", request.RequestUri!.Host);
+            if (request.Method == HttpMethod.Patch)
+            {
+                Assert.EndsWith("/api/v3/meteringPoints", request.RequestUri.AbsolutePath);
+                Payload = await request.Content!.ReadAsStringAsync(ct);
+                Writes++;
+                return new(outcome == "write-error" ? HttpStatusCode.BadRequest : HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+            Assert.Equal(HttpMethod.Get, request.Method);
+            string json;
+            if (request.RequestUri.AbsolutePath.EndsWith("/history")) json = """{"consumerDates":["2026-01-01T00:00:00Z"]}""";
+            else if (request.RequestUri.AbsolutePath.EndsWith("/deliveryStatuses")) json = """{"deliveryStatuses":[{"inDelivery":false,"period":{"start":"2025-12-01T00:00:00Z","end":"2026-01-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},{"inDelivery":false,"period":{"start":"2026-01-01T00:00:00Z","end":null},"startReason":"MoveIn","stopReason":"Na"}]}""";
+            else
+            {
+                Assert.Contains("/api/v4/meteringPoints/", request.RequestUri.AbsolutePath);
+                if (Writes > 0) Assert.Contains("2026-01-01", Uri.UnescapeDataString(request.RequestUri.Query));
+                json = JsonSerializer.Serialize(new
+                {
+                    id = Id, consumer = new
+                    {
+                        start = outcome == "wrong-before" || Writes > 0 && outcome == "wrong-version" ? "2026-02-01T00:00:00Z" : "2026-01-01T00:00:00Z",
+                        customerType = "Person", marketUpdate = true,
+                        firstConsumerParty = new { name = new { fullName = "Fixture" } },
+                        secondConsumerParty = new
+                        {
+                            name = new { fullName = Writes == 0 || outcome == "retained-name" ? "Fixture" : "" },
+                            nationalIdentificationNumber = Writes == 0 || outcome == "retained-id" ? "1234567890" : ""
+                        }
+                    }
+                });
+            }
+            return new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        }
+    }
+}

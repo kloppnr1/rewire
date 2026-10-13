@@ -1,3 +1,5 @@
+using DataMigration.OpsCli.Services;
+using DataMigration.OpsCli.Runners;
 using DataMigration.SettlApi.Clients;
 using DataMigration.SettlApi.Models;
 
@@ -10,7 +12,7 @@ namespace DataMigration.OpsCli.Tests.Fixtures;
 /// still shows the duplicate. Anything the runner does not call for this command stays unimplemented
 /// on purpose, so a test that starts depending on a new call fails loudly rather than silently.
 /// </summary>
-public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeteringPointClient
+public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeteringPointClient, IConsumerVersionCleanup
 {
     /// <summary>Queued <see cref="GetByIdV4Async"/> responses, one per call in order (the "detect"
     /// read, then the runner's post-write "verify" read). The last item repeats once the queue is
@@ -61,6 +63,17 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     {
         BlankCalls++;
         return Task.FromResult(BlankResult);
+    }
+
+    public List<(Guid Id, DateTime Start)> CleanedVersions { get; } = [];
+    public async Task<(bool Success, string? Error)> BlankAsync(Guid id, DateTime start, CancellationToken ct)
+    {
+        BlankCalls++;
+        CleanedVersions.Add((id, start));
+        if (!BlankResult.Success) return BlankResult;
+        var (point, error) = await GetByIdV4Async(id, start, ct);
+        return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.FindDuplicateName(point) is null
+            ? (true, null) : (false, "still shows duplicate or verification failed: " + error);
     }
 
     private static T Unused<T>() => throw new NotImplementedException("Not used by these tests");
