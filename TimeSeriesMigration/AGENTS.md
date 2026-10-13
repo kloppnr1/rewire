@@ -8,4 +8,4 @@ Read [workspace instructions](../AGENTS.md) for safety, verification, branches, 
 - Xellent timestamps are UTC; Danish calendar boundaries are converted separately. Stored resolution determines posted resolution except story 45902: hourly values in dated quarter-hour reading periods are split only for sending. Follow the current knowledge entry point, not old guide examples.
 - For code changes, build the solution, run both unit test projects, run the separate Xellent integration project when extraction or API mapping changes, then smoke-test the CLI. Commands and prerequisites are in the entry point.
 - Keep these instructions short. Put validated domain knowledge in shared docs and link it here. `CLAUDE.md` remains Claude's setup; its historical tool names, deleted paths, and package names are not current Codex configuration.
-- Leave changes uncommitted unless the user asks to commit; commits go to `develop`.
+- When the user is working in this repo, commit each finished change to `develop` as soon as its checks pass. Push only when the user asks.
