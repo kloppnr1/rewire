@@ -153,12 +153,15 @@ public class ReportConsumer2DuplicateHttpTests
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
         Assert.Equal(3, rows.Length);
-        Assert.All(rows, row => Assert.Equal(17, row.Length));
+        Assert.All(rows, row => Assert.Equal(18, row.Length));
         Assert.Equal("3", rows[2][8]);
         Assert.Equal("Different", rows[2][10]);
         Assert.StartsWith("2026-12-01", rows[2][11]);
         Assert.Equal("No", rows[2][13]);
         Assert.Equal("Yes", rows[2][14]);
+        Assert.Equal("MarketUpdate", rows[0][17]);
+        Assert.Equal("true", rows[2][17]);
+        Assert.Empty(rows[1][17]);
         Assert.All(handler.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
     }
 
@@ -206,7 +209,7 @@ public class ReportConsumer2DuplicateHttpTests
                         id, identification = new { meteringPointIdentification = "fixture" },
                         consumer = new
                         {
-                            start = start + "T00:00:00Z", end, customerType = "Person",
+                            start = start + "T00:00:00Z", end, customerType = "Person", marketUpdate = future,
                             firstConsumerParty = new { name = new { fullName = "Fixture" } },
                             secondConsumerParty = new { name = new { fullName = historical || future && futureDuplicate ? "Fixture" : "Different" } }
                         }

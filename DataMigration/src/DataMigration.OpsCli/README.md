@@ -575,9 +575,11 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   first period), with the warning.
 - DeliveryWarning and ConsumerWarning are blank when valid. A missing delivery
   history retains one diagnostic row with blank delivery values and a warning.
-- The CSV has 17 columns. RowType, environment, current delivery summaries, LastUpdated,
+- The CSV has 18 columns. RowType, environment, current delivery summaries, LastUpdated,
   change signals and calculated overlaps have been removed. Include the
   environment in the output filename, for example consumer2-production.csv.
+- MarketUpdate contains the selected Consumer version's MarketUpdate value as
+  true/false, or blank when no Consumer version can be selected.
 - All four date columns use Danish time with daylight-saving offsets (+01:00 or
   +02:00), and names ending Dk. Null and year-9999 ends show (open).
   Consumer dates without an offset are interpreted as UTC. Missing or inconsistent

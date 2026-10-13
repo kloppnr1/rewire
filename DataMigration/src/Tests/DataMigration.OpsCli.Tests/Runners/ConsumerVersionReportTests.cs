@@ -28,6 +28,8 @@ public class ConsumerVersionReportTests
         Assert.Contains("2026-12-01T01:00:00.0000000+01:00", rows[2]);
         Assert.Equal("1", Cells(rows[1])[8]);
         Assert.Equal("3", Cells(rows[2])[8]);
+        Assert.Equal("false", Cells(rows[1])[17]);
+        Assert.Equal("true", Cells(rows[2])[17]);
         Assert.Contains("duplicates: 1; read errors: 0; versions read: 3; duplicate versions: 2", progress.ToString());
         Assert.Equal(0, client.BlankCalls);
     }
@@ -178,13 +180,14 @@ public class ConsumerVersionReportTests
             .RunAsync("featuretest", [], null, csv));
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
-        Assert.All(rows, row => Assert.Equal(17, row.Length));
+        Assert.All(rows, row => Assert.Equal(18, row.Length));
         Assert.Equal(new[] { "MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
             "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
             "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
-            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning" }, rows[0]);
+            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate" }, rows[0]);
         Assert.Equal(4, rows.Length);
         Assert.Equal("0", rows[1][8]);
+        Assert.Empty(rows[1][17]);
         Assert.Equal("1", rows[2][8]);
         Assert.Equal("Yes", rows[2][13]);
         Assert.Equal("Yes", rows[2][14]);
@@ -220,7 +223,7 @@ public class ConsumerVersionReportTests
         Id = id, Identification = new() { MeteringPointIdentification = "fixture" },
         Consumer = new()
         {
-            Start = start, End = end, CustomerType = "Person",
+            Start = start, End = end, CustomerType = "Person", MarketUpdate = start == December,
             FirstConsumerParty = new() { Name = new() { FullName = "Synthetic" } },
             SecondConsumerParty = new() { Name = new() { FullName = duplicate ? "Synthetic" : "Different" } }
         }
