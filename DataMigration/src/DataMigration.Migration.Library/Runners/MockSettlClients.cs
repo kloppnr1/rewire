@@ -78,6 +78,7 @@ public class MockContractClient : ISettlContractClient
     public Task<(List<ContractLineInfoDto>?, string?)> GetContractLinesAsync(Guid id, CancellationToken ct = default) => Task.FromResult(((List<ContractLineInfoDto>?)null, (string?)null));
     public Task<(List<ContractMeteringPointInfoDto>?, string?)> GetContractMeteringPointsAsync(Guid id, CancellationToken ct = default) => Task.FromResult(((List<ContractMeteringPointInfoDto>?)null, (string?)null));
     public Task<(List<CustomerContractWithMeteringPointsDto>?, string?)> GetCustomerMeteringPointContractsAsync(Guid customerId, CancellationToken ct = default) => Task.FromResult(((List<CustomerContractWithMeteringPointsDto>?)null, (string?)null));
+    public Task<(List<ContractMeteringPointInfoDto>? Links, string? Error)> GetContractMeteringPointLinksAsync(Guid contractId, Guid meteringPointId, CancellationToken ct = default) => Task.FromResult(((List<ContractMeteringPointInfoDto>?)new List<ContractMeteringPointInfoDto>(), (string?)null));
     public Task<(bool, string?)> AddContractMeteringPointsAsync(Guid id, AddContractMeteringPointsRequest r, CancellationToken ct = default) => Task.FromResult((true, (string?)null));
     public Task<(bool, string?)> RemoveContractMeteringPointAsync(Guid contractId, Guid linkId, CancellationToken ct = default) => Task.FromResult((true, (string?)null));
 }

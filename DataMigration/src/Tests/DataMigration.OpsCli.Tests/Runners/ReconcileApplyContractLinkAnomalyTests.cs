@@ -35,6 +35,8 @@ public class ReconcileApplyContractLinkAnomalyTests
             => Task.FromResult(((List<ContractMeteringPointInfoDto>?)Links, (string?)null));
         public Task<(List<CustomerContractWithMeteringPointsDto>?, string?)> GetCustomerMeteringPointContractsAsync(Guid customerId, CancellationToken ct = default)
             => Task.FromResult(((List<CustomerContractWithMeteringPointsDto>?)null, (string?)null));
+        public Task<(List<ContractMeteringPointInfoDto>? Links, string? Error)> GetContractMeteringPointLinksAsync(Guid contractId, Guid meteringPointId, CancellationToken ct = default)
+            => Task.FromResult(((List<ContractMeteringPointInfoDto>?)Links.Where(l => l.MeteringPointId == meteringPointId).ToList(), (string?)null));
         public Task<(bool, string?)> AddContractMeteringPointsAsync(Guid id, AddContractMeteringPointsRequest r, CancellationToken ct = default)
             => Task.FromResult((true, (string?)null));
         public Task<(bool, string?)> RemoveContractMeteringPointAsync(Guid contractId, Guid linkId, CancellationToken ct = default)

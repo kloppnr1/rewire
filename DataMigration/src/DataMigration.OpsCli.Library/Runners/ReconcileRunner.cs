@@ -1514,7 +1514,7 @@ public sealed class ReconcileRunner
                     if (intendedPairs.Contains((contract.Id, mpKey))) continue;
                     // Already-ended link: history, not actionable drift — never propose deleting it.
                     if (m.End < now) continue;
-                    var endLabel = m.End.Year >= 9999 ? "open-ended" : m.End.ToString("yyyy-MM-dd");
+                    var endLabel = m.End is not { } end || end.Year >= 9999 ? "open-ended" : end.ToString("yyyy-MM-dd");
                     rows.Add(new ReconcileDriftRow(rep, "MeteringPoint", mpKey,
                         $"ContractLink[{contract.Id}]", null,
                         $"linked to '{contract.ContractName}' (end {endLabel})",

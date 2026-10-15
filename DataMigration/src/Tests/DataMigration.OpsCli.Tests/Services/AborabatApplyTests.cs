@@ -142,6 +142,8 @@ public class AborabatApplyTests
             => Task.FromResult(((List<ContractMeteringPointInfoDto>?)Links[id], (string?)null));
         public Task<(List<CustomerContractWithMeteringPointsDto>?, string?)> GetCustomerMeteringPointContractsAsync(Guid customerId, CancellationToken ct = default)
             => Task.FromResult(((List<CustomerContractWithMeteringPointsDto>?)null, (string?)null));
+        public Task<(List<ContractMeteringPointInfoDto>? Links, string? Error)> GetContractMeteringPointLinksAsync(Guid contractId, Guid meteringPointId, CancellationToken ct = default)
+            => Task.FromResult(((List<ContractMeteringPointInfoDto>?)new List<ContractMeteringPointInfoDto>(), (string?)null));
         public Task<(bool, string?)> AddContractMeteringPointsAsync(Guid id, AddContractMeteringPointsRequest request, CancellationToken ct = default)
         {
             AddNumber++;

@@ -6,6 +6,7 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
+| 2026-10-15 | `reconcile` | Open-ended contract links (Settl sends no end) are read instead of failing the customer contract read, and are reported as "open-ended". Uses SettlClient 0.7.53. | *(this commit)* |
 | 2026-10-13 | `fix-consumer2-duplicate` | Reuse report delivery-period selection on fresh Settl histories; clean each selected dated Consumer once, exclude first period, omit MarketUpdate from requests, verify both cleared fields and report incomplete scans. | This commit |
 | 2026-10-13 | `report-consumer2-duplicate` | Add MarketUpdate from the selected Consumer version to the CSV, blank when no version can be selected. | *(this commit)* |
 | 2026-10-13 | `report-consumer2-duplicate` | Set DuplicateConsumer2=No only on the first chronological delivery period while preserving AnyDuplicateConsumer2, inclusion and totals; display all dates in Danish time with Dk column names, DST offsets and open-end markers. | 5322b010 |
