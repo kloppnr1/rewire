@@ -190,8 +190,12 @@ public class TimeSeriesRunner
     /// </summary>
     public Action<string, int, int>? OnStepProgress { get; set; }
 
+    // progress.json for a running snapshot (null outside snapshot). Never allowed to slow or break the run.
+    private SnapshotProgressWriter? _progressWriter;
+
     private void ReportProgress(string step, int done, int total)
     {
+        _progressWriter?.Report(step, done, total);
         if (OnStepProgress != null)
             OnStepProgress(step, done, total);
         else if (done % 250 == 0 || done == total)
@@ -814,8 +818,10 @@ public class TimeSeriesRunner
             _log($"Refresh: removed {stale.Count} stored read file(s) from {directory}; done marks kept.");
         }
         _snapshot = new RunSnapshot(directory, reuse: true);
+        _progressWriter = new SnapshotProgressWriter(directory, environment);
         try
         {
+            _progressWriter.StartPhase(1, "Settl list, Xellent contracts, payers");
             _log($"=== Snapshot seed — {environment} → {_snapshot.DirectoryPath} ===");
             List<BatchMeteringPoint> meteringPoints;
             try
@@ -836,6 +842,7 @@ public class TimeSeriesRunner
                 return Error(ex.Message);
             }
 
+            _progressWriter?.StartPhase(2, "Settl reads per metering point");
             _log($"Settl, per metering point: {meteringPoints.Count} metering points, {parallelism} at a time...");
             var done = 0;
             var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -856,6 +863,7 @@ public class TimeSeriesRunner
 
             // Done check: run the batch's own decisions over the snapshot, and ask Settl whether each
             // metering point that would be posted already has points in its window.
+            _progressWriter?.StartPhase(3, "Done check (asking Settl)");
             _log("Done check: metering points Settl already holds points for...");
             var runLog = _log;
             _markDoneMode = true;
@@ -863,16 +871,23 @@ public class TimeSeriesRunner
             _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
             var doneBefore = meteringPoints.Count(m => _done.Contains(SnapshotDone, m.Identification));
             _log = _ => { };
+            // Tally the scope rules the batch applies (the same reasons coverage reports), so progress can
+            // show what holds back the metering points that are not done.
+            _coverageTrace = new CoverageScopeTrace();
             try
             {
                 await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
                     skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
                     cancellationToken);
+                _progressWriter?.SetBlockers(_coverageTrace.Exclusions
+                    .Where(e => e.Value.Total > 0)
+                    .ToDictionary(e => e.Key, e => e.Value.Total, StringComparer.Ordinal));
             }
             finally
             {
                 _log = runLog;
                 _markDoneMode = false;
+                _coverageTrace = null;
             }
             var (doneMarked, doneFailures) = await CheckDoneCandidatesAsync(parallelism, cancellationToken);
             foreach (var failure in doneFailures)
@@ -890,6 +905,7 @@ public class TimeSeriesRunner
             // Xellent point counts for every candidate, in the same window the reports use, stored in the
             // snapshot. readiness, resolution-changes and offline dry runs then read them back instead of
             // counting in Xellent again.
+            _progressWriter?.StartPhase(4, "Xellent counts");
             _log("Counting points in Xellent for each metering point that would be posted...");
             await using (var countContext = BuildXellentContext())
             {
@@ -918,10 +934,13 @@ public class TimeSeriesRunner
                  $"{_snapshot.Fetched} read now, {failures.Count} metering point(s) with a failed read.");
             foreach (var failure in failures.OrderBy(f => f, StringComparer.Ordinal))
                 _log($"  - {failure}");
+            _progressWriter?.Complete();
             return failures.IsEmpty ? 0 : 1;
         }
         finally
         {
+            _progressWriter?.Stop();
+            _progressWriter = null;
             _snapshot = null;
         }
     }

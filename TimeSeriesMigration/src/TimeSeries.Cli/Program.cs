@@ -6,6 +6,7 @@ using DataMigration.SettlApi.Clients;
 using DataMigration.SettlApi.Configuration;
 using DataMigration.SettlApi.Services;
 using TimeSeries.Cli.Runners;
+using TimeSeries.Cli.Services;
 
 // Resolve --env early (before System.CommandLine parses) so config can be overlaid for the chosen env.
 var envArgIndex = Array.IndexOf(args, "--env");
@@ -241,6 +242,27 @@ coverageCommand.SetAction(async (parseResult, cancellationToken) =>
         cancellationToken);
 });
 
+// === progress command ===
+var progressWatchOption = new Option<bool>("--watch") { Description = "Repaint the report in place every --refresh seconds until Ctrl+C" };
+var progressRefreshOption = new Option<int>("--refresh")
+{
+    Description = "Seconds between repaints with --watch (default 10)",
+    DefaultValueFactory = _ => 10
+};
+var progressCommand = new Command("progress",
+    "Show how far a (running) snapshot is: phase, progress in the current step, done marks and what remains. " +
+    "Read-only: reads <Output:BaseDirectory>/snapshot/<env> only, safe to run from another session while snapshot runs.")
+{
+    envOption, progressWatchOption, progressRefreshOption
+};
+
+progressCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    var outputDir = config["Output:BaseDirectory"] ?? "output";
+    return await SnapshotProgressCommand.RunAsync(Path.Combine(outputDir, "snapshot", settlEnv), settlEnv,
+        parseResult.GetValue(progressWatchOption), parseResult.GetValue(progressRefreshOption), cancellationToken);
+});
+
 var rootCommand = new RootCommand("Time Series Migration CLI — extract from Xellent, post to Settl");
 rootCommand.Subcommands.Add(coverageCommand);
 rootCommand.Subcommands.Add(resolutionChangesCommand);
@@ -248,6 +270,7 @@ rootCommand.Subcommands.Add(readinessCommand);
 rootCommand.Subcommands.Add(extractCommand);
 rootCommand.Subcommands.Add(postCommand);
 rootCommand.Subcommands.Add(snapshotCommand);
+rootCommand.Subcommands.Add(progressCommand);
 
 var parseResultTop = rootCommand.Parse(args);
 return await parseResultTop.InvokeAsync();
