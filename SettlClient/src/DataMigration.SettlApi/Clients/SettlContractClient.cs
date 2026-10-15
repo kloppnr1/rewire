@@ -60,6 +60,32 @@ public class SettlContractClient : SettlApiClientBase, ISettlContractClient
         return (all, null);
     }
 
+    public async Task<(List<ContractMeteringPointInfoDto>? Links, string? Error)> GetContractMeteringPointLinksAsync(
+        Guid contractId, Guid meteringPointId, CancellationToken cancellationToken = default)
+    {
+        // Same route as GetContractMeteringPointsAsync, filtered server-side to one metering point.
+        // A metering point can have several links (periods) on the same contract, so page anyway.
+        var all = new List<ContractMeteringPointInfoDto>();
+        var url = $"{Options.BillingBaseUrl}/api/v1/contracts/{contractId}/meteringPoints"
+            + $"?MeteringPointId={meteringPointId}&Limit=1000";
+
+        while (url != null)
+        {
+            var (response, error) = await SendAsync<FindResponse<ContractMeteringPointInfoDto>>(
+                HttpMethod.Get, url, null, JsonOptions, cancellationToken);
+
+            if (error != null)
+                return (null, error);
+
+            if (response?.Items != null)
+                all.AddRange(response.Items);
+
+            url = response?.NextUri;
+        }
+
+        return (all, null);
+    }
+
     public async Task<(List<ContractInfoDto>? Contracts, string? Error)> FindContractsByMeteringPointAsync(
         Guid meteringPointId, CancellationToken cancellationToken = default)
     {

@@ -233,6 +233,7 @@ public class SettlClientFailureLogTests
         public Task<(List<ContractInfoDto>?, string?)> FindContractsAsync(string? commodityType = null, CancellationToken ct = default) => Null<List<ContractInfoDto>>();
         public Task<(List<ContractMeteringPointInfoDto>?, string?)> GetContractMeteringPointsAsync(Guid id, CancellationToken ct = default) => Task.FromResult<(List<ContractMeteringPointInfoDto>?, string?)>(([], null));
         public Task<(List<ContractInfoDto>?, string?)> FindContractsByMeteringPointAsync(Guid meteringPointId, CancellationToken ct = default) => Null<List<ContractInfoDto>>();
+        public Task<(List<ContractMeteringPointInfoDto>?, string?)> GetContractMeteringPointLinksAsync(Guid contractId, Guid meteringPointId, CancellationToken ct = default) => Task.FromResult<(List<ContractMeteringPointInfoDto>?, string?)>(([], null));
         public Task<(List<ContractLineInfoDto>?, string?)> GetContractLinesAsync(Guid id, CancellationToken ct = default) => Task.FromResult<(List<ContractLineInfoDto>?, string?)>(([], null));
         public Task<(List<CustomerContractWithMeteringPointsDto>?, string?)> GetCustomerMeteringPointContractsAsync(Guid id, CancellationToken ct = default) => Task.FromResult<(List<CustomerContractWithMeteringPointsDto>?, string?)>(([], null));
         public Task<(bool, string?)> AddContractMeteringPointsAsync(Guid id, AddContractMeteringPointsRequest request, CancellationToken ct = default)

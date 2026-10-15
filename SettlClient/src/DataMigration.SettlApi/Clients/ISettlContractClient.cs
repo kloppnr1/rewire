@@ -11,6 +11,15 @@ public interface ISettlContractClient
         Guid contractId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns one contract's links to one metering point, each with its link id, start and end.
+    /// Usually one item; more when the metering point was linked to the contract over several
+    /// periods. Empty when there is no link. Route:
+    /// GET /api/v1/contracts/{contractId}/meteringPoints?MeteringPointId={meteringPointId}.
+    /// </summary>
+    Task<(List<ContractMeteringPointInfoDto>? Links, string? Error)> GetContractMeteringPointLinksAsync(
+        Guid contractId, Guid meteringPointId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns every contract a metering point is — or ever was — linked to, including
     /// links whose period has ended. Filters the global contracts list by MeteringPointId
     /// (honoured server-side). This is the way to surface ended links: the customer-scoped

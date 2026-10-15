@@ -5,7 +5,7 @@
          Default VersionSuffix=dev så lokal pack giver 0.6.0-dev (prerelease).
          CI overrider med /p:VersionSuffix=preview.{BuildId} → 0.6.0-preview.{BuildId}.
          Stable release (0.6.0) kræver explicit /p:VersionSuffix= (tom). -->
-    <VersionPrefix>0.7.52</VersionPrefix>
+    <VersionPrefix>0.7.53</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
     <Authors>Verdo</Authors>
     <Company>Verdo</Company>

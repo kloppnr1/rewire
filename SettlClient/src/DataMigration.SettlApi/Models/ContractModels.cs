@@ -50,7 +50,9 @@ public class CustomerContractWithMeteringPointsDto
     public string? ContractName { get; set; }
     public string? ContractDescription { get; set; }
     public DateTimeOffset ContractStart { get; set; }
-    public DateTimeOffset ContractEnd { get; set; }
+    /// <summary>Null when the contract has no end date (open-ended). Nullable in Settl's schema
+    /// and seen as null in featuretest.</summary>
+    public DateTimeOffset? ContractEnd { get; set; }
     public List<CustomerContractMeteringPointDto> MeteringPoints { get; set; } = [];
 }
 
@@ -60,7 +62,8 @@ public class CustomerContractMeteringPointDto
     public string? MeteringPointIdentification { get; set; }
     public string? CommodityType { get; set; }
     public DateTimeOffset Start { get; set; }
-    public DateTimeOffset End { get; set; }
+    /// <summary>Null when the link has no end date (open-ended). Nullable in Settl's schema.</summary>
+    public DateTimeOffset? End { get; set; }
 }
 
 /// <summary>
