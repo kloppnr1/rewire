@@ -2022,8 +2022,13 @@ public class TimeSeriesRunner
                     RecordNotMigrated($"customer {accountNumber}: {closeProblem}", "Not migrated: migration close validation failed");
                     continue;
                 }
+                // Decided 2026-10-16: not closed as a migration at COS − 1 means it was not migrated, so it is a skip.
                 RecordCoverageExclusion("Migration close validation failed", isChild);
-                if (!RecordFailure($"  MP {identification} (customer {accountNumber}{(contractIdentification != identification ? $", on the parent {contractIdentification}" : "")}): {closeProblem}")) return 1;
+                CountState("Skipped", "contract not closed as a migration at COS − 1");
+                var closeReason = $"customer {accountNumber}{(contractIdentification != identification ? $", on the parent {contractIdentification}" : "")}: {closeProblem}";
+                _log($"SKIP MP {identification}: not closed as a migration — {closeReason}{TypeSuffix()}");
+                RecordSkip(TimeSeriesSkipCategory.NotMigrated, accountNumber, identification, mpGuid,
+                    revisionResolution.Revision, revisionResolution.DeliveryBoundary, closeReason);
                 continue;
             }
 

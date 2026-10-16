@@ -1902,7 +1902,7 @@ public class PostAllRunnerTests : IDisposable
     [InlineData("contract-open")]
     [InlineData("agreement-status")]
     [InlineData("agreement-end")]
-    public async Task RunPostAllAsync_NotClosedAsAMigration_FailsTheMeteringPoint(string problem)
+    public async Task RunPostAllAsync_NotClosedAsAMigration_IsSkipped(string problem)
     {
         // Delivery from 2023-06-15, so the account's contract and its agreement should both end
         // 2023-06-14 and the agreement should be "Leverance ophørt" (5).
@@ -1926,12 +1926,15 @@ public class PostAllRunnerTests : IDisposable
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
 
-        Assert.Equal(1, rc);
+        // Not closed as a migration at COS − 1 means not migrated: a skip, not a failure (decided 2026-10-16).
+        Assert.Equal(0, rc);
         Assert.Empty(_ts.PostCalls);
         var expected = problem == "contract-open"
             ? "contract does not end on 2023-06-14"
             : "agreement is not \"Leverance ophørt\"";
-        Assert.Contains(logs, l => l.StartsWith($"ERROR:   MP {MpId1} (customer {Account}): {expected}", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: not closed as a migration — customer {Account}: {expected}", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(OutputDir, "skip-not-migrated.csv")));
+        Assert.Contains(logs, l => l.StartsWith("  Skipped: 1", StringComparison.Ordinal));
     }
 
     [Fact]
