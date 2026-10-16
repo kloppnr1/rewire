@@ -848,7 +848,8 @@ public class PostAllRunnerTests : IDisposable
         InSettl((MpId1, Guid.NewGuid()));
         BothSeriesInSettl();
         var logs = new List<string>();
-        Assert.Equal(1, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: true));
+        // Blocked, not failed: the run does not stop and exits 0.
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
         Assert.Empty(_ts.PostCalls);
         Assert.Empty(_mp.AddEipCalls);
         Assert.Contains(logs, l => l.Contains($"Conversion failed for MP {MpId1}") && l.Contains("0.0001"));
@@ -1184,12 +1185,16 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(MpId2, File.ReadAllText(Path.Combine(OutputDir, "skip-not-installed.csv")));
         Assert.Contains(logs, l => l.StartsWith("Run completed:", StringComparison.Ordinal) && l.Contains(" 1 posted,", StringComparison.Ordinal));
         Assert.Contains(logs, l => l.Contains("1 (1 parents, 0 children) skipped (see skip files)", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1  no meter installed (Xellent status Oprettet)", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith(dryRun ? "  Ready: 1" : "  Done: 1", StringComparison.Ordinal));
         if (!dryRun)
             Assert.Equal(mp1Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
     }
 
-    [Fact]
-    public async Task RunPostAllAsync_MeterInstalledButNoValues_FailsTheMeteringPoint()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunPostAllAsync_MeterInstalledButNoValues_IsBlocked(bool dryRun)
     {
         // MP1 has a meter that delivers (status 6) but no values: that is an error, not a skip.
         var supplyStart = new DateTime(2023, 6, 15);
@@ -1200,9 +1205,13 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
         var logs = new List<string>();
 
-        Assert.Equal(1, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
 
         Assert.Contains(logs, l => l.StartsWith("ERROR:", StringComparison.Ordinal) && l.Contains("a meter is installed", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1  meter installed, but no values in Xellent", StringComparison.Ordinal));
+        // Blocked ones are listed per reason, so the group can be handed over.
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "blocked-meter-installed-but-no-values-in-xellent.csv")));
+        Assert.Contains(logs, l => l.Contains("→ blocked-meter-installed-but-no-values-in-xellent.csv", StringComparison.Ordinal));
         Assert.False(File.Exists(Path.Combine(OutputDir, "skip-not-installed.csv")));
         Assert.Empty(_mp.AddEipCalls);
     }
@@ -1532,7 +1541,7 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task RunPostAllAsync_HeldBySeveralAccountsOnTheDayBeforeDelivery_Fails()
+    public async Task RunPostAllAsync_HeldBySeveralAccountsOnTheDayBeforeDelivery_IsBlocked()
     {
         var supplyStart = new DateTime(2023, 6, 15);
         InDeliveryFrom(supplyStart);
@@ -1544,9 +1553,9 @@ public class PostAllRunnerTests : IDisposable
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
 
-        Assert.Equal(1, rc);
+        Assert.Equal(0, rc);
         Assert.Empty(_ts.PostCalls);
-        Assert.Contains($"ERROR:   MP {MpId1}: held by several accounts on 2023-06-14 (acct1/acct2)", logs);
+        Assert.Contains($"BLOCKED:   MP {MpId1}: held by several accounts on 2023-06-14 (acct1/acct2)", logs);
     }
 
     [Fact]
@@ -1590,7 +1599,7 @@ public class PostAllRunnerTests : IDisposable
         var resolvedRevision = new DateTimeOffset(2023, 7, 1, 4, 5, 6, TimeSpan.FromHours(-3));
         var logs = new List<string>();
 
-        // Inside the window: a metering point with a meter but no values is stopped before Settl is asked for its series.
+        // Inside the window: a metering point with a meter but no values is blocked before Settl is asked for its series.
         _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 1);
         _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 1);
         _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2023, 7, 1));
@@ -1926,7 +1935,7 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task RunPostAllAsync_WindowEndDiffersFromSettlDeliveryDate_FailsTheMeteringPoint()
+    public async Task RunPostAllAsync_WindowEndDiffersFromSettlDeliveryDate_BlocksTheMeteringPoint()
     {
         // The delivery-status list says delivery started 2023-06-15, but the metering point's current
         // delivery status (Settl's page) says 2023-07-01.
@@ -1943,13 +1952,14 @@ public class PostAllRunnerTests : IDisposable
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
 
-        Assert.Equal(1, rc);
+        Assert.Equal(0, rc);
         Assert.Empty(_ts.PostCalls);
-        Assert.Contains($"ERROR:   Window end 2023-06-15 for MP {MpId1} does not match Settl delivery date 2023-07-01.", logs);
+        Assert.Contains($"BLOCKED:   Window end 2023-06-15 for MP {MpId1} does not match Settl delivery date 2023-07-01.", logs);
+        Assert.True(File.Exists(Path.Combine(OutputDir, "blocked-window-end-differs-from-settl-delivery-date.csv")));
     }
 
     [Fact]
-    public async Task RunPostAllAsync_SeriesWithoutAgreement_FailsTheMeteringPoint()
+    public async Task RunPostAllAsync_SeriesWithoutAgreement_BlocksTheMeteringPoint()
     {
         var mpGuid = Guid.NewGuid();
         var supplyStart = new DateTime(2023, 6, 15);
@@ -1961,7 +1971,7 @@ public class PostAllRunnerTests : IDisposable
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
 
-        Assert.Equal(1, rc);
+        Assert.Equal(0, rc);
         Assert.Empty(_ts.PostCalls);
         Assert.Contains(logs, l => l.Contains("Xellent series without an agreement period") && l.Contains("/xxx"));
     }

@@ -194,6 +194,69 @@ public class TimeSeriesRunner
     /// </summary>
     public Action<string, int, int>? OnStepProgress { get; set; }
 
+    // The states of the time series migration process: every metering point a post --all run looks at ends
+    // the run in exactly one, with a reason. "Wrong" (sent, but different from Xellent) needs a value
+    // comparison and is not counted here.
+    private static readonly string[] StateOrder = ["Done", "Ready", "Skipped", "Excluded", "Blocked", "Failed"];
+    private readonly Dictionary<string, SortedDictionary<string, int>> _states = new(StringComparer.Ordinal);
+    private TimeSeriesSkipCategory? _lastSkip;
+
+    private void CountState(string state, string reason, int count = 1)
+    {
+        if (_markDoneMode || count <= 0)
+            return;
+        if (!_states.TryGetValue(state, out var reasons))
+            _states[state] = reasons = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        reasons[reason] = reasons.GetValueOrDefault(reason) + count;
+    }
+
+    private static readonly string[] BlockedCsvHeader =
+        ["MeteringPointIdentification", "Type", "SettlMeteringPointId", "CustomerNumber", "Reason", "Detail"];
+
+    // One file per blocked reason, so each group can be handed to whoever has to fix it.
+    private static string BlockedCsvFileName(string reason) =>
+        "blocked-" + System.Text.RegularExpressions.Regex.Replace(reason.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-') + ".csv";
+
+    /// <summary>Counts a blocked metering point and lists it in the CSV for its reason.</summary>
+    private void CountBlocked(string reason, string meteringPoint, Guid settlId, string? account, string detail)
+    {
+        if (_markDoneMode)
+            return;
+        CountState("Blocked", reason);
+        Directory.CreateDirectory(_outputBaseDirectory);
+        AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)), BlockedCsvHeader,
+            [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail]);
+    }
+
+    private int StateTotal(string state) => _states.TryGetValue(state, out var reasons) ? reasons.Values.Sum() : 0;
+
+    private string StateLine() => string.Join(" · ", StateOrder.Select(s => $"{s.ToLowerInvariant()} {StateTotal(s):N0}"));
+
+    // A send that stopped: failed when a call to Settl itself went wrong, blocked when something has to be fixed first.
+    private static (string State, string Reason) ClassifyPostError(string? error)
+    {
+        if (error == null)
+            return ("Failed", "stopped without a reason (see log)");
+        string[] settlCalls = ["Settl MP lookup failed", "GetTimeSeries failed", "GetPointsSummary failed",
+            "Time-series POST failed", "externallyInvoicedPeriod POST failed", "Revision resolution failed"];
+        if (settlCalls.Any(c => error.Contains(c, StringComparison.Ordinal)))
+            return ("Failed", "a call to Settl went wrong");
+        if (error.Contains("No Settl TimeSeries found", StringComparison.Ordinal))
+        {
+            var resolution = System.Text.RegularExpressions.Regex.Match(error, @"segment (\S+)").Groups[1].Value;
+            return ("Blocked", $"missing {resolution} series in Settl".Replace("  ", " "));
+        }
+        if (error.Contains("without an agreement period", StringComparison.Ordinal))
+            return ("Blocked", "Xellent series without an agreement period");
+        if (error.Contains("a meter is installed", StringComparison.Ordinal))
+            return ("Blocked", "meter installed, but no values in Xellent");
+        if (error.Contains("Conversion failed", StringComparison.Ordinal))
+            return ("Blocked", "hourly values cannot be split into quarters");
+        if (error.Contains("not found in Settl", StringComparison.Ordinal))
+            return ("Blocked", "metering point not found in Settl");
+        return ("Blocked", "other (see log)");
+    }
+
     // progress.json for a running snapshot (null outside snapshot). Never allowed to slow or break the run.
     private SnapshotProgressWriter? _progressWriter;
 
@@ -710,6 +773,7 @@ public class TimeSeriesRunner
 
             if (mpError != null)
             {
+                options.Error = mpError.Trim();
                 _log($"ERROR: {mpError}");
                 failedMps.Add(mpTs.MeteringPointId);
                 if (!options.ContinueOnError)
@@ -1669,6 +1733,7 @@ public class TimeSeriesRunner
 
         _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
 
+        _states.Clear();
         var totalPosted = new Tally();
         var totalSkipped = new Tally();
         var totalFailed = new Tally();
@@ -1710,6 +1775,7 @@ public class TimeSeriesRunner
             if (totalAlreadyDone.Total > 0)
             {
                 settlMeteringPoints = settlMeteringPoints.Where(m => !_done.Contains(SnapshotDone, m.Identification)).ToList();
+                CountState("Done", "already in Settl", totalAlreadyDone.Total);
                 _log($"Already done: {totalAlreadyDone.Total} metering point(s) already in Settl (snapshot check or an earlier post), left out ({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
             }
         }
@@ -1796,6 +1862,7 @@ public class TimeSeriesRunner
             if (!inDelivery && revisionResolution.Outcome == RevisionResolutionOutcome.Error)
             {
                 totalNoDeliveryStart.Add(isChild);
+                CountState("Skipped", "never delivered (no delivery start in Settl)");
                 RecordCoverageExclusion("Never delivered (no delivery start)", isChild);
                 continue;
             }
@@ -1834,6 +1901,7 @@ public class TimeSeriesRunner
             void RecordNotMigrated(string reason, string coverageReason)
             {
                 totalNotMigrated.Add(isChild);
+                CountState("Skipped", coverageReason);
                 RecordCoverageExclusion(coverageReason, isChild);
                 _missingReadingsScan?.Remove(identification);
                 _log($"SKIP MP {identification}: not migrated — {reason}{TypeSuffix()}");
@@ -1844,6 +1912,8 @@ public class TimeSeriesRunner
             if (revisionResolution.Outcome == RevisionResolutionOutcome.Ambiguous)
             {
                 totalAmbiguousRevisions.Add(isChild);
+                CountBlocked("unclear delivery dates in Settl (several in delivery)", identification, mpGuid, null,
+                    $"{revisionResolution.ActiveStatuses.Count} delivery statuses marked in delivery");
                 RecordCoverageExclusion("Ambiguous delivery revision", isChild);
                 _log($"SKIP MP {identification}: ambiguous delivery statuses ({revisionResolution.ActiveStatuses.Count} InDelivery=true){TypeSuffix()}");
                 RecordAmbiguousRevision(
@@ -1856,6 +1926,8 @@ public class TimeSeriesRunner
             if (revisionResolution.Outcome == RevisionResolutionOutcome.SafetySkip)
             {
                 RecordCoverageExclusion($"Delivery safety: {revisionResolution.SkipCategory}", isChild);
+                CountBlocked($"unclear delivery dates in Settl ({revisionResolution.SkipCategory})", identification, mpGuid, null,
+                    revisionResolution.SkipReason ?? "");
                 _log($"REVISION MP {identification}: {revisionResolution.Revision:O}");
                 _log($"SKIP MP {identification}: {revisionResolution.SkipReason}{TypeSuffix()}");
                 RecordSkip(
@@ -1871,6 +1943,7 @@ public class TimeSeriesRunner
             if (revisionResolution.Outcome == RevisionResolutionOutcome.Error)
             {
                 RecordCoverageExclusion("Delivery revision could not be resolved", isChild);
+                CountState("Failed", "Settl delivery status could not be read");
                 if (!RecordFailure($"  Revision resolution failed for MP {identification} ({mpGuid}): {revisionResolution.Error}")) return 1;
                 continue;
             }
@@ -1910,6 +1983,7 @@ public class TimeSeriesRunner
                     continue;
                 }
                 RecordCoverageExclusion("Missing Xellent contract", isChild);
+                CountState("Skipped", "no Xellent contract at COS − 1");
                 _log($"SKIP MP {identification}: {reason}{TypeSuffix()}");
                 RecordSkip(TimeSeriesSkipCategory.MissingInXellent, null, identification, mpGuid,
                     revisionResolution.Revision, revisionResolution.DeliveryBoundary, reason);
@@ -1924,7 +1998,9 @@ public class TimeSeriesRunner
                     continue;
                 }
                 RecordCoverageExclusion("Multiple Xellent account holders", isChild);
-                if (!RecordFailure($"  MP {identification}: {reason}")) return 1;
+                // Blocked, not failed: the run goes on (only a failed call to Settl stops it).
+                CountBlocked("several Xellent account holders at COS − 1", identification, mpGuid, null, reason);
+                _log($"BLOCKED:   MP {identification}: {reason}");
                 continue;
             }
             var accountNumber = holders[0];
@@ -1993,6 +2069,7 @@ public class TimeSeriesRunner
                 if (currentErr != null)
                 {
                     RecordCoverageExclusion("Settl delivery status lookup failed", isChild);
+                    CountState("Failed", "Settl delivery status could not be read");
                     if (!RecordFailure($"  Settl delivery status lookup failed for MP {identification} ({revisionGuid}): {currentErr}")) return 1;
                     continue;
                 }
@@ -2003,8 +2080,10 @@ public class TimeSeriesRunner
                 if (settlDeliveryDate != DateOnly.FromDateTime(endDate))
                 {
                     RecordCoverageExclusion("Window end differs from Settl delivery date", isChild);
-                    if (!RecordFailure($"  Window end {endDate:yyyy-MM-dd} for MP {identification} does not match Settl delivery date " +
-                                       $"{(settlDeliveryDate is { } d ? d.ToString("yyyy-MM-dd") : "(none)")}.")) return 1;
+                    CountBlocked("window end differs from Settl delivery date", identification, mpGuid, accountNumber,
+                        $"window end {endDate:yyyy-MM-dd}, Settl delivery date {(settlDeliveryDate is { } sd ? sd.ToString("yyyy-MM-dd") : "(none)")}");
+                    _log($"BLOCKED:   Window end {endDate:yyyy-MM-dd} for MP {identification} does not match Settl delivery date " +
+                         $"{(settlDeliveryDate is { } d ? d.ToString("yyyy-MM-dd") : "(none)")}.");
                     continue;
                 }
             }
@@ -2040,6 +2119,7 @@ public class TimeSeriesRunner
                 SkipResolutionChange = skipResolutionChange,
                 SkipIfExistingPoints = skipIfExistingPoints,
             };
+            _lastSkip = null;
             var rc = await RunPostCoreAsync(postOptions, cancellationToken);
 
             // A live post that put points in Settl marks the metering point done, like the seed's check would.
@@ -2049,6 +2129,15 @@ public class TimeSeriesRunner
 
             if (rc != 0)
             {
+                var (state, stateReason) = ClassifyPostError(postOptions.Error);
+                if (state == "Blocked")
+                {
+                    // Blocked, not failed: something has to be fixed first. Listed, and the run goes on.
+                    CountBlocked(stateReason, identification, mpGuid, accountNumber, postOptions.Error ?? "");
+                    _log($"  → MP {identification} ({_meteringPointType.ToLowerInvariant()}) blocked: {stateReason}");
+                    continue;
+                }
+                CountState(state, stateReason);
                 failures.Add($"MP {identification} ({_meteringPointType.ToLowerInvariant()}, customer {accountNumber}) post failed");
                 totalFailed.Add(isChild);
                 if (!continueOnError)
@@ -2065,9 +2154,20 @@ public class TimeSeriesRunner
             if (postOptions.Skipped)
             {
                 totalSkipped.Add(isChild);
+                CountState("Skipped",
+                    _lastSkip switch
+                    {
+                        TimeSeriesSkipCategory.NotInstalled => "no meter installed (Xellent status Oprettet)",
+                        TimeSeriesSkipCategory.NoPointsAfterBoundary => "no values after the delivery boundary",
+                        TimeSeriesSkipCategory.ResolutionChange => "resolution change (--skip-resolution-change)",
+                        TimeSeriesSkipCategory.ExistingSettlData => "Settl already has points (--skip-if-existing-points)",
+                        { } other => other.ToString(),
+                        null => "skipped during the post (see log)",
+                    });
                 continue;
             }
             totalPosted.Add(isChild);
+            CountState(dryRun ? "Ready" : "Done", dryRun ? "would be posted" : "posted in this run");
         }
 
         _log("");
@@ -2084,6 +2184,23 @@ public class TimeSeriesRunner
              (cosFrom != null || cosTo != null ? $"{totalOutOfRange} outside the delivery-start range, " : "") +
              (skip is > 0 ? $"{totalPassedOver} passed over (--skip), " : "") +
              $"{totalAmbiguousRevisions} ambiguous revision safety skips.");
+        if (!_markDoneMode)
+        {
+            _log("");
+            _log($"States{(dryRun ? " (dry run: ready = would be posted)" : "")}: {StateLine()}");
+            foreach (var state in StateOrder.Where(st => StateTotal(st) > 0))
+            {
+                _log($"  {state}: {StateTotal(state):N0}");
+                foreach (var (reason, count) in _states[state].OrderByDescending(r => r.Value))
+                    _log($"    {count,8:N0}  {reason}" + (state == "Blocked" ? $"  → {BlockedCsvFileName(reason)}" : ""));
+            }
+            if (StateTotal("Blocked") > 0)
+            {
+                _log($"  Blocked metering points are listed per reason in {Path.GetFullPath(_outputBaseDirectory)}: " +
+                     "hand each file to whoever has to fix that group.");
+            }
+            _log("");
+        }
         if (failures.Count > 0)
         {
             _log($"{failures.Count} failure(s) skipped (--force){(totalFailed.Total == failures.Count ? $" — {totalFailed}" : "")}:");
@@ -2277,6 +2394,7 @@ public class TimeSeriesRunner
             RecordSkip(TimeSeriesSkipCategory.ExcludedPayer, null, mp.Identification, mp.Id, null, null, $"payer {payers[mp.Id]}");
         }
         _meteringPointType = "";
+        CountState("Skipped", "payer in the 6##### series", excluded.Count);
         _log($"Payer 6#####: {excluded.Count} metering point(s) left out ({SkipCsvFileNames[TimeSeriesSkipCategory.ExcludedPayer]})");
         var excludedIds = excluded.Select(m => m.Id).ToHashSet();
         return meteringPoints.Where(m => !excludedIds.Contains(m.Id)).ToList();
@@ -2978,6 +3096,9 @@ public class TimeSeriesRunner
             if (File.Exists(path))
                 File.Delete(path);
         }
+        if (Directory.Exists(_outputBaseDirectory))
+            foreach (var path in Directory.GetFiles(_outputBaseDirectory, "blocked-*.csv"))
+                File.Delete(path);
     }
 
     /// <summary>
@@ -2998,6 +3119,8 @@ public class TimeSeriesRunner
         DateTimeOffset? deliveryBoundary,
         string detail)
     {
+        if (category != TimeSeriesSkipCategory.KnownIssueXellentResolution)
+            _lastSkip = category;
         if (_markDoneMode)
             return;
         Directory.CreateDirectory(_outputBaseDirectory);
@@ -3209,6 +3332,9 @@ public class PostOptions
 
     /// <summary>After a run that succeeded: nothing was posted because every metering point was skipped to a skip file.</summary>
     public bool Skipped { get; internal set; }
+
+    /// <summary>After a run that stopped on a metering point: why (the ERROR line's text).</summary>
+    public string? Error { get; internal set; }
 
     /// <summary>
     /// When set, skip SearchByIdentificationAsync and use this Guid directly. Used by profile-mode
