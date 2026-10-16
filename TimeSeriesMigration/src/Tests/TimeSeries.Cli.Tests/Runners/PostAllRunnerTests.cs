@@ -1161,6 +1161,52 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(logs, l => l.Contains("1 never delivered", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunPostAllAsync_NoMeterInstalled_IsSkippedToItsOwnFile_NotCountedAsPosted(bool dryRun)
+    {
+        // MP2 has no values and Xellent status 5 "Oprettet": no meter at the address, nothing to post.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, companyId: "for", partStart: new DateTime(2020, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedMeterPointStatus(MpId2, "for", status: 5, start: new DateTime(2020, 1, 1));
+        var (mp1Guid, mp2Guid, tsGuid) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
+
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId2}: no meter installed", StringComparison.Ordinal));
+        Assert.Contains(MpId2, File.ReadAllText(Path.Combine(OutputDir, "skip-not-installed.csv")));
+        Assert.Contains(logs, l => l.StartsWith("Run completed:", StringComparison.Ordinal) && l.Contains(" 1 posted,", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1 (1 parents, 0 children) skipped (see skip files)", StringComparison.Ordinal));
+        if (!dryRun)
+            Assert.Equal(mp1Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_MeterInstalledButNoValues_FailsTheMeteringPoint()
+    {
+        // MP1 has a meter that delivers (status 6) but no values: that is an error, not a skip.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2020, 1, 1), migratedOn: supplyStart);
+        _xellent.SeedMeterPointStatus(MpId1, "for", status: 6, start: new DateTime(2020, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var logs = new List<string>();
+
+        Assert.Equal(1, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Contains(logs, l => l.StartsWith("ERROR:", StringComparison.Ordinal) && l.Contains("a meter is installed", StringComparison.Ordinal));
+        Assert.False(File.Exists(Path.Combine(OutputDir, "skip-not-installed.csv")));
+        Assert.Empty(_mp.AddEipCalls);
+    }
+
     [Fact]
     public async Task RunPostAllAsync_NotInDeliveryAndNotClosedAsAMigration_IsSkippedAsNotMigrated()
     {
@@ -1544,8 +1590,9 @@ public class PostAllRunnerTests : IDisposable
         var resolvedRevision = new DateTimeOffset(2023, 7, 1, 4, 5, 6, TimeSpan.FromHours(-3));
         var logs = new List<string>();
 
-        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
-        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        // Inside the window: a metering point with a meter but no values is stopped before Settl is asked for its series.
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 1);
         _xellent.SeedContract(Account, MpId1, migratedOn: new DateTime(2023, 7, 1));
         _xellent.SeedContract(Account, MpId2, migratedOn: new DateTime(2023, 7, 1));
         InSettl((MpId1, ambiguousMpGuid), (MpId2, resolvedMpGuid));

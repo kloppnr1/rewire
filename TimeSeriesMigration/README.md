@@ -97,6 +97,7 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 
 | File | Reason |
 |------|--------|
+| `skip-not-installed.csv` | No values in the window and Xellent status 5 "Oprettet": no meter installed or connected. Nothing to post; not counted as posted. A metering point with a meter but no values fails instead |
 | `skip-payer-6-series.csv` | The metering point's current payer in Settl is in the 6##### series (six digits starting with 6); those are not migrated. Left out before `--skip` / `--limit` count |
 | `skip-missing-in-xellent.csv` | Nobody held the metering point in Xellent the day before delivery |
 | `skip-not-migrated.csv` | Not in delivery in Settl, and no migration in Xellent |

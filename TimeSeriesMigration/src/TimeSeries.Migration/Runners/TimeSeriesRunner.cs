@@ -55,7 +55,10 @@ public enum TimeSeriesSkipCategory
     KnownIssueXellentResolution,
 
     /// <summary>The metering point's current payer in Settl is in the 6##### series; those are not migrated.</summary>
-    ExcludedPayer
+    ExcludedPayer,
+
+    /// <summary>No values in the window and Xellent status 5 "Oprettet": no meter is installed or connected, so there is nothing to post.</summary>
+    NotInstalled
 }
 
 public sealed record CoverageStatusCount(string Status, int Count);
@@ -133,7 +136,8 @@ public class TimeSeriesRunner
             [TimeSeriesSkipCategory.MissingInXellent] = "skip-missing-in-xellent.csv",
             [TimeSeriesSkipCategory.NotMigrated] = "skip-not-migrated.csv",
             [TimeSeriesSkipCategory.KnownIssueXellentResolution] = "known-issue-xellent-resolution.csv",
-            [TimeSeriesSkipCategory.ExcludedPayer] = "skip-payer-6-series.csv"
+            [TimeSeriesSkipCategory.ExcludedPayer] = "skip-payer-6-series.csv",
+            [TimeSeriesSkipCategory.NotInstalled] = "skip-not-installed.csv"
         };
 
     /// <summary>Every skip artifact a run can produce, ambiguity CSV included. Used by the dashboard to bundle them.</summary>
@@ -367,6 +371,24 @@ public class TimeSeriesRunner
             : await ExtractTimeSeriesAsync(
                 context, accounts, meteringPointIds, deliveryCategory, options.IncludeChildren, startDate, endDate, quiet: inBatch);
 
+        // A batch metering point Xellent has no values for. No meter installed: a skip. A meter but no
+        // readings: an error.
+        if (inBatch && timeSeries.Count == 0 && options.MeteringPointId != null)
+        {
+            OnPhase?.Invoke(null);
+            if (await MeterPointStatusAsync(context, options.MeteringPointId) != MeterPointStatusCreated)
+            {
+                _log($"ERROR:   No values in Xellent in the window for MP {options.MeteringPointId}, and a meter is installed.");
+                return 1;
+            }
+            _log($"SKIP MP {options.MeteringPointId}: no meter installed (Xellent status Oprettet){TypeSuffix()}");
+            RecordSkip(TimeSeriesSkipCategory.NotInstalled, options.CustomerNumber ?? options.AccountNumber,
+                options.MeteringPointId, options.MeteringPointGuid, options.ResolvedRevision, options.ResolvedDeliveryBoundary,
+                "no values, Xellent status Oprettet");
+            options.Skipped = true;
+            return 0;
+        }
+
         // Known Xellent issue: values stored at the wrong resolution. Listed in their own file whatever
         // happens next, so every such metering point can be found.
         foreach (var mpTs in timeSeries.Where(t => t.ValuesWithWrongResolution.Count > 0))
@@ -465,6 +487,16 @@ public class TimeSeriesRunner
                         points, false);
 
             var originalPointCount = mpTs.Segments.Sum(PointCount) + (mpTs.CountedPointsBeforeBoundary ?? 0);
+            // No values: a skip only when no meter is installed (Xellent status Oprettet), otherwise an error.
+            if (originalPointCount == 0)
+            {
+                if (await MeterPointStatusAsync(context, mpTs.MeteringPointId) != MeterPointStatusCreated)
+                    return ($"  No values in Xellent in the window for MP {mpTs.MeteringPointId}, and a meter is installed.", points, false);
+                _log($"SKIP MP {mpTs.MeteringPointId}: no meter installed (Xellent status Oprettet){TypeSuffix()}");
+                RecordSkip(TimeSeriesSkipCategory.NotInstalled, options.CustomerNumber ?? options.AccountNumber,
+                    mpTs.MeteringPointId, mpGuid, revision, deliveryBoundary, "no values, Xellent status Oprettet");
+                return (null, points, true);
+            }
             var filteredSegments = mpTs.Segments
                 .Select(segment => segment.CountedPoints != null
                     ? segment // counted on or after the boundary already
@@ -712,6 +744,7 @@ public class TimeSeriesRunner
             return 1;
         }
         options.PointsPosted = dryRun ? 0 : pointsPosted;
+        options.Skipped = posted == 0 && skippedSafety > 0;
         LogSetup(dryRun
             ? $"Dry run completed: {posted} metering points{skipFragment}, {pointsPosted:N0} points would be posted."
             : $"Post completed successfully: {posted} metering points{skipFragment}, {pointsPosted:N0} points posted.");
@@ -1637,6 +1670,7 @@ public class TimeSeriesRunner
         _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
 
         var totalPosted = new Tally();
+        var totalSkipped = new Tally();
         var totalFailed = new Tally();
         var totalAmbiguousRevisions = new Tally();
         var failures = new List<string>();
@@ -2027,6 +2061,12 @@ public class TimeSeriesRunner
                 continue;
             }
 
+            // A metering point the post skipped (no meter installed, safety checks) is in a skip file, not posted.
+            if (postOptions.Skipped)
+            {
+                totalSkipped.Add(isChild);
+                continue;
+            }
             totalPosted.Add(isChild);
         }
 
@@ -2039,7 +2079,7 @@ public class TimeSeriesRunner
              (skip is > 0 ? $"{totalPassedOver.Total} passed over (--skip), " : "") +
              $"{totalAmbiguousRevisions.Total} ambiguous revision safety skips, {totalChildren} children " +
              (_includeChildren ? "included." : "skipped."));
-        _log($"  Parents/children: {totalAlreadyDone} already done, {totalInRange} processed, {totalPosted} posted, " +
+        _log($"  Parents/children: {totalAlreadyDone} already done, {totalInRange} processed, {totalPosted} posted, {totalSkipped} skipped (see skip files), " +
              $"{totalNoDeliveryStart} never delivered, {totalNotMigrated} not migrated, " +
              (cosFrom != null || cosTo != null ? $"{totalOutOfRange} outside the delivery-start range, " : "") +
              (skip is > 0 ? $"{totalPassedOver} passed over (--skip), " : "") +
@@ -3166,6 +3206,9 @@ public class PostOptions
 
     /// <summary>After a live run that succeeded: how many points were posted.</summary>
     public int PointsPosted { get; internal set; }
+
+    /// <summary>After a run that succeeded: nothing was posted because every metering point was skipped to a skip file.</summary>
+    public bool Skipped { get; internal set; }
 
     /// <summary>
     /// When set, skip SearchByIdentificationAsync and use this Guid directly. Used by profile-mode
