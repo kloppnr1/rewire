@@ -112,6 +112,15 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
 
     if (all)
     {
+        // One line per metering point goes to a log file; the console shows the counts per state,
+        // updating in place, and the summary at the end.
+        Directory.CreateDirectory(outputDir);
+        var logPath = Path.GetFullPath(Path.Combine(outputDir, $"post-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.log"));
+        using var runConsole = new RunConsole(logPath);
+        runner.OnLogLine = runConsole.Line;
+        runner.OnStatus = runConsole.Status;
+        runner.OnStepProgress = null;
+        Console.WriteLine($"Details per metering point: {logPath}");
         return await runner.RunPostAllAsync(
             settlEnv,
             parseResult.GetValue(dryRunOption),
@@ -392,3 +401,70 @@ static (string ConnectionString, string OutputDir, int Years) LoadXellentConfig(
 }
 
 public partial class Program;
+
+/// <summary>
+/// The console of a post --all run: every log line goes to the log file; the console shows the run's own
+/// lines (setup and summary) and one status line with the counts per state that updates in place.
+/// </summary>
+sealed class RunConsole(string logPath) : IDisposable
+{
+    private readonly string _logPath = logPath;
+    private readonly StreamWriter _file = new(logPath) { AutoFlush = true };
+    private readonly object _gate = new();
+    private DateTime _lastStatus = DateTime.MinValue;
+    private int _statusLength;
+    private bool _summary;
+
+    // Lines before the per-metering-point part that say what the run is about to do.
+    private static readonly string[] SetupPrefixes =
+        ["Already done:", "Excluded by hand:", "Migration:", "Payer 6#####", "Payer check", "Limit of", "Aborting run"];
+
+    public void Line(string line)
+    {
+        lock (_gate)
+        {
+            _file.WriteLine(line);
+            if (line.StartsWith("Run completed:", StringComparison.Ordinal))
+                _summary = true;
+            var show = _summary
+                ? !line.StartsWith("  - ", StringComparison.Ordinal) // the full failure list stays in the file
+                : SetupPrefixes.Any(p => line.StartsWith(p, StringComparison.Ordinal));
+            if (!show)
+                return;
+            ClearStatus();
+            Console.WriteLine(line);
+            if (_summary && line.EndsWith("skipped (--force):", StringComparison.Ordinal))
+                Console.WriteLine($"  (listed in {_logPath})");
+        }
+    }
+
+    public void Status(string status)
+    {
+        lock (_gate)
+        {
+            if (Console.IsOutputRedirected || _summary)
+                return;
+            if (DateTime.UtcNow - _lastStatus < TimeSpan.FromMilliseconds(200))
+                return;
+            _lastStatus = DateTime.UtcNow;
+            var text = "  " + status;
+            Console.Write("\r" + text.PadRight(_statusLength));
+            _statusLength = text.Length;
+        }
+    }
+
+    private void ClearStatus()
+    {
+        if (_statusLength == 0)
+            return;
+        Console.Write("\r" + new string(' ', _statusLength) + "\r");
+        _statusLength = 0;
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+            ClearStatus();
+        _file.Dispose();
+    }
+}

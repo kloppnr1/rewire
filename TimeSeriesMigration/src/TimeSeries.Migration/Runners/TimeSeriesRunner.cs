@@ -194,6 +194,12 @@ public class TimeSeriesRunner
     /// </summary>
     public Action<string, int, int>? OnStepProgress { get; set; }
 
+    /// <summary>
+    /// A post --all run's running count per state, as one line (e.g. "1,200/4,273 checked · done 56,010 ·
+    /// ready 12 · …"), called for every metering point. A console host shows it as one line that updates in place.
+    /// </summary>
+    public Action<string>? OnStatus { get; set; }
+
     // The states of the time series migration process: every metering point a post --all run looks at ends
     // the run in exactly one, with a reason. "Wrong" (sent, but different from Xellent) needs a value
     // comparison and is not counted here.
@@ -1865,6 +1871,8 @@ public class TimeSeriesRunner
             _scanCurrentMeteringPoint = null;
             if (_markDoneMode)
                 ReportProgress("Done check, deciding windows", i + 1, settlMeteringPoints.Count);
+            else
+                OnStatus?.Invoke($"{i:N0}/{settlMeteringPoints.Count:N0} checked · {StateLine()}");
 
             if (limit is { } take && take > 0 && totalInRange.Total >= take)
             {
@@ -2227,6 +2235,7 @@ public class TimeSeriesRunner
              (cosFrom != null || cosTo != null ? $"{totalOutOfRange} outside the delivery-start range, " : "") +
              (skip is > 0 ? $"{totalPassedOver} passed over (--skip), " : "") +
              $"{totalAmbiguousRevisions} ambiguous revision safety skips.");
+        OnStatus?.Invoke($"{settlMeteringPoints.Count:N0}/{settlMeteringPoints.Count:N0} checked · {StateLine()}");
         if (!_markDoneMode)
         {
             _log("");
