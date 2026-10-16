@@ -210,6 +210,28 @@ public class TimeSeriesRunner
         reasons[reason] = reasons.GetValueOrDefault(reason) + count;
     }
 
+    /// <summary>The operator's list of metering points excluded by hand, in the environment's snapshot folder.</summary>
+    public const string ExcludedFileName = "excluded.csv";
+
+    // One row per metering point: identification, then the reason (further columns, such as who and when, are
+    // for the operator). Semicolon or comma between fields; a header row is ignored.
+    internal static Dictionary<string, string> ReadExcluded(string path)
+    {
+        var excluded = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!File.Exists(path))
+            return excluded;
+        foreach (var line in File.ReadAllLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+            var fields = line.Split(line.Contains(';') ? ';' : ',').Select(f => f.Trim().Trim('"').Trim()).ToArray();
+            if (fields[0].Length == 0 || !fields[0].All(char.IsDigit))
+                continue;
+            excluded[fields[0]] = fields.Length > 1 && fields[1].Length > 0 ? fields[1] : "no reason given";
+        }
+        return excluded;
+    }
+
     private static readonly string[] BlockedCsvHeader =
         ["MeteringPointIdentification", "Type", "SettlMeteringPointId", "CustomerNumber", "Reason", "Detail"];
 
@@ -1778,6 +1800,22 @@ public class TimeSeriesRunner
                 CountState("Done", "already in Settl", totalAlreadyDone.Total);
                 _log($"Already done: {totalAlreadyDone.Total} metering point(s) already in Settl (snapshot check or an earlier post), left out ({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
             }
+        }
+
+        // Metering points the operator excluded by hand are never sent; each counts as excluded with its reason.
+        var excludedPath = Path.Combine(SnapshotDirectory(environment), ExcludedFileName);
+        var excludedByHand = ReadExcluded(excludedPath);
+        if (excludedByHand.Count > 0)
+        {
+            var leftOut = settlMeteringPoints.Where(m => excludedByHand.ContainsKey(m.Identification)).ToList();
+            foreach (var mp in leftOut)
+            {
+                RecordCoverageExclusion("Excluded by hand", mp.ParentIdentification != null);
+                CountState("Excluded", excludedByHand[mp.Identification]);
+            }
+            settlMeteringPoints = settlMeteringPoints.Where(m => !excludedByHand.ContainsKey(m.Identification)).ToList();
+            if (leftOut.Count > 0)
+                _log($"Excluded by hand: {leftOut.Count} metering point(s) left out ({excludedPath})");
         }
 
         // How far the migration is: metering points done now, out of the total the last snapshot counted.

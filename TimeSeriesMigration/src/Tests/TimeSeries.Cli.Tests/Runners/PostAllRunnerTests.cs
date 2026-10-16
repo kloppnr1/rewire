@@ -1217,6 +1217,53 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPostAllAsync_ExcludedByHand_IsNeverSent_AndCountedWithItsReason()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        var (mp1Guid, mp2Guid, tsGuid) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
+        var folder = Path.Combine(OutputDir, "snapshot", "test");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, TimeSeriesRunner.ExcludedFileName),
+            $"MeteringPoint;Reason;By;Date\n{MpId2};decided not to migrate;Martin;2026-10-16\n");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Equal(mp1Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.Contains(logs, l => l.StartsWith("Excluded by hand: 1 metering point(s) left out", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Excluded: 1", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1  decided not to migrate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Coverage_CountsMeteringPointsExcludedByHand()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        File.WriteAllText(Path.Combine(OutputDir, "snapshot", "test", TimeSeriesRunner.ExcludedFileName),
+            $"MeteringPoint;Reason\n{MpId2};decided not to migrate\n");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunCoverageAsync("test"));
+
+        Assert.Contains(logs, l => l.Contains("Excluded by hand", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunPostAllAsync_NotInDeliveryAndNotClosedAsAMigration_IsSkippedAsNotMigrated()
     {
         var outputDirectory = Path.Combine(OutputDir, Guid.NewGuid().ToString("N"));

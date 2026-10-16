@@ -108,6 +108,10 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 | `skip-resolution-change.csv` | Resolution change (`--skip-resolution-change`): included outgoing values use more than one resolution after dated conversion and delivery filtering |
 | `known-issue-xellent-resolution.csv` | Known Xellent issue: values stored at a different resolution than Xellent says the meter was read at (e.g. hourly values where it reads every 15 minutes), with no series for the right resolution. The source mismatch remains visible here. Hourly values in dated quarter-hour reading periods are split into four equal outgoing values; source values remain unchanged |
 
+### Excluded by hand
+
+`output/snapshot/<env>/excluded.csv` is the operator's list of metering points that are never sent. One row per metering point: identification, then the reason; further columns (who, when) are for the operator. Semicolon or comma between fields; a header row is ignored. `post --all` leaves them out before anything else and counts them as Excluded with their reason. `coverage` counts them as "Excluded by hand".
+
 ## `readiness`
 
 One row per metering point a `post --all` would send: which resolutions its values are in, which time series Settl has for it, what is missing, and a status. Read-only, and it creates nothing in Settl — the missing series are the list for Systemate.
