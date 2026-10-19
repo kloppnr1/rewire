@@ -74,9 +74,50 @@ public class FixConsumer2DuplicateRunnerTests
             DryRun = false,
         });
 
-        Assert.Equal(1, exitCode); // errors > 0
+        Assert.Equal(1, exitCode); // failed writes > 0
         Assert.Contains(loggedLines, l => l.Contains("still shows duplicate", StringComparison.Ordinal));
-        Assert.DoesNotContain(loggedLines, l => l.Contains("fixed —", StringComparison.Ordinal));
+        Assert.DoesNotContain(loggedLines, l => l.Contains("fixed - verified", StringComparison.Ordinal));
+        Assert.Contains("  Failed writes: 1", loggedLines);
+        Assert.Contains("  Errors: 0", loggedLines);
+    }
+
+    [Theory]
+    [InlineData("rejected", 0, 1, 0)]
+    [InlineData("not-sent", 0, 0, 1)]
+    [InlineData("fixed", 1, 0, 0)]
+    public async Task Each_cleanup_outcome_lands_in_exactly_one_count(string outcome, int fixedVersions, int failedWrites, int errors)
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.Reads.Enqueue(DuplicateMp(id)); // detect read
+        client.Reads.Enqueue(DuplicateMp(id)); // eligibility recheck
+        client.Reads.Enqueue(BlankedMp(id));   // post-write verify read
+        if (outcome == "rejected") client.BlankResult = (false, "HTTP 400: Kind Local not allowed");
+        if (outcome == "not-sent") client.RefuseBeforeWrite = "Consumer is no longer duplicated; no write made.";
+
+        var logs = new List<string>();
+        var exitCode = await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()] });
+
+        Assert.Equal(fixedVersions == 1 ? 0 : 1, exitCode);
+        Assert.Contains("  Matched:  1", logs);
+        Assert.Contains($"  Fixed versions: {fixedVersions}", logs);
+        Assert.Contains($"  Failed writes: {failedWrites}", logs);
+        Assert.Contains($"  Errors: {errors}", logs);
+        if (outcome == "rejected") Assert.Contains(logs, l => l.Contains("Settl rejected the write", StringComparison.Ordinal));
+        if (outcome == "not-sent") Assert.Contains(logs, l => l.Contains("skipped before write", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Dry_run_summary_has_no_failed_writes_line()
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.Reads.Enqueue(DuplicateMp(id));
+        var logs = new List<string>();
+        await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true });
+        Assert.DoesNotContain(logs, l => l.StartsWith("  Failed writes", StringComparison.Ordinal));
     }
 
     [Theory]

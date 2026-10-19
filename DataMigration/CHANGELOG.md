@@ -6,6 +6,7 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
+| 2026-10-19 | `fix-consumer2-duplicate` | Send PatchTime and EffectiveDate as `yyyy-MM-ddTHH:mm:ssZ` like SettlClient (Settl rejected `+00:00` as Kind Local); count rejected or unverified Settl writes as `Failed writes`, separate from skips before any write, and exit 1 on either. | *(this commit)* |
 | 2026-10-15 | `reconcile` | Open-ended contract links (Settl sends no end) are read instead of failing the customer contract read, and are reported as "open-ended". Uses SettlClient 0.7.53. | *(this commit)* |
 | 2026-10-13 | `fix-consumer2-duplicate` | Reuse report delivery-period selection on fresh Settl histories; clean each selected dated Consumer once, exclude first period, omit MarketUpdate from requests, verify both cleared fields and report incomplete scans. | This commit |
 | 2026-10-13 | `report-consumer2-duplicate` | Add MarketUpdate from the selected Consumer version to the CSV, blank when no version can be selected. | *(this commit)* |

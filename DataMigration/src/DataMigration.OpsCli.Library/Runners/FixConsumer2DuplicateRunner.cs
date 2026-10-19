@@ -93,9 +93,10 @@ public class FixConsumer2DuplicateRunner
         candidateIds = candidateIds.Distinct().ToList();
         var matched = 0;
         var fixedCount = 0;
+        var failedWrites = 0;
         var checkedCount = 0;
         var versionReads = 0;
-        string Status() => $"Checked: {Volatile.Read(ref checkedCount):N0} / {candidateIds.Count:N0}   Matched: {matched:N0}   Fixed versions: {fixedCount:N0}   Errors: {errors:N0}   Versions read: {Volatile.Read(ref versionReads):N0}";
+        string Status() => $"Checked: {Volatile.Read(ref checkedCount):N0} / {candidateIds.Count:N0}   Matched: {matched:N0}   Fixed versions: {fixedCount:N0}   Failed writes: {failedWrites:N0}   Errors: {errors:N0}   Versions read: {Volatile.Read(ref versionReads):N0}";
         async Task<(ConsumerVersionEvidence Versions, ConsumerDeliveryEvidence Delivery)> Read(Guid id)
         {
             var (json, error) = await _meteringPointClient.GetDeliveryStatusesRawAsync(id, cancellationToken);
@@ -158,10 +159,19 @@ public class FixConsumer2DuplicateRunner
                         Log($"  {label}: skipped: selection changed or evidence is incomplete.");
                         continue;
                     }
-                    var (success, error) = await progress.ReadAsync(() => _cleanup!.BlankAsync(result.Id, start, cancellationToken),
+                    var (outcome, error) = await progress.ReadAsync(() => _cleanup!.BlankAsync(result.Id, start, cancellationToken),
                         "dated Consumer update and verification", Status, cancellationToken);
-                    if (!success) { errors++; Log($"  {label}: FAILED - {error}"); }
-                    else { fixedCount++; Log($"  {label}: fixed - verified on the same dated version"); }
+                    switch (outcome)
+                    {
+                        case ConsumerCleanupOutcome.Fixed:
+                            fixedCount++; Log($"  {label}: fixed - verified on the same dated version"); break;
+                        case ConsumerCleanupOutcome.NotSent:
+                            errors++; Log($"  {label}: skipped before write - {error}"); break;
+                        case ConsumerCleanupOutcome.Rejected:
+                            failedWrites++; Log($"  {label}: FAILED - Settl rejected the write: {error}"); break;
+                        default:
+                            failedWrites++; Log($"  {label}: FAILED - write sent but not verified: {error}"); break;
+                    }
                 }
             }
             progress.Update(Status());
@@ -171,9 +181,10 @@ public class FixConsumer2DuplicateRunner
         Log($"  Checked:  {checkedCount}");
         Log($"  Matched:  {matched}");
         Log($"  Fixed versions: {fixedCount}");
+        if (!options.DryRun) Log($"  Failed writes: {failedWrites}");
         Log($"  {(options.DryRun ? "Read errors" : "Errors")}: {errors}");
         if (options.DryRun) Log("  (dry-run - no writes)");
-        return errors > 0 ? 1 : 0;
+        return errors > 0 || failedWrites > 0 ? 1 : 0;
     }
 
     /// <summary>

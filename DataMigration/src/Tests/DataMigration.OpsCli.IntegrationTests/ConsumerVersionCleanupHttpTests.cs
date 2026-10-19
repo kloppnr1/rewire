@@ -42,6 +42,9 @@ public class ConsumerVersionCleanupHttpTests
         Assert.Equal(3, patch.EnumerateObject().Count());
         Assert.Equal(handler.Id, patch.GetProperty("Id").GetGuid());
         Assert.Equal(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), patch.GetProperty("PatchTime").GetDateTimeOffset());
+        Assert.Equal("2026-01-01T00:00:00Z", patch.GetProperty("PatchTime").GetString());
+        Assert.All(handler.DatedQueries, q => Assert.Equal("?EffectiveDate=2026-01-01T00:00:00Z", q));
+        Assert.NotEmpty(handler.DatedQueries);
         var party = patch.GetProperty("ConsumerPatch").GetProperty("SecondConsumerParty");
         Assert.Equal("", party.GetProperty("NationalIdentificationNumber").GetString());
         Assert.All(party.GetProperty("Name").EnumerateObject(), p => Assert.Equal(JsonValueKind.Null, p.Value.ValueKind));
@@ -49,6 +52,9 @@ public class ConsumerVersionCleanupHttpTests
         Assert.DoesNotContain("1234567890", string.Join("\n", logs));
         if (expectedExit == 0) Assert.Contains(logs, l => l.Contains("fixed - verified"));
         else Assert.DoesNotContain(logs, l => l.Contains("fixed - verified"));
+        // Every failure here happens after the PATCH was sent, so it is a failed write, not a skip.
+        Assert.Contains($"  Failed writes: {expectedExit}", logs);
+        Assert.Contains("  Errors: 0", logs);
     }
 
     [Fact]
@@ -58,7 +64,7 @@ public class ConsumerVersionCleanupHttpTests
         using var http = new HttpClient(handler);
         var writer = new ConsumerVersionCleanup(http, new Auth(), Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }), NullLogger<ConsumerVersionCleanup>.Instance);
         var result = await writer.BlankAsync(handler.Id, new(2026, 1, 1), default);
-        Assert.False(result.Success);
+        Assert.Equal(ConsumerCleanupOutcome.NotSent, result.Outcome);
         Assert.Equal(0, handler.Writes);
     }
 
@@ -73,9 +79,11 @@ public class ConsumerVersionCleanupHttpTests
         internal Guid Id { get; } = Guid.NewGuid();
         internal string? Payload { get; private set; }
         internal int Writes { get; private set; }
+        internal List<string> DatedQueries { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Assert.Equal("offline.invalid", request.RequestUri!.Host);
+            if (request.RequestUri.Query.Contains("EffectiveDate")) lock (DatedQueries) DatedQueries.Add(Uri.UnescapeDataString(request.RequestUri.Query));
             if (request.Method == HttpMethod.Patch)
             {
                 Assert.EndsWith("/api/v3/meteringPoints", request.RequestUri.AbsolutePath);

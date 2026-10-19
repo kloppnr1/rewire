@@ -66,14 +66,17 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     }
 
     public List<(Guid Id, DateTime Start)> CleanedVersions { get; } = [];
-    public async Task<(bool Success, string? Error)> BlankAsync(Guid id, DateTime start, CancellationToken ct)
+    /// <summary>When set, <see cref="BlankAsync"/> refuses before writing (a pre-write check failed).</summary>
+    public string? RefuseBeforeWrite { get; set; }
+    public async Task<(ConsumerCleanupOutcome Outcome, string? Error)> BlankAsync(Guid id, DateTime start, CancellationToken ct)
     {
         BlankCalls++;
         CleanedVersions.Add((id, start));
-        if (!BlankResult.Success) return BlankResult;
+        if (RefuseBeforeWrite is not null) return (ConsumerCleanupOutcome.NotSent, RefuseBeforeWrite);
+        if (!BlankResult.Success) return (ConsumerCleanupOutcome.Rejected, BlankResult.Error);
         var (point, error) = await GetByIdV4Async(id, start, ct);
         return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.FindDuplicateName(point) is null
-            ? (true, null) : (false, "still shows duplicate or verification failed: " + error);
+            ? (ConsumerCleanupOutcome.Fixed, null) : (ConsumerCleanupOutcome.Unverified, "still shows duplicate or verification failed: " + error);
     }
 
     private static T Unused<T>() => throw new NotImplementedException("Not used by these tests");
