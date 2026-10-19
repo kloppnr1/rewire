@@ -10,7 +10,11 @@ internal sealed record ConsumerVersion(MeteringPointV4Dto? Point, DateTime? Requ
 {
     public DateTime? Start => Point?.Consumer?.Start ?? RequestedDate;
     public DateTime? End => Point?.Consumer?.End;
-    public string? Reason => Point is null ? null : FixConsumer2DuplicateRunner.Consumer2Reason(Point);
+    /// <summary>Whether consumer 2 has a national id on this version, from Settl's separate national-id read.
+    /// Null when it was not read (only read when <see cref="FixConsumer2DuplicateRunner.NeedsNationalIdCheck"/>).
+    /// The value itself is never kept.</summary>
+    public bool? SecondHasNationalId { get; init; }
+    public string? Reason => Point is null ? null : FixConsumer2DuplicateRunner.Consumer2Reason(Point, SecondHasNationalId);
     public bool Duplicate => Reason is not null;
 }
 
@@ -58,6 +62,25 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
             }
             if (current?.Consumer?.Start is { } start && !dates.Contains(ConsumerDeliveryEvidence.Utc(start).UtcDateTime))
                 errors.Add("Current Consumer start is absent from ConsumerDates.");
+        }
+        // Settl's metering-point read never carries national ids; read them separately, but only for the
+        // versions where the answer decides selection.
+        for (var i = 0; i < versions.Count; i++)
+        {
+            var version = versions[i];
+            if (version.Point is not { } candidate || version.Status != "As returned"
+                || !FixConsumer2DuplicateRunner.NeedsNationalIdCheck(candidate)) continue;
+            ct.ThrowIfCancellationRequested();
+            var date = ConsumerDeliveryEvidence.Utc(candidate.Consumer!.Start!.Value).UtcDateTime;
+            var (ids, idError) = await client.GetConsumerNationalIdsAsync(id, date, ct);
+            versionRead();
+            if (ids is null || idError is not null)
+            {
+                const string message = "Consumer national id read failed.";
+                errors.Add(message + (idError is null ? "" : " " + idError));
+                versions[i] = version with { Status = message };
+            }
+            else versions[i] = version with { SecondHasNationalId = !string.IsNullOrWhiteSpace(ids.SecondConsumerPartyNationalIdentificationNumber) };
         }
         var ordered = versions.OrderBy(v => v.Start ?? DateTime.MaxValue).ToList();
         for (var i = 0; i + 1 < ordered.Count; i++)

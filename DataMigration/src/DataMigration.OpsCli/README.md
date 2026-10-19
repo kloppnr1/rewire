@@ -521,8 +521,14 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
     LastName each match. Detection ignores surrounding whitespace and treats
     missing name fields as blank; comparison is case-sensitive.
   - National id without name: Consumer 2 has a national identification number
-    but no name (no name object, or all three name fields blank).
+    but no name (no name object, or all three name fields blank). Settl's
+    metering-point read never carries national ids, so the id is read from
+    `GET /api/v4/meteringPoints/{id}/nationalIdentificationNumber?EffectiveDate=…`,
+    only for private versions where consumer 2 has no name. A failed id read
+    skips the MP.
   The dry-run line names the case. The national id value is never printed.
+- After every write, the cleanup reads the same national-id endpoint and only
+  counts the version as fixed when consumer 2's id is blank.
 - Clears Consumer 2's name fields and national identification number. The update
   operation rechecks selection and equality before writing at the existing Consumer
   start date. MarketUpdate is omitted from both request levels; other fields are preserved.
@@ -532,6 +538,11 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
   and verification failures are reported, including failures during full scans.
 - `--limit` caps matching MPs, not the number scanned. The run stops once that
   number of matches has been reached.
+- `--from-report <csv>` takes the points from a `report-consumer2-duplicate` CSV:
+  the SettlId of every row with DuplicateConsumer2=Yes. Only the scope comes from
+  the file; every point is read fresh from Settl and selected by the rules above.
+  The header must match the current report exactly, and it cannot be combined
+  with `--mp-id`.
 
 For a read-only preview:
 

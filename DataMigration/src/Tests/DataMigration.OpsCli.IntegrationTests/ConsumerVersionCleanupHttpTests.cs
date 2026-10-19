@@ -49,6 +49,8 @@ public class ConsumerVersionCleanupHttpTests
         Assert.Equal("", party.GetProperty("NationalIdentificationNumber").GetString());
         Assert.All(party.GetProperty("Name").EnumerateObject(), p => Assert.Equal(JsonValueKind.Null, p.Value.ValueKind));
         Assert.Equal(1, handler.Writes);
+        // The id check after the write uses Settl's dedicated national-id read.
+        if (outcome is "cleared" or "retained-id") Assert.True(handler.NationalIdReads > 0);
         Assert.DoesNotContain("1234567890", string.Join("\n", logs));
         if (expectedExit == 0) Assert.Contains(logs, l => l.Contains("fixed - verified"));
         else Assert.DoesNotContain(logs, l => l.Contains("fixed - verified"));
@@ -80,6 +82,7 @@ public class ConsumerVersionCleanupHttpTests
         internal string? Payload { get; private set; }
         internal int Writes { get; private set; }
         internal List<string> DatedQueries { get; } = [];
+        internal int NationalIdReads { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Assert.Equal("offline.invalid", request.RequestUri!.Host);
@@ -95,6 +98,17 @@ public class ConsumerVersionCleanupHttpTests
             string json;
             if (request.RequestUri.AbsolutePath.EndsWith("/history")) json = """{"consumerDates":["2026-01-01T00:00:00Z"]}""";
             else if (request.RequestUri.AbsolutePath.EndsWith("/deliveryStatuses")) json = """{"deliveryStatuses":[{"inDelivery":false,"period":{"start":"2025-12-01T00:00:00Z","end":"2026-01-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},{"inDelivery":false,"period":{"start":"2026-01-01T00:00:00Z","end":null},"startReason":"MoveIn","stopReason":"Na"}]}""";
+            else if (request.RequestUri.AbsolutePath.EndsWith("/nationalIdentificationNumber"))
+            {
+                // Settl's only source for national ids; the metering-point read below never carries them.
+                NationalIdReads++;
+                Assert.Equal("?EffectiveDate=2026-01-01T00:00:00Z", Uri.UnescapeDataString(request.RequestUri.Query));
+                json = JsonSerializer.Serialize(new
+                {
+                    firstConsumerPartyNationalIdentificationNumber = "1234567890",
+                    secondConsumerPartyNationalIdentificationNumber = Writes == 0 || outcome == "retained-id" ? "1234567890" : null
+                });
+            }
             else
             {
                 Assert.Contains("/api/v4/meteringPoints/", request.RequestUri.AbsolutePath);
@@ -106,11 +120,7 @@ public class ConsumerVersionCleanupHttpTests
                         start = outcome == "wrong-before" || Writes > 0 && outcome == "wrong-version" ? "2026-02-01T00:00:00Z" : "2026-01-01T00:00:00Z",
                         customerType = "Person", marketUpdate = true,
                         firstConsumerParty = new { name = new { fullName = "Fixture" } },
-                        secondConsumerParty = new
-                        {
-                            name = new { fullName = Writes == 0 || outcome == "retained-name" ? "Fixture" : "" },
-                            nationalIdentificationNumber = Writes == 0 || outcome == "retained-id" ? "1234567890" : ""
-                        }
+                        secondConsumerParty = new { name = new { fullName = Writes == 0 || outcome == "retained-name" ? "Fixture" : "" } }
                     }
                 });
             }

@@ -4,22 +4,35 @@ using DataMigration.SettlApi.Models;
 
 namespace DataMigration.OpsCli.Tests.Runners;
 
+/// <summary>
+/// Settl's metering-point read never carries national ids; they come from the separate national-id
+/// read, which the stub answers from <see cref="StubFixConsumer2DuplicateMeteringPointClient.SecondNationalIds"/>.
+/// </summary>
 public class Consumer2NationalIdWithoutNameTests
 {
     private const string FakeNationalId = "0101019999";
 
     [Theory]
-    [InlineData("id-no-name-object", "National id without name")]
-    [InlineData("id-blank-name", "National id without name")]
-    [InlineData("id-other-name", null)]
-    [InlineData("no-id-no-name", null)]
-    [InlineData("id-company", null)]
-    [InlineData("same-name", "Same name")]
-    public void Reason_covers_national_id_without_name(string scenario, string? expected)
+    [InlineData("no-name-object", true, "National id without name")]
+    [InlineData("blank-name", true, "National id without name")]
+    [InlineData("other-name", true, null)]
+    [InlineData("no-name-object", false, null)]
+    [InlineData("company", true, null)]
+    [InlineData("same-name", false, "Same name")]
+    public void Reason_covers_national_id_without_name(string scenario, bool secondHasId, string? expected)
     {
         var point = Point(Guid.NewGuid(), new(2026, 1, 1), scenario);
-        Assert.Equal(expected, FixConsumer2DuplicateRunner.Consumer2Reason(point));
+        Assert.Equal(expected, FixConsumer2DuplicateRunner.Consumer2Reason(point, secondHasId));
     }
+
+    [Theory]
+    [InlineData("no-name-object", true)]
+    [InlineData("blank-name", true)]
+    [InlineData("other-name", false)]
+    [InlineData("company", false)]
+    [InlineData("same-name", false)]
+    public void National_id_is_only_read_when_it_decides_selection(string scenario, bool expected) =>
+        Assert.Equal(expected, FixConsumer2DuplicateRunner.NeedsNationalIdCheck(Point(Guid.NewGuid(), new(2026, 1, 1), scenario)));
 
     [Theory]
     [InlineData(false, 1)]
@@ -28,7 +41,8 @@ public class Consumer2NationalIdWithoutNameTests
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
-        client.ConsumerPoints[id] = Point(id, new(2026, 1, 1), "id-no-name-object");
+        client.ConsumerPoints[id] = Point(id, new(2026, 1, 1), "no-name-object");
+        client.SecondNationalIds[id] = FakeNationalId;
         if (firstPeriodOnly)
             client.DeliveryHistories[id] = ("""{"deliveryStatuses":[{"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":null},"startReason":"Na","stopReason":"Na"}]}""", null);
         using var csv = new StringWriter();
@@ -54,14 +68,43 @@ public class Consumer2NationalIdWithoutNameTests
     }
 
     [Fact]
+    public async Task A_named_consumer_2_is_not_selected_and_its_id_is_never_read()
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.ConsumerPoints[id] = Point(id, new(2026, 1, 1), "other-name");
+        client.SecondNationalIds[id] = FakeNationalId;
+        var logs = new List<string>();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true }));
+        Assert.DoesNotContain(logs, line => line.Contains("would blank"));
+        Assert.Equal(0, client.NationalIdReads);
+    }
+
+    [Fact]
+    public async Task A_failed_national_id_read_skips_the_point()
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.ConsumerPoints[id] = Point(id, new(2026, 1, 1), "no-name-object");
+        client.NationalIdReadFailures.Add(id);
+        var logs = new List<string>();
+        Assert.Equal(1, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()] }));
+        Assert.Contains(logs, line => line.Contains("skipped:") && line.Contains("national id read failed"));
+        Assert.Equal(0, client.BlankCalls);
+    }
+
+    [Fact]
     public async Task Hot_run_blanks_a_national_id_without_name()
     {
         var id = Guid.NewGuid();
         var start = new DateTime(2026, 1, 1);
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
-        client.Reads.Enqueue(Point(id, start, "id-no-name-object")); // detect
-        client.Reads.Enqueue(Point(id, start, "id-no-name-object")); // recheck
-        client.Reads.Enqueue(Point(id, start, "no-id-no-name"));     // post-write verify
+        client.SecondNationalIds[id] = FakeNationalId;
+        client.Reads.Enqueue(Point(id, start, "no-name-object")); // detect
+        client.Reads.Enqueue(Point(id, start, "no-name-object")); // recheck
+        client.Reads.Enqueue(Point(id, start, "no-name-object")); // post-write verify
         var logs = new List<string>();
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
             .RunAsync(new() { MeteringPointIds = [id.ToString()] }));
@@ -70,19 +113,23 @@ public class Consumer2NationalIdWithoutNameTests
         Assert.DoesNotContain(FakeNationalId, string.Join("\n", logs));
     }
 
-    [Fact]
-    public async Task Hot_run_reports_a_national_id_that_survives_the_write_as_a_failed_write()
+    [Theory]
+    [InlineData("no-name-object")]
+    [InlineData("same-name")]
+    public async Task A_national_id_that_survives_the_write_is_a_failed_write(string scenario)
     {
         var id = Guid.NewGuid();
         var start = new DateTime(2026, 1, 1);
-        var client = new StubFixConsumer2DuplicateMeteringPointClient();
-        client.Reads.Enqueue(Point(id, start, "id-no-name-object"));
-        client.Reads.Enqueue(Point(id, start, "id-no-name-object"));
-        client.Reads.Enqueue(Point(id, start, "id-no-name-object")); // id still there after write
+        var client = new StubFixConsumer2DuplicateMeteringPointClient { KeepNationalIdAfterWrite = true };
+        client.SecondNationalIds[id] = FakeNationalId;
+        client.Reads.Enqueue(Point(id, start, scenario));
+        client.Reads.Enqueue(Point(id, start, scenario));
+        client.Reads.Enqueue(Point(id, start, "no-name-object")); // name cleared, id still there
         var logs = new List<string>();
         Assert.Equal(1, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
             .RunAsync(new() { MeteringPointIds = [id.ToString()] }));
         Assert.Contains("  Failed writes: 1", logs);
+        Assert.DoesNotContain(FakeNationalId, string.Join("\n", logs));
     }
 
     private static MeteringPointV4Dto Point(Guid id, DateTime start, string scenario) => new()
@@ -91,13 +138,13 @@ public class Consumer2NationalIdWithoutNameTests
         Consumer = new()
         {
             Start = start,
-            CustomerType = scenario == "id-company" ? "Company" : "Person",
+            CustomerType = scenario == "company" ? "Company" : "Person",
             FirstConsumerParty = new() { Name = new() { FullName = "Fixture" } },
             SecondConsumerParty = scenario switch
             {
-                "id-no-name-object" or "id-company" => new() { NationalIdentificationNumber = FakeNationalId },
-                "id-blank-name" => new() { Name = new() { FullName = " ", FirstName = "", LastName = null }, NationalIdentificationNumber = FakeNationalId },
-                "id-other-name" => new() { Name = new() { FullName = "Someone else" }, NationalIdentificationNumber = FakeNationalId },
+                "no-name-object" or "company" => new(),
+                "blank-name" => new() { Name = new() { FullName = " ", FirstName = "", LastName = null } },
+                "other-name" => new() { Name = new() { FullName = "Someone else" } },
                 "same-name" => new() { Name = new() { FullName = "Fixture" } },
                 _ => new() { Name = new() { FullName = "" } },
             }

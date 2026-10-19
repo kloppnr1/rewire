@@ -68,14 +68,39 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public List<(Guid Id, DateTime Start)> CleanedVersions { get; } = [];
     /// <summary>When set, <see cref="BlankAsync"/> refuses before writing (a pre-write check failed).</summary>
     public string? RefuseBeforeWrite { get; set; }
+    /// <summary>Consumer 2's national id per point, as Settl's separate national-id read returns it.</summary>
+    public Dictionary<Guid, string?> SecondNationalIds { get; } = [];
+    /// <summary>Points whose national-id read fails.</summary>
+    public HashSet<Guid> NationalIdReadFailures { get; } = [];
+    /// <summary>When true, a successful write leaves consumer 2's national id in place.</summary>
+    public bool KeepNationalIdAfterWrite { get; set; }
+    public int NationalIdReads { get; private set; }
+
+    public Task<(MeteringPointConsumerNationalIdsDto? Ids, string? Error)> GetConsumerNationalIdsAsync(
+        Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default)
+    {
+        lock (_readLock)
+        {
+            NationalIdReads++;
+            if (NationalIdReadFailures.Contains(meteringPointId))
+                return Task.FromResult<(MeteringPointConsumerNationalIdsDto?, string?)>((null, "Fixture national id failure"));
+            return Task.FromResult<(MeteringPointConsumerNationalIdsDto?, string?)>((new MeteringPointConsumerNationalIdsDto
+            {
+                SecondConsumerPartyNationalIdentificationNumber = SecondNationalIds.GetValueOrDefault(meteringPointId)
+            }, null));
+        }
+    }
+
     public async Task<(ConsumerCleanupOutcome Outcome, string? Error)> BlankAsync(Guid id, DateTime start, CancellationToken ct)
     {
         BlankCalls++;
         CleanedVersions.Add((id, start));
         if (RefuseBeforeWrite is not null) return (ConsumerCleanupOutcome.NotSent, RefuseBeforeWrite);
         if (!BlankResult.Success) return (ConsumerCleanupOutcome.Rejected, BlankResult.Error);
+        if (!KeepNationalIdAfterWrite) SecondNationalIds.Remove(id);
         var (point, error) = await GetByIdV4Async(id, start, ct);
-        return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.Consumer2Reason(point) is null
+        var hasId = !string.IsNullOrWhiteSpace(SecondNationalIds.GetValueOrDefault(id));
+        return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.Consumer2Reason(point, hasId) is null
             ? (ConsumerCleanupOutcome.Fixed, null) : (ConsumerCleanupOutcome.Unverified, "still shows duplicate or verification failed: " + error);
     }
 

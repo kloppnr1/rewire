@@ -7,6 +7,12 @@ namespace DataMigration.OpsCli.Runners;
 /// <summary>Read-only duplicate report with one row per delivery period, using its newest effective Consumer version.</summary>
 public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient client)
 {
+    /// <summary>The CSV header. <see cref="Consumer2ReportInput"/> refuses a file whose header differs.</summary>
+    internal static readonly string[] Header = ["MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
+        "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
+        "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
+        "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason"];
+
     public TextWriter ProgressOutput { get; init; } = Console.Error;
     public string? OutputPath { get; init; }
     internal TimeSpan ProgressInterval { get; init; } = TimeSpan.FromSeconds(5);
@@ -75,10 +81,7 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
 
         var selected = candidates.DistinctBy(c => c.Id).ToList();
         progress.Message($"Loading complete: {selected.Count:N0} metering points to check.");
-        await WriteRow(output, ["MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
-            "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
-            "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
-            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason"]);
+        await WriteRow(output, Header);
         var matched = 0;
         var checkedCount = 0;
         var versionReads = 0;

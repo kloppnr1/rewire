@@ -1274,13 +1274,17 @@ var fixC2dMpIdOption = new Option<string[]>("--mp-id")
 var fixC2dLimitOption = new Option<int?>("--limit") { Description = "Maximum MPs with eligible duplicate Consumer versions to fix in one run." };
 var fixC2dDryRunOption = new Option<bool>("--dry-run") { Description = "Print dated Consumer versions selected by the report rules, skip Settl mutations" };
 var fixC2dEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production, production-hev, production-vhel)" };
+var fixC2dFromReportOption = new Option<string?>("--from-report")
+{
+    Description = "report-consumer2-duplicate CSV; scopes the run to the SettlIds of rows with DuplicateConsumer2=Yes. Points are still read fresh from Settl. Cannot be combined with --mp-id."
+};
 
 var fixConsumer2DuplicateCommand = new Command(
     "fix-consumer2-duplicate",
     "Use the report rules to select duplicate Consumer versions per delivery period, then " +
     "blank Name + NationalIdentificationNumber on the second party. VatIdentificationNumber and everything else is untouched.")
 {
-    fixC2dMpIdOption, fixC2dLimitOption, fixC2dDryRunOption, fixC2dEnvOption
+    fixC2dMpIdOption, fixC2dLimitOption, fixC2dDryRunOption, fixC2dEnvOption, fixC2dFromReportOption
 };
 
 fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -1288,6 +1292,7 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
     var mpIdsRaw = parseResult.GetValue(fixC2dMpIdOption) ?? [];
     var limit = parseResult.GetValue(fixC2dLimitOption);
     var dryRun = parseResult.GetValue(fixC2dDryRunOption);
+    var fromReport = parseResult.GetValue(fixC2dFromReportOption);
 
     var mpIds = mpIdsRaw
         .SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -1296,6 +1301,17 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
 
     try
     {
+        if (fromReport is not null)
+        {
+            if (mpIds.Length > 0) throw new ArgumentException("--from-report cannot be combined with --mp-id.");
+            mpIds = Consumer2ReportInput.ReadDuplicateSettlIds(fromReport).Select(id => id.ToString()).ToArray();
+            Console.WriteLine($"--from-report '{fromReport}': {mpIds.Length} metering points with DuplicateConsumer2=Yes");
+            if (mpIds.Length == 0)
+            {
+                Console.WriteLine("Nothing to do: the report has no DuplicateConsumer2=Yes rows.");
+                return 0;
+            }
+        }
         Console.WriteLine($"fix-consumer2-duplicate env='{settlEnv}' mp-ids={mpIds.Length} limit={(limit?.ToString() ?? "unlimited")} dry-run={dryRun}");
 
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();

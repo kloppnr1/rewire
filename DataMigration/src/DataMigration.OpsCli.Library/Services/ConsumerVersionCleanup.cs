@@ -38,7 +38,14 @@ public sealed class ConsumerVersionCleanup(HttpClient http, ISettlAuthService au
             var point = JsonSerializer.Deserialize<MeteringPointV4Dto>(before, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (point?.Id != id || point.Consumer?.Start is not { } actual || ConsumerDeliveryEvidence.Utc(actual) != utc)
                 return (ConsumerCleanupOutcome.NotSent, "Pre-write read returned a different Consumer version.");
-            if (FixConsumer2DuplicateRunner.Consumer2Reason(point) is null)
+            bool? secondHasId = null;
+            if (FixConsumer2DuplicateRunner.NeedsNationalIdCheck(point))
+            {
+                var (hasId, idError) = await SecondHasNationalIdAsync(id, settlDate, cancellationToken);
+                if (hasId is null) return (ConsumerCleanupOutcome.NotSent, "Pre-write national id read failed: " + idError);
+                secondHasId = hasId;
+            }
+            if (FixConsumer2DuplicateRunner.Consumer2Reason(point, secondHasId) is null)
                 return (ConsumerCleanupOutcome.NotSent, "Consumer is no longer duplicated; no write made.");
             var payload = new JsonObject
             {
@@ -71,12 +78,33 @@ public sealed class ConsumerVersionCleanup(HttpClient http, ISettlAuthService au
                 return (ConsumerCleanupOutcome.Unverified, "Post-write read returned a different Consumer version.");
             var party = Field(consumer, "secondConsumerParty");
             var name = Field(party, "name");
-            if (!Blank(Field(name, "fullName")) || !Blank(Field(name, "firstName")) || !Blank(Field(name, "lastName"))
-                || !Blank(Field(party, "nationalIdentificationNumber")))
-                return (ConsumerCleanupOutcome.Unverified, "Post-write verification: second Consumer name or national identification is not blank.");
+            if (!Blank(Field(name, "fullName")) || !Blank(Field(name, "firstName")) || !Blank(Field(name, "lastName")))
+                return (ConsumerCleanupOutcome.Unverified, "Post-write verification: second Consumer name is not blank.");
+            // The metering-point read never carries national ids, so check the dedicated read.
+            var (stillHasId, verifyIdError) = await SecondHasNationalIdAsync(id, settlDate, cancellationToken);
+            if (stillHasId is null) return (ConsumerCleanupOutcome.Unverified, "Post-write national id read failed: " + verifyIdError);
+            if (stillHasId.Value)
+                return (ConsumerCleanupOutcome.Unverified, "Post-write verification: second Consumer national identification is not blank.");
             return (ConsumerCleanupOutcome.Fixed, null);
         }
         catch (JsonException) { return (sent ? ConsumerCleanupOutcome.Unverified : ConsumerCleanupOutcome.NotSent, "Invalid Consumer JSON; cleanup could not be verified."); }
+    }
+
+    /// <summary>Whether consumer 2 has a national id on the dated version. Only presence is returned, never the value.</summary>
+    private async Task<(bool? HasId, string? Error)> SecondHasNationalIdAsync(Guid id, string settlDate, CancellationToken cancellationToken)
+    {
+        var url = $"{Options.GetMarketBaseUrl(null)}/api/v4/meteringPoints/{id}/nationalIdentificationNumber?EffectiveDate={Uri.EscapeDataString(settlDate)}";
+        var (json, error) = await GetRawAsync(url, cancellationToken);
+        if (json is null || error is not null) return (null, error);
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var second = Field(document.RootElement, "secondConsumerPartyNationalIdentificationNumber");
+            // A missing field must not read as "blank", or a changed response shape would pass every check.
+            if (second.ValueKind == JsonValueKind.Undefined) return (null, "National id response has no second-party field.");
+            return (!Blank(second), null);
+        }
+        catch (JsonException) { return (null, "Invalid national id JSON."); }
     }
 
     private static JsonElement Field(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object

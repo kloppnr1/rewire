@@ -216,19 +216,28 @@ public class FixConsumer2DuplicateRunner
     /// <summary>
     /// Why the second Consumer party should be blanked, or null when it should not. Private MPs only:
     /// either the second party's name equals the first's (<see cref="FindDuplicateName"/>), or the
-    /// second party has a national identification number but no name.
+    /// second party has a national identification number but no name. Settl's metering-point read
+    /// never carries national ids, so <paramref name="secondHasNationalId"/> comes from the separate
+    /// national-id read (see <see cref="NeedsNationalIdCheck"/>).
     /// </summary>
-    internal static string? Consumer2Reason(MeteringPointV4Dto mp)
+    internal static string? Consumer2Reason(MeteringPointV4Dto mp, bool? secondHasNationalId = null)
     {
         if (FindDuplicateName(mp) is not null) return SameNameReason;
+        if (!NeedsNationalIdCheck(mp)) return null;
+        var fromPoint = !string.IsNullOrWhiteSpace(mp.Consumer!.SecondConsumerParty?.NationalIdentificationNumber);
+        return secondHasNationalId == true || fromPoint ? NationalIdWithoutNameReason : null;
+    }
+
+    /// <summary>True when only consumer 2's national id decides whether this version is selected:
+    /// a private MP that is not a same-name duplicate and whose second party has no name.</summary>
+    internal static bool NeedsNationalIdCheck(MeteringPointV4Dto mp)
+    {
         var consumer = mp.Consumer;
-        if (consumer == null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal))
-            return null;
-        var second = consumer.SecondConsumerParty;
-        if (second == null || string.IsNullOrWhiteSpace(second.NationalIdentificationNumber)) return null;
-        var name = second.Name;
-        return name == null || Normalize(name.FullName) == "" && Normalize(name.FirstName) == "" && Normalize(name.LastName) == ""
-            ? NationalIdWithoutNameReason : null;
+        if (consumer?.Start is null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal)
+            || FindDuplicateName(mp) is not null)
+            return false;
+        var name = consumer.SecondConsumerParty?.Name;
+        return name == null || Normalize(name.FullName) == "" && Normalize(name.FirstName) == "" && Normalize(name.LastName) == "";
     }
 
     private static bool NamesEqual(MeteringPointV4NameDto a, MeteringPointV4NameDto b) =>
