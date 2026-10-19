@@ -407,6 +407,8 @@ public class MeteringPointV4ConsumerPartyDto
 {
     public MeteringPointV4NameDto? Name { get; set; }
     public string? VatIdentificationNumber { get; set; }
+    /// <summary>CPR of the consumer party, as returned by GET /api/v4/meteringPoints/{id}.</summary>
+    public string? NationalIdentificationNumber { get; set; }
 }
 
 public class MeteringPointV4NameDto

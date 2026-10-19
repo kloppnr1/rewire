@@ -115,6 +115,29 @@ public class SettlMeteringPointClientBillingTests
         Assert.Equal(string.Empty, handler.LastBody); // no PUT sent — no-op
     }
 
+    [Fact]
+    public async Task GetByIdV4Async_reads_camelCase_consumer_party_NationalIdentificationNumber()
+    {
+        const string json =
+            """
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "consumer": {
+                "firstConsumerParty": { "name": { "fullName": "Test Person" }, "nationalIdentificationNumber": null },
+                "secondConsumerParty": { "name": null, "nationalIdentificationNumber": "0101011234" }
+              }
+            }
+            """;
+        var (client, _) = MakeClient(json);
+
+        var (meteringPoint, error) = await client.GetByIdV4Async(Guid.NewGuid());
+
+        Assert.Null(error);
+        Assert.Null(meteringPoint!.Consumer!.FirstConsumerParty!.NationalIdentificationNumber);
+        Assert.Null(meteringPoint.Consumer.SecondConsumerParty!.Name);
+        Assert.Equal("0101011234", meteringPoint.Consumer.SecondConsumerParty.NationalIdentificationNumber);
+    }
+
     private static (SettlMeteringPointClient Client, CapturingHandler Handler) MakeClient(
         string responseBody = "{}", HttpStatusCode status = HttpStatusCode.OK)
     {
