@@ -38,7 +38,7 @@ public sealed class ConsumerVersionCleanup(HttpClient http, ISettlAuthService au
             var point = JsonSerializer.Deserialize<MeteringPointV4Dto>(before, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (point?.Id != id || point.Consumer?.Start is not { } actual || ConsumerDeliveryEvidence.Utc(actual) != utc)
                 return (ConsumerCleanupOutcome.NotSent, "Pre-write read returned a different Consumer version.");
-            if (FixConsumer2DuplicateRunner.FindDuplicateName(point) is null)
+            if (FixConsumer2DuplicateRunner.Consumer2Reason(point) is null)
                 return (ConsumerCleanupOutcome.NotSent, "Consumer is no longer duplicated; no write made.");
             var payload = new JsonObject
             {

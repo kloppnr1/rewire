@@ -10,7 +10,8 @@ internal sealed record ConsumerVersion(MeteringPointV4Dto? Point, DateTime? Requ
 {
     public DateTime? Start => Point?.Consumer?.Start ?? RequestedDate;
     public DateTime? End => Point?.Consumer?.End;
-    public bool Duplicate => Point is not null && FixConsumer2DuplicateRunner.FindDuplicateName(Point) is not null;
+    public string? Reason => Point is null ? null : FixConsumer2DuplicateRunner.Consumer2Reason(Point);
+    public bool Duplicate => Reason is not null;
 }
 
 internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, List<string> Errors)

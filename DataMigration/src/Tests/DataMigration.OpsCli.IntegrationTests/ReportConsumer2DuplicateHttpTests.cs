@@ -153,7 +153,7 @@ public class ReportConsumer2DuplicateHttpTests
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
         Assert.Equal(3, rows.Length);
-        Assert.All(rows, row => Assert.Equal(18, row.Length));
+        Assert.All(rows, row => Assert.Equal(19, row.Length));
         Assert.Equal("3", rows[2][8]);
         Assert.Equal("Different", rows[2][10]);
         Assert.StartsWith("2026-12-01", rows[2][11]);

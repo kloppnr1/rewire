@@ -78,7 +78,7 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         await WriteRow(output, ["MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
             "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
             "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
-            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate"]);
+            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason"]);
         var matched = 0;
         var checkedCount = 0;
         var versionReads = 0;
@@ -146,12 +146,13 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                         version is null ? "" : VersionDate(version.Start), version is null ? "" : version.End is null ? "(open)" : VersionDate(version.End, true),
                         selection.Duplicate is null ? "Unknown" : selection.Duplicate.Value ? "Yes" : "No",
                         correlation.AnyDuplicate is null ? "Unknown" : correlation.AnyDuplicate.Value ? "Yes" : "No", correlation.Warning, deliveryWarning,
-                        mp?.Consumer is null ? "" : mp.Consumer.MarketUpdate ? "true" : "false"]);
+                        mp?.Consumer is null ? "" : mp.Consumer.MarketUpdate ? "true" : "false",
+                        selection.Duplicate == true ? version!.Reason ?? "" : ""]);
                 }
                 if (periods.Count == 0)
                     await WriteRow(output, [identification, result.Id.ToString(), pattern, "", "", "", "", "", "Unknown",
                         "", "", "", "", "Unknown", "Unknown", "Consumer correlation unavailable: " + string.Join(" | ", result.Versions.Errors.Distinct()),
-                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", ""]);
+                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", "", ""]);
             }
             progress.Update(CheckStatus());
         }

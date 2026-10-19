@@ -516,9 +516,13 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
 - Full scans include all delivery states, including false or missing `InDelivery`,
   and exclude child MPs. `--mp-id` instead scopes the run to the supplied MP
   identifications or Settl GUIDs.
-- Matches only customer type `Person`, with names present for both consumers.
-  FullName, FirstName and LastName must each match. Detection ignores surrounding
-  whitespace and treats missing name fields as blank; comparison is case-sensitive.
+- Matches only customer type `Person`, in one of two cases:
+  - Same name: names present for both consumers, and FullName, FirstName and
+    LastName each match. Detection ignores surrounding whitespace and treats
+    missing name fields as blank; comparison is case-sensitive.
+  - National id without name: Consumer 2 has a national identification number
+    but no name (no name object, or all three name fields blank).
+  The dry-run line names the case. The national id value is never printed.
 - Clears Consumer 2's name fields and national identification number. The update
   operation rechecks selection and equality before writing at the existing Consumer
   start date. MarketUpdate is omitted from both request levels; other fields are preserved.
@@ -538,7 +542,8 @@ dotnet run --project src/DataMigration.OpsCli -- fix-consumer2-duplicate --env f
 # Duplicate Consumer 2 version report
 
 `report-consumer2-duplicate` is read-only. It checks historical, current and future
-Consumer versions, using the cleanup tool's existing private-person/name rule.
+Consumer versions, using the cleanup tool's private-person rule (same name, or
+national id without name).
 
 ~~~powershell
 dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --env featuretest --output consumer2.csv
@@ -580,11 +585,14 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   first period), with the warning.
 - DeliveryWarning and ConsumerWarning are blank when valid. A missing delivery
   history retains one diagnostic row with blank delivery values and a warning.
-- The CSV has 18 columns. RowType, environment, current delivery summaries, LastUpdated,
+- The CSV has 19 columns. RowType, environment, current delivery summaries, LastUpdated,
   change signals and calculated overlaps have been removed. Include the
   environment in the output filename, for example consumer2-production.csv.
 - MarketUpdate contains the selected Consumer version's MarketUpdate value as
   true/false, or blank when no Consumer version can be selected.
+- Consumer2Reason (last column) says why DuplicateConsumer2 is Yes: `Same name` or
+  `National id without name`. It is blank on every other row. The national id
+  value itself is never exported.
 - All four date columns use Danish time with daylight-saving offsets (+01:00 or
   +02:00), and names ending Dk. Null and year-9999 ends show (open).
   Consumer dates without an offset are interpreted as UTC. Missing or inconsistent

@@ -75,7 +75,7 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
         if (RefuseBeforeWrite is not null) return (ConsumerCleanupOutcome.NotSent, RefuseBeforeWrite);
         if (!BlankResult.Success) return (ConsumerCleanupOutcome.Rejected, BlankResult.Error);
         var (point, error) = await GetByIdV4Async(id, start, ct);
-        return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.FindDuplicateName(point) is null
+        return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.Consumer2Reason(point) is null
             ? (ConsumerCleanupOutcome.Fixed, null) : (ConsumerCleanupOutcome.Unverified, "still shows duplicate or verification failed: " + error);
     }
 

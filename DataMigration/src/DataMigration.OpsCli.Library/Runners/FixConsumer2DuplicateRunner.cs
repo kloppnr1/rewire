@@ -145,7 +145,7 @@ public class FixConsumer2DuplicateRunner
                     var label = $"{identification} ({result.Id}): Consumer {ConsumerReportDates.Format(new DateTimeOffset(start))}";
                     if (options.DryRun)
                     {
-                        Log($"  {label} - would blank second party Name + NationalIdentificationNumber");
+                        Log($"  {label} - would blank second party Name + NationalIdentificationNumber ({target.Reason})");
                         continue;
                     }
                     // Re-read the histories so a newly added version cannot silently change selection.
@@ -208,6 +208,27 @@ public class FixConsumer2DuplicateRunner
             return null;
 
         return first.FullName ?? $"{first.FirstName} {first.LastName}".Trim();
+    }
+
+    internal const string SameNameReason = "Same name";
+    internal const string NationalIdWithoutNameReason = "National id without name";
+
+    /// <summary>
+    /// Why the second Consumer party should be blanked, or null when it should not. Private MPs only:
+    /// either the second party's name equals the first's (<see cref="FindDuplicateName"/>), or the
+    /// second party has a national identification number but no name.
+    /// </summary>
+    internal static string? Consumer2Reason(MeteringPointV4Dto mp)
+    {
+        if (FindDuplicateName(mp) is not null) return SameNameReason;
+        var consumer = mp.Consumer;
+        if (consumer == null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal))
+            return null;
+        var second = consumer.SecondConsumerParty;
+        if (second == null || string.IsNullOrWhiteSpace(second.NationalIdentificationNumber)) return null;
+        var name = second.Name;
+        return name == null || Normalize(name.FullName) == "" && Normalize(name.FirstName) == "" && Normalize(name.LastName) == ""
+            ? NationalIdWithoutNameReason : null;
     }
 
     private static bool NamesEqual(MeteringPointV4NameDto a, MeteringPointV4NameDto b) =>

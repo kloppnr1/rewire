@@ -180,11 +180,11 @@ public class ConsumerVersionReportTests
             .RunAsync("featuretest", [], null, csv));
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
-        Assert.All(rows, row => Assert.Equal(18, row.Length));
+        Assert.All(rows, row => Assert.Equal(19, row.Length));
         Assert.Equal(new[] { "MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
             "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
             "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
-            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate" }, rows[0]);
+            "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason" }, rows[0]);
         Assert.Equal(4, rows.Length);
         Assert.Equal("0", rows[1][8]);
         Assert.Empty(rows[1][17]);
