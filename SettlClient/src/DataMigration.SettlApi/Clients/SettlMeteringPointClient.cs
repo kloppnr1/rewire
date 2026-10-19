@@ -237,6 +237,15 @@ public class SettlMeteringPointClient : SettlApiClientBase, ISettlMeteringPointC
         return await SendAsync<MeteringPointV4Dto>(HttpMethod.Get, url, null, CamelCaseJsonOptions, cancellationToken);
     }
 
+    public async Task<(MeteringPointConsumerNationalIdsDto? Ids, string? Error)> GetConsumerNationalIdsAsync(
+        Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default)
+    {
+        var url = $"{Options.GetMarketBaseUrl(_deliveryCategory)}/api/v4/meteringPoints/{meteringPointId}/nationalIdentificationNumber";
+        if (effectiveDate.HasValue)
+            url += $"?EffectiveDate={effectiveDate.Value:yyyy-MM-ddTHH:mm:ssZ}";
+        return await SendAsync<MeteringPointConsumerNationalIdsDto>(HttpMethod.Get, url, null, CamelCaseJsonOptions, cancellationToken);
+    }
+
     public async Task<(List<MarketBalanceAreaInfoDto>? Items, string? Error)> FindMarketBalanceAreasAsync(
         CancellationToken cancellationToken = default)
     {

@@ -478,6 +478,18 @@ public class MeteringPointV4NotesDto : MeteringPointV4SectionDto
 }
 
 /// <summary>
+/// Consumer national ids (CPR) for a metering point at a given time. Settl's
+/// <c>ConsumerPartyWithNationalIdentificationNumberDto</c>, fetched via
+/// GET /api/v4/meteringPoints/{id}/nationalIdentificationNumber?EffectiveDate={date}.
+/// The plain v4 GET never returns these values.
+/// </summary>
+public class MeteringPointConsumerNationalIdsDto
+{
+    public string? FirstConsumerPartyNationalIdentificationNumber { get; set; }
+    public string? SecondConsumerPartyNationalIdentificationNumber { get; set; }
+}
+
+/// <summary>
 /// Full market v4 MP response. All sections are independently versioned — see
 /// <see cref="MeteringPointV4SectionDto"/> for the Start/End semantics.
 /// Fetch via GET /api/v4/meteringPoints/{id}?EffectiveDate={date}.

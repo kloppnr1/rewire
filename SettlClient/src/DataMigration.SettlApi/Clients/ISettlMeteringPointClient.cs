@@ -79,6 +79,17 @@ public interface ISettlMeteringPointClient
     Task<(MeteringPointV4Dto? MeteringPoint, string? Error)> GetByIdV4Async(
         Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Consumer national ids (CPR) from market v4
+    /// (GET /api/v4/meteringPoints/{id}/nationalIdentificationNumber). <see cref="GetByIdV4Async"/>
+    /// never returns them. Omit <paramref name="effectiveDate"/> for the current version.
+    /// The default implementation keeps test stubs in consumer repos compiling; it does not call Settl.
+    /// </summary>
+    Task<(MeteringPointConsumerNationalIdsDto? Ids, string? Error)> GetConsumerNationalIdsAsync(
+        Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default)
+        => Task.FromResult<(MeteringPointConsumerNationalIdsDto?, string?)>(
+            (null, "GetConsumerNationalIdsAsync is not implemented by this client."));
+
     Task<(List<MarketBalanceAreaInfoDto>? Items, string? Error)> FindMarketBalanceAreasAsync(
         CancellationToken cancellationToken = default);
 

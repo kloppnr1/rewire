@@ -138,6 +138,28 @@ public class SettlMeteringPointClientBillingTests
         Assert.Equal("0101011234", meteringPoint.Consumer.SecondConsumerParty.NationalIdentificationNumber);
     }
 
+    [Fact]
+    public async Task GetConsumerNationalIdsAsync_calls_subresource_and_reads_both_ids()
+    {
+        const string json =
+            """
+            {
+              "firstConsumerPartyNationalIdentificationNumber": "0101011111",
+              "secondConsumerPartyNationalIdentificationNumber": "0202022222"
+            }
+            """;
+        var (client, handler) = MakeClient(json);
+        var effectiveDate = new DateTime(2026, 6, 30, 22, 0, 0, DateTimeKind.Utc);
+
+        var (ids, error) = await client.GetConsumerNationalIdsAsync(Guid.NewGuid(), effectiveDate);
+
+        Assert.Null(error);
+        Assert.EndsWith("/nationalIdentificationNumber", handler.LastRequestUri!.AbsolutePath);
+        Assert.Equal("?EffectiveDate=2026-06-30T22:00:00Z", handler.LastRequestUri.Query);
+        Assert.Equal("0101011111", ids!.FirstConsumerPartyNationalIdentificationNumber);
+        Assert.Equal("0202022222", ids.SecondConsumerPartyNationalIdentificationNumber);
+    }
+
     private static (SettlMeteringPointClient Client, CapturingHandler Handler) MakeClient(
         string responseBody = "{}", HttpStatusCode status = HttpStatusCode.OK)
     {
@@ -163,10 +185,12 @@ public class SettlMeteringPointClientBillingTests
     private sealed class CapturingHandler(string responseBody, HttpStatusCode status) : HttpMessageHandler
     {
         public string LastBody { get; private set; } = string.Empty;
+        public Uri? LastRequestUri { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            LastRequestUri = request.RequestUri;
             if (request.Content != null)
                 LastBody = await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(status)
