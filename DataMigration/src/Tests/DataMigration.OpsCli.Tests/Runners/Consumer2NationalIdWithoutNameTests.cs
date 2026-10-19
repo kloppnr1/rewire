@@ -50,11 +50,11 @@ public class Consumer2NationalIdWithoutNameTests
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }.RunAsync("featuretest", [id.ToString()], null, csv));
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
-        Assert.Equal("Consumer2Reason", rows[0][^1]);
+        Assert.Equal("Consumer2Reason", rows[0][18]);
         var yes = rows.Skip(1).Where(row => row[13] == "Yes").ToArray();
         Assert.Equal(expected, yes.Length);
-        Assert.All(yes, row => Assert.Equal("National id without name", row[^1]));
-        Assert.All(rows.Skip(1).Where(row => row[13] != "Yes"), row => Assert.Empty(row[^1]));
+        Assert.All(yes, row => Assert.Equal("National id without name", row[18]));
+        Assert.All(rows.Skip(1).Where(row => row[13] != "Yes"), row => Assert.Empty(row[18]));
 
         var logs = new List<string>();
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }
@@ -68,7 +68,7 @@ public class Consumer2NationalIdWithoutNameTests
     }
 
     [Fact]
-    public async Task A_named_consumer_2_is_not_selected_and_its_id_is_never_read()
+    public async Task A_named_consumer_2_is_not_selected()
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -78,7 +78,39 @@ public class Consumer2NationalIdWithoutNameTests
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
             .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true }));
         Assert.DoesNotContain(logs, line => line.Contains("would blank"));
-        Assert.Equal(0, client.NationalIdReads);
+    }
+
+    [Theory]
+    [InlineData("other-name", "", "Yes")]
+    [InlineData("other-name", " ", "Yes")]
+    [InlineData("other-name", null, "")]
+    [InlineData("other-name", FakeNationalId, "")]
+    [InlineData("company", "", "")]
+    public async Task Report_flags_a_named_consumer_2_with_an_empty_national_id(string scenario, string? secondId, string expected)
+    {
+        var id = Guid.NewGuid();
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        var point = Point(id, new(2026, 1, 1), scenario);
+        if (scenario == "company") point.Consumer!.SecondConsumerParty = new() { Name = new() { FullName = "Someone else" } };
+        client.ConsumerPoints[id] = point;
+        client.SecondNationalIds[id] = secondId;
+        using var csv = new StringWriter();
+        Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = TextWriter.Null }
+            .RunAsync("featuretest", [id.ToString()], null, csv));
+        var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
+        Assert.Equal("Consumer2NameWithEmptyNationalId", rows[0][^1]);
+        // A point is only listed when it is a duplicate, has an empty id or could not be read.
+        if (expected == "") { Assert.Single(rows); return; }
+        // The first delivery period has no consumer version, so its cell is empty.
+        Assert.Equal(["", "Yes"], rows.Skip(1).Select(row => row[^1]).ToArray());
+        Assert.All(rows.Skip(1), row => Assert.Equal("No", row[13]));
+
+        // The fix never selects these versions.
+        var logs = new List<string>();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true }));
+        Assert.DoesNotContain(logs, line => line.Contains("would blank"));
     }
 
     [Fact]

@@ -23,7 +23,8 @@ public class ReportConsumer2DuplicateHttpTests
             NullLogger<SettlMeteringPointClient>.Instance);
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [], null, output));
-        Assert.Equal(4, handler.Requests.Count);
+        // Includes the national-id read for the named consumer 2.
+        Assert.Equal(5, handler.Requests.Count);
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
         Assert.Contains("DeliveryPatternMatch", output.ToString());
         Assert.Contains("2025-12-01", output.ToString());
@@ -44,7 +45,8 @@ public class ReportConsumer2DuplicateHttpTests
         using var progress = new StringWriter();
         Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = progress }
             .RunAsync(new() { DryRun = true }));
-        Assert.Equal(4, handler.Requests.Count);
+        // Includes the national-id read for the named consumer 2.
+        Assert.Equal(5, handler.Requests.Count);
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
         Assert.Contains(logs, line => line.Contains("would blank", StringComparison.Ordinal));
         Assert.Contains("Checked: 1 / 1", progress.ToString());
@@ -97,7 +99,7 @@ public class ReportConsumer2DuplicateHttpTests
         Assert.Contains("2026-12-01", output.ToString());
         Assert.Contains(handler.Uris, uri => Uri.UnescapeDataString(uri.Query) == "?EffectiveDate=2026-01-01T00:00:00Z");
         Assert.Contains(handler.Uris, uri => Uri.UnescapeDataString(uri.Query) == "?EffectiveDate=2026-12-01T00:00:00Z");
-        Assert.Equal(3, handler.Uris.Count(uri => uri.AbsolutePath.Contains("/v4/")));
+        Assert.Equal(3, handler.Uris.Count(uri => uri.AbsolutePath.Contains("/v4/") && !uri.AbsolutePath.EndsWith("/nationalIdentificationNumber")));
         Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
     }
 
@@ -153,7 +155,7 @@ public class ReportConsumer2DuplicateHttpTests
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
         Assert.Equal(3, rows.Length);
-        Assert.All(rows, row => Assert.Equal(19, row.Length));
+        Assert.All(rows, row => Assert.Equal(20, row.Length));
         Assert.Equal("3", rows[2][8]);
         Assert.Equal("Different", rows[2][10]);
         Assert.StartsWith("2026-12-01", rows[2][11]);

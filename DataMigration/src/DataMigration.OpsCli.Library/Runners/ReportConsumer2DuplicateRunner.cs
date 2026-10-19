@@ -11,7 +11,8 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
     internal static readonly string[] Header = ["MeteringPointIdentification", "SettlId", "DeliveryPatternMatch",
         "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
         "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
-        "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason"];
+        "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason",
+        "Consumer2NameWithEmptyNationalId"];
 
     public TextWriter ProgressOutput { get; init; } = Console.Error;
     public string? OutputPath { get; init; }
@@ -87,8 +88,9 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         var versionReads = 0;
         var prefixMatches = 0;
         var duplicateVersions = 0;
+        var emptyIdVersions = 0;
         var stoppedAtLimit = false;
-        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Prefix matches: {Volatile.Read(ref prefixMatches):N0}   Versions read: {Volatile.Read(ref versionReads):N0}   Duplicate versions: {duplicateVersions:N0}   Read errors: {errors:N0}";
+        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Prefix matches: {Volatile.Read(ref prefixMatches):N0}   Versions read: {Volatile.Read(ref versionReads):N0}   Duplicate versions: {duplicateVersions:N0}   Name with empty national id: {emptyIdVersions:N0}   Read errors: {errors:N0}";
         progress.StartPhase();
         progress.Update(CheckStatus(), force: true);
         for (var offset = 0; offset < selected.Count;)
@@ -122,7 +124,9 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 foreach (var message in messages)
                     progress.Message($"{result.Id}: {message}; report incomplete.");
                 var affected = result.Versions.Versions.Any(v => v.Duplicate);
-                if (!affected && messages.Count == 0) continue;
+                var emptyIds = result.Versions.Versions.Count(v => v.NameWithEmptyNationalId);
+                emptyIdVersions += emptyIds;
+                if (!affected && emptyIds == 0 && messages.Count == 0) continue;
                 if (affected)
                 {
                     matched++;
@@ -150,19 +154,20 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                         selection.Duplicate is null ? "Unknown" : selection.Duplicate.Value ? "Yes" : "No",
                         correlation.AnyDuplicate is null ? "Unknown" : correlation.AnyDuplicate.Value ? "Yes" : "No", correlation.Warning, deliveryWarning,
                         mp?.Consumer is null ? "" : mp.Consumer.MarketUpdate ? "true" : "false",
-                        selection.Duplicate == true ? version!.Reason ?? "" : ""]);
+                        selection.Duplicate == true ? version!.Reason ?? "" : "",
+                        version is null ? "" : version.NameWithEmptyNationalId ? "Yes" : "No"]);
                 }
                 if (periods.Count == 0)
                     await WriteRow(output, [identification, result.Id.ToString(), pattern, "", "", "", "", "", "Unknown",
                         "", "", "", "", "Unknown", "Unknown", "Consumer correlation unavailable: " + string.Join(" | ", result.Versions.Errors.Distinct()),
-                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", "", ""]);
+                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", "", "", ""]);
             }
             progress.Update(CheckStatus());
         }
         progress.Update(CheckStatus(), force: true);
         if (stoppedAtLimit) progress.Message($"Stopped at --limit {limit}: remaining metering points were not checked.");
         progress.Message(errors > 0 ? "Report incomplete: some metering points could not be read." : "Complete");
-        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}; versions read: {versionReads:N0}; duplicate versions: {duplicateVersions:N0}; delivery-prefix matches: {prefixMatches:N0}.");
+        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}; versions read: {versionReads:N0}; duplicate versions: {duplicateVersions:N0}; name with empty national id: {emptyIdVersions:N0}; delivery-prefix matches: {prefixMatches:N0}.");
         if (OutputPath is not null) progress.Message($"Report: {OutputPath}");
         progress.Message("No Settl writes.");
         return errors > 0 ? 1 : 0;

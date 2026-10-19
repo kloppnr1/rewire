@@ -240,6 +240,16 @@ public class FixConsumer2DuplicateRunner
         return name == null || Normalize(name.FullName) == "" && Normalize(name.FirstName) == "" && Normalize(name.LastName) == "";
     }
 
+    /// <summary>True when consumer 2 on a private MP has a name. DataHub rejects a customer update that carries a
+    /// name with a blank CPR (BRS-015), so the report flags such versions. Report only: the fix never selects them.</summary>
+    internal static bool HasSecondName(MeteringPointV4Dto mp)
+    {
+        var consumer = mp.Consumer;
+        if (consumer?.Start is null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal)) return false;
+        var name = consumer.SecondConsumerParty?.Name;
+        return name != null && (Normalize(name.FullName) != "" || Normalize(name.FirstName) != "" || Normalize(name.LastName) != "");
+    }
+
     private static bool NamesEqual(MeteringPointV4NameDto a, MeteringPointV4NameDto b) =>
         Normalize(a.FullName) == Normalize(b.FullName)
         && Normalize(a.FirstName) == Normalize(b.FirstName)

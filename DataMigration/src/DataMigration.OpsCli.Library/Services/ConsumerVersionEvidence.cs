@@ -14,6 +14,11 @@ internal sealed record ConsumerVersion(MeteringPointV4Dto? Point, DateTime? Requ
     /// Null when it was not read (only read when <see cref="FixConsumer2DuplicateRunner.NeedsNationalIdCheck"/>).
     /// The value itself is never kept.</summary>
     public bool? SecondHasNationalId { get; init; }
+    /// <summary>Whether Settl holds consumer 2's national id as an empty string rather than null. Null when not read.</summary>
+    public bool? SecondNationalIdEmpty { get; init; }
+    /// <summary>Consumer 2 has a name but an empty national id: DataHub rejects that update (BRS-015). Report only.</summary>
+    public bool NameWithEmptyNationalId => SecondNationalIdEmpty == true && Point is { } point
+        && Status == "As returned" && FixConsumer2DuplicateRunner.HasSecondName(point);
     public string? Reason => Point is null ? null : FixConsumer2DuplicateRunner.Consumer2Reason(Point, SecondHasNationalId);
     public bool Duplicate => Reason is not null;
 }
@@ -64,12 +69,12 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
                 errors.Add("Current Consumer start is absent from ConsumerDates.");
         }
         // Settl's metering-point read never carries national ids; read them separately, but only for the
-        // versions where the answer decides selection.
+        // versions where the answer decides selection or the empty-id flag.
         for (var i = 0; i < versions.Count; i++)
         {
             var version = versions[i];
             if (version.Point is not { } candidate || version.Status != "As returned"
-                || !FixConsumer2DuplicateRunner.NeedsNationalIdCheck(candidate)) continue;
+                || !FixConsumer2DuplicateRunner.NeedsNationalIdCheck(candidate) && !FixConsumer2DuplicateRunner.HasSecondName(candidate)) continue;
             ct.ThrowIfCancellationRequested();
             var date = ConsumerDeliveryEvidence.Utc(candidate.Consumer!.Start!.Value).UtcDateTime;
             var (ids, idError) = await client.GetConsumerNationalIdsAsync(id, date, ct);
@@ -80,7 +85,11 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
                 errors.Add(message + (idError is null ? "" : " " + idError));
                 versions[i] = version with { Status = message };
             }
-            else versions[i] = version with { SecondHasNationalId = !string.IsNullOrWhiteSpace(ids.SecondConsumerPartyNationalIdentificationNumber) };
+            else versions[i] = version with
+            {
+                SecondHasNationalId = !string.IsNullOrWhiteSpace(ids.SecondConsumerPartyNationalIdentificationNumber),
+                SecondNationalIdEmpty = ids.SecondConsumerPartyNationalIdentificationNumber is { } second && string.IsNullOrWhiteSpace(second)
+            };
         }
         var ordered = versions.OrderBy(v => v.Start ?? DateTime.MaxValue).ToList();
         for (var i = 0; i + 1 < ordered.Count; i++)
