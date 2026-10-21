@@ -146,15 +146,16 @@ public class FixConsumer2DuplicateRunner
                     Log($"  {skippedIdentification} ({result.Id}): skipped: {string.Join(" | ", warnings)}");
                     continue;
                 }
-                // A same-version duplicate wins: blanking it clears the CPR too.
-                var targets = decisions.Where(d => d.Duplicate == true).Select(d => (Version: d.Correlation.Latest!, ClearCpr: false))
-                    .Concat(options.ClearFictitiousCpr2
-                        ? decisions.Where(d => d.FictitiousCpr2 == true && d.Duplicate != true).Select(d => (Version: d.Correlation.Latest!, ClearCpr: true))
-                        : [])
-                    .DistinctBy(t => ConsumerDeliveryEvidence.Utc(t.Version.Start!.Value)).ToArray();
-                // Only the version in effect today may be written; older and future versions are left alone.
-                notCurrent += targets.Count(t => !t.Version.IsCurrent);
-                targets = targets.Where(t => t.Version.IsCurrent).ToArray();
+                // Only the version in effect today may be written. It is judged itself, so a future version in the
+                // same period cannot hide it. Versions the period rules pick that are not today's are only counted.
+                var current = ConsumerDuplicateSelection.CurrentTarget(result.Delivery, result.Versions);
+                notCurrent += decisions.Where(d => d.Duplicate == true || options.ClearFictitiousCpr2 && d.FictitiousCpr2 == true)
+                    .Select(d => d.Correlation.Latest!).Where(v => !v.IsCurrent)
+                    .DistinctBy(v => ConsumerDeliveryEvidence.Utc(v.Start!.Value)).Count();
+                (ConsumerVersion Version, bool ClearCpr)[] targets = current is null ? []
+                    // A duplicate wins: blanking it clears the CPR too.
+                    : current.Duplicate ? [(current, false)]
+                    : options.ClearFictitiousCpr2 && current.FictitiousSecondCpr == true ? [(current, true)] : [];
                 if (targets.Length == 0) continue;
                 matched++;
                 foreach (var (target, clearCpr) in targets)
@@ -171,9 +172,9 @@ public class FixConsumer2DuplicateRunner
                     // Re-read the histories so a newly added version cannot silently change selection.
                     var fresh = await progress.ReadAsync(() => Read(result.Id), "rechecking Consumer selection", Status, cancellationToken);
                     var stillSelected = fresh.Versions.Errors.Count == 0 && fresh.Delivery.Errors.Count == 0
-                        && ConsumerDuplicateSelection.For(fresh.Delivery, fresh.Versions).Any(d => (clearCpr ? d.FictitiousCpr2 == true : d.Duplicate == true)
-                            && d.Correlation.Latest!.IsCurrent
-                            && ConsumerDeliveryEvidence.Utc(d.Correlation.Latest.Start!.Value).UtcDateTime == start);
+                        && ConsumerDuplicateSelection.CurrentTarget(fresh.Delivery, fresh.Versions) is { } freshCurrent
+                        && ConsumerDeliveryEvidence.Utc(freshCurrent.Start!.Value).UtcDateTime == start
+                        && (clearCpr ? !freshCurrent.Duplicate && freshCurrent.FictitiousSecondCpr == true : freshCurrent.Duplicate);
                     if (!stillSelected)
                     {
                         errors++;

@@ -132,6 +132,27 @@ public class Consumer2DataHubRuleTests
         Assert.DoesNotContain(client.ConsumerRequests, request => request.Date == default(DateTime));
     }
 
+    [Fact]
+    public async Task A_future_company_version_does_not_hide_todays_fictitious_cpr()
+    {
+        // Production 571313115190608328: today's private version has the fictitious CPR 2, and a future company
+        // version starts later in the same delivery period.
+        var id = Guid.NewGuid();
+        var today = new DateTime(2026, 1, 1);
+        var future = new DateTime(2026, 12, 1);
+        var client = Fictitious2(id);
+        client.ConsumerPoints[id]!.Consumer!.End = future;
+        var company = Point(id, "Company", true);
+        company.Consumer!.Start = future;
+        client.DatedConsumerPoints[(id, future)] = company;
+        client.ConsumerHistories[id] = (new() { ConsumerDates = [today, future] }, null);
+        var logs = new List<string>();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true, ClearFictitiousCpr2 = true }));
+        var line = Assert.Single(logs, l => l.Contains("would clear"));
+        Assert.Contains("2026-01-01", line);
+    }
+
     private static StubFixConsumer2DuplicateMeteringPointClient Fictitious2(Guid id)
     {
         var client = new StubFixConsumer2DuplicateMeteringPointClient();

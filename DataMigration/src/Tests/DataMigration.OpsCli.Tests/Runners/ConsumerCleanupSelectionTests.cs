@@ -8,15 +8,16 @@ namespace DataMigration.OpsCli.Tests.Runners;
 public class ConsumerCleanupSelectionTests
 {
     [Theory]
-    // The report shows every Yes version; the fix only writes the one in effect today.
-    [InlineData("duplicate", 1, 1)]
-    [InlineData("future-selected", 1, 0)]
-    [InlineData("latest-clean", 0, 0)]
-    [InlineData("first-only", 0, 0)]
-    [InlineData("repeated-version", 1, 1)]
-    [InlineData("inactive", 1, 1)]
-    [InlineData("nonmatching-pattern", 1, 1)]
-    public async Task Preview_targets_only_the_current_report_yes_version(string scenario, int expected, int expectedPreviews)
+    // The report shows the newest Yes version per period; the fix only writes the one in effect today, judged itself,
+    // so a future duplicate in the same period neither hides it nor gets written (it is counted as not current).
+    [InlineData("duplicate", 1, 1, 0)]
+    [InlineData("future-selected", 1, 1, 1)]
+    [InlineData("latest-clean", 0, 0, 0)]
+    [InlineData("first-only", 0, 0, 0)]
+    [InlineData("repeated-version", 1, 1, 0)]
+    [InlineData("inactive", 1, 1, 0)]
+    [InlineData("nonmatching-pattern", 1, 1, 0)]
+    public async Task Preview_targets_only_the_current_report_yes_version(string scenario, int expected, int expectedPreviews, int notCurrent)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -56,8 +57,9 @@ public class ConsumerCleanupSelectionTests
         var previews = logs.Where(line => line.Contains("would blank")).ToArray();
         Assert.Equal(expected, reportDates.Length);
         Assert.Equal(expectedPreviews, previews.Length);
-        Assert.Contains($"  Selected but not current (left alone): {expected - expectedPreviews}", logs);
-        foreach (var date in reportDates.Take(expectedPreviews)) Assert.Single(previews, line => line.Contains(date));
+        Assert.Contains($"  Selected but not current (left alone): {notCurrent}", logs);
+        // Every preview is today's version, which starts 2026-01-01 in each scenario.
+        Assert.All(previews, line => Assert.Contains("2026-01-01", line));
         Assert.Equal(0, client.BlankCalls);
     }
 
