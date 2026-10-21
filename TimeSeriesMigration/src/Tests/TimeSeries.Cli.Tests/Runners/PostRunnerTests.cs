@@ -73,6 +73,7 @@ public class PostRunnerTests : IDisposable
                     new DeliveryStatusDto
                     {
                         InDelivery = true,
+                        StartReason = DeliveryStartReason.ChangeOfSupplier,
                         Period = new TimePeriodDto { Start = revision }
                     }
                 ]
@@ -105,7 +106,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -146,7 +147,7 @@ public class PostRunnerTests : IDisposable
         var matchingEnd = multipleMatches ? revision : revision.AddDays(-1);
         var statuses = new List<DeliveryStatusDto>
         {
-            new() { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+            new() { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
             new()
             {
                 InDelivery = false,
@@ -191,7 +192,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -231,7 +232,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -278,7 +279,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -302,7 +303,7 @@ public class PostRunnerTests : IDisposable
                 {
                     DeliveryStatuses =
                     [
-                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                        new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } }
                     ]
                 },
                 null);
@@ -331,7 +332,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -371,7 +372,7 @@ public class PostRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,
@@ -419,12 +420,15 @@ public class PostRunnerTests : IDisposable
                     new DeliveryStatusDto
                     {
                         InDelivery = true,
+                        StartReason = DeliveryStartReason.ChangeOfSupplier,
                         Period = new TimePeriodDto { Start = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero) }
                     },
                     new DeliveryStatusDto
                     {
+                        // Same first day, another start reason: Settl does not say which delivery it was.
                         InDelivery = true,
-                        Period = new TimePeriodDto { Start = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero) }
+                        StartReason = DeliveryStartReason.MoveIn,
+                        Period = new TimePeriodDto { Start = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero) }
                     }
                 ]
             },

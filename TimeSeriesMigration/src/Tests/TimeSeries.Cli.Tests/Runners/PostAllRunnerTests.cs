@@ -54,7 +54,7 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetDeliveryStatusesResponse = _ => (
             new GetDeliveryStatusesResponse
             {
-                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = start } }]
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = start } }]
             },
             null);
     }
@@ -201,7 +201,7 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetDeliveryStatusesResponse = _ => (
             new GetDeliveryStatusesResponse
             {
-                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }]
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } }]
             },
             null);
         _mp.GetTimeSeriesResponse = _ => HourTs(tsGuid);
@@ -800,7 +800,7 @@ public class PostAllRunnerTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = DanishMidnight(supplyStart) } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = DanishMidnight(supplyStart) } },
                     new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = boundary, End = DanishMidnight(supplyStart) } },
                 ]
             },
@@ -1058,7 +1058,7 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetDeliveryStatusesResponse = id => (
             new GetDeliveryStatusesResponse
             {
-                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
             },
             null);
 
@@ -1097,7 +1097,7 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetDeliveryStatusesResponse = id => (
             new GetDeliveryStatusesResponse
             {
-                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
+                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = mps.Single(m => m.Id == id).CurrentOrNextDeliveryPeriod }]
             },
             null);
         var logs = new List<string>();
@@ -1409,8 +1409,9 @@ public class PostAllRunnerTests : IDisposable
                 {
                     DeliveryStatuses =
                     [
-                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = firstStart } },
-                        new DeliveryStatusDto { InDelivery = true, Period = null }
+                        new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = firstStart } },
+                        // Same first day, another start reason: Settl does not say which delivery it was.
+                        new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.MoveIn, Period = new TimePeriodDto { Start = firstStart.AddHours(1) } }
                     ]
                 },
                 null)
@@ -1422,6 +1423,7 @@ public class PostAllRunnerTests : IDisposable
                         new DeliveryStatusDto
                         {
                             InDelivery = true,
+                            StartReason = DeliveryStartReason.ChangeOfSupplier,
                             Period = new TimePeriodDto { Start = resolvedRevision }
                         }
                     ]
@@ -1438,7 +1440,7 @@ public class PostAllRunnerTests : IDisposable
             Assert.Equal(2, _mp.GetDeliveryStatusesCalls.Count);
             Assert.Single(_mp.GetTimeSeriesCalls);
             Assert.Equal(resolvedMpGuid, _mp.GetTimeSeriesCalls[0]);
-            Assert.Contains($"SKIP MP {MpId1}: ambiguous delivery statuses (2 InDelivery=true) (parent)", logs);
+            Assert.Contains($"SKIP MP {MpId1}: ambiguous delivery statuses (different start reasons on the first in-delivery day) (parent)", logs);
             Assert.Contains($"REVISION MP {MpId2}: {resolvedRevision:O}", logs);
 
             var csvPath = Path.Combine(outputDirectory, TimeSeriesRunner.AmbiguousRevisionCsvFileName);
@@ -1447,7 +1449,7 @@ public class PostAllRunnerTests : IDisposable
                 "\"CustomerNumber\";\"MeteringPointIdentification\";\"Type\";\"SettlMeteringPointId\";\"ActiveInDeliveryCount\";\"ActivePeriodStarts\"",
                 lines[0]);
             Assert.Equal(
-                $"\"\";\"{MpId1}\";\"Parent\";\"{ambiguousMpGuid}\";\"2\";\"{firstStart:O} | MISSING_PERIOD\"",
+                $"\"\";\"{MpId1}\";\"Parent\";\"{ambiguousMpGuid}\";\"2\";\"{firstStart:O} | {firstStart.AddHours(1):O}\"",
                 lines[1]);
         }
         finally
@@ -1478,7 +1480,7 @@ public class PostAllRunnerTests : IDisposable
                 {
                     DeliveryStatuses =
                     [
-                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                        new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                         new DeliveryStatusDto
                         {
                             InDelivery = false,
@@ -1492,7 +1494,7 @@ public class PostAllRunnerTests : IDisposable
                 {
                     DeliveryStatuses =
                     [
-                        new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                        new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } }
                     ]
                 },
                 null);
@@ -1545,6 +1547,7 @@ public class PostAllRunnerTests : IDisposable
                             new DeliveryStatusDto
                             {
                                 InDelivery = true,
+                                StartReason = DeliveryStartReason.ChangeOfSupplier,
                                 Period = new TimePeriodDto { Start = goodRevision }
                             }
                         ]
@@ -1558,7 +1561,7 @@ public class PostAllRunnerTests : IDisposable
                 "malformed" => (
                     new GetDeliveryStatusesResponse
                     {
-                        DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = null }]
+                        DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = null }]
                     },
                     null),
                 "api" => (null, "delivery endpoint failed"),
@@ -1602,7 +1605,7 @@ public class PostAllRunnerTests : IDisposable
                 DeliveryStatuses =
                 [
                     new DeliveryStatusDto { InDelivery = false, Period = new TimePeriodDto { Start = boundary, End = revision } },
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } }
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } }
                 ]
             },
             null);
@@ -1736,29 +1739,103 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task RunPostAllAsync_WindowEndDiffersFromSettlDeliveryDate_BlocksTheMeteringPoint()
+    public async Task RunPostAllAsync_ALaterCurrentDeliveryStatus_DoesNotMoveTheWindow()
     {
-        // The delivery-status list says delivery started 2023-06-15, but the metering point's current
-        // delivery status (Settl's page) says 2023-07-01.
+        // Production 2026-10: Verdo took over 2023-06-15 by change of supplier; the metering point's current
+        // delivery status in Settl starts later (the customer left again). The migration date still holds.
         var supplyStart = new DateTime(2023, 6, 15);
         InDeliveryFrom(supplyStart);
         _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
         _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
-        InSettl((MpId1, Guid.NewGuid()));
+        var mpGuid = Guid.NewGuid();
+        InSettl((MpId1, mpGuid));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
         _mp.GetByIdV4Response = _ => new MeteringPointV4Dto
         {
-            DeliveryStatus = new MeteringPointV4DeliveryStatusDto { Start = new DateTime(2023, 6, 30, 22, 0, 0, DateTimeKind.Utc), InDelivery = true }
+            DeliveryStatus = new MeteringPointV4DeliveryStatusDto { Start = new DateTime(2023, 6, 30, 22, 0, 0, DateTimeKind.Utc), InDelivery = false }
         };
         var logs = new List<string>();
 
-        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
 
-        Assert.Equal(0, rc);
-        Assert.Empty(_ts.PostCalls);
-        Assert.Contains($"BLOCKED:   Window end 2023-06-15 for MP {MpId1} does not match Settl delivery date 2023-07-01.", logs);
-        Assert.True(File.Exists(Path.Combine(OutputDir, "blocked-window-end-differs-from-settl-delivery-date.csv")));
+        Assert.Equal(mpGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.Contains(logs, l => l.Contains($"MP {MpId1}: end=2023-06-15", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, l => l.StartsWith("BLOCKED:", StringComparison.Ordinal));
     }
 
+    // A Settl delivery history: each period runs until the next one starts, the last one stays open.
+    private void DeliveryHistory(params (bool InDelivery, DateTime From, DeliveryStartReason Reason)[] periods) =>
+        _mp.GetDeliveryStatusesResponse = _ => (new GetDeliveryStatusesResponse
+        {
+            DeliveryStatuses = periods.Select((p, i) => new DeliveryStatusDto
+            {
+                InDelivery = p.InDelivery,
+                StartReason = p.Reason,
+                Period = new TimePeriodDto
+                {
+                    Start = DanishMidnight(p.From),
+                    End = i + 1 < periods.Length ? DanishMidnight(periods[i + 1].From) : default,
+                },
+            }).ToList()
+        }, null);
+
+    [Fact]
+    public async Task RunPostAllAsync_SeveralInDelivery_TheFirstChangeOfSupplierIsTheMigration()
+    {
+        // As DataMigration: the first delivery decides; a later gap and return never replace it.
+        var supplyStart = new DateTime(2023, 6, 15);
+        DeliveryHistory(
+            (false, new DateTime(2020, 1, 1), DeliveryStartReason.Na),
+            (true, supplyStart, DeliveryStartReason.ChangeOfSupplier),
+            (false, new DateTime(2023, 8, 1), DeliveryStartReason.Na),
+            (true, new DateTime(2023, 8, 2), DeliveryStartReason.Na));
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Single(_mp.AddEipCalls);
+        Assert.Contains(logs, l => l.Contains($"MP {MpId1}: end=2023-06-15", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(DeliveryStartReason.MoveIn, "first delivery in Settl is a move-in")]
+    [InlineData(DeliveryStartReason.Na, "first delivery in Settl is not a change of supplier")]
+    public async Task RunPostAllAsync_FirstDeliveryNotAChangeOfSupplier_IsSkippedAsNotMigrated(DeliveryStartReason reason, string stateReason)
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        DeliveryHistory((true, supplyStart, reason));
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: not migrated — the first delivery in Settl", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.EndsWith($"1  {stateReason}", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(OutputDir, "skip-not-migrated.csv")));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_FirstDeliveryWithUnknownStartReason_IsBlocked()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        DeliveryHistory((true, supplyStart, DeliveryStartReason.Unknown));
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(logs, l => l.StartsWith($"BLOCKED:   MP {MpId1}: the first delivery in Settl", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(OutputDir, "blocked-unclear-delivery-dates-in-settl-first-delivery-has-start-reason-unknown.csv")));
+    }
     [Fact]
     public async Task RunPostAllAsync_SeriesWithoutAgreement_BlocksTheMeteringPoint()
     {

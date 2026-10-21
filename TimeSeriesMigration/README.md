@@ -98,9 +98,9 @@ Time series points are **not** stored. A batch dry run asks Xellent for counts p
 Settl decides which metering points are posted; Xellent decides whose they are.
 
 1. Every electricity metering point in Settl's list, parents only. Children (a Settl relation or the Xellent relation table) are never in scope.
-2. Per metering point, the delivery start comes from its delivery statuses. Settl can fail to mark delivery (2026-09), so metering points shown as not in delivery are checked too, using the start of their current delivery status.
+2. Per metering point, the delivery start comes from its delivery statuses, the way DataMigration picks it: the first in-delivery period, which must have started as a change of supplier. A later move-in, gap or return never replaces it, and the metering point's current delivery status does not matter. A first delivery that is a move-in, or has no start reason, is skipped as not migrated; start reason Unknown, or two start reasons on the first day, is blocked. Settl can fail to mark delivery (2026-09), so metering points shown as not in delivery anywhere are checked too, using the start of their current delivery status.
 3. The account is whoever held the metering point in Xellent (`El-ekstern` contracts) on the day before delivery starts. That relationship must be closed as a migration.
-4. Window: `end` = delivery start, `start = max(end − 3 years, delivery boundary, the account's own contract start)`. Before posting, `end` must match the delivery start on the metering point in Settl.
+4. Window: `end` = delivery start, `start = max(end − 3 years, delivery boundary, the account's own contract start)`.
 
 | Option | Meaning |
 |--------|---------|

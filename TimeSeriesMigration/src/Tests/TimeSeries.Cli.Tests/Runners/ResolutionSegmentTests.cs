@@ -230,7 +230,7 @@ public class ResolutionSegmentTests : IDisposable
             {
                 DeliveryStatuses =
                 [
-                    new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = revision } },
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = revision } },
                     new DeliveryStatusDto
                     {
                         InDelivery = false,

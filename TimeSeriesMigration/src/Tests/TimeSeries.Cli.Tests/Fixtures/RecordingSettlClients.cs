@@ -60,6 +60,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
                     new DeliveryStatusDto
                     {
                         InDelivery = true,
+                        StartReason = DeliveryStartReason.ChangeOfSupplier,
                         Period = new TimePeriodDto
                         {
                             Start = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero)

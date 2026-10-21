@@ -163,6 +163,13 @@ public class TimeSeriesRunner
     private const string NoContractReason = "no Xellent contract at COS − 1";
     private const string SeveralHoldersReason = "several Xellent account holders at COS − 1";
     private const string NotClosedReason = "contract not closed as a migration at COS − 1";
+    private const string UnknownStartReason = "unclear delivery dates in Settl (first delivery has start reason Unknown)";
+
+    // The state reason for a first delivery in Settl that is not a change of supplier.
+    private static string FirstDeliveryNotMigratedReason(string? detail) =>
+        detail?.Contains("move-in", StringComparison.Ordinal) == true
+            ? "first delivery in Settl is a move-in"
+            : "first delivery in Settl is not a change of supplier";
 
     private static string SkipReason(TimeSeriesSkipCategory category) => category switch
     {
@@ -607,6 +614,15 @@ public class TimeSeriesRunner
                         resolution.SkipReason ?? "");
                     return (null, points, true);
                 }
+                if (resolution.Outcome == RevisionResolutionOutcome.NotMigrated)
+                {
+                    _log($"SKIP MP {mpTs.MeteringPointId}: not migrated — {resolution.SkipReason}{TypeSuffix()}");
+                    RecordSkip(TimeSeriesSkipCategory.NotMigrated, options.CustomerNumber ?? options.AccountNumber,
+                        mpTs.MeteringPointId, mpGuid, null, null, resolution.SkipReason ?? "");
+                    return (null, points, true);
+                }
+                if (resolution.Outcome == RevisionResolutionOutcome.Unclear)
+                    return ($"  Unclear delivery dates in Settl for MP {mpTs.MeteringPointId} ({mpGuid}): {resolution.SkipReason}", points, false);
                 if (resolution.Outcome == RevisionResolutionOutcome.Error)
                     return ($"  Revision resolution failed for MP {mpTs.MeteringPointId} ({mpGuid}): {resolution.Error}", points, false);
 
@@ -1626,10 +1642,10 @@ public class TimeSeriesRunner
             if (revisionResolution.Outcome == RevisionResolutionOutcome.Ambiguous)
             {
                 totalAmbiguousRevisions.Add(isChild);
-                CountBlocked("unclear delivery dates in Settl (several in delivery)", identification, mpGuid, null,
+                CountBlocked("unclear delivery dates in Settl (first delivery has several start reasons)", identification, mpGuid, null,
                     $"{revisionResolution.ActiveStatuses.Count} delivery statuses marked in delivery");
                 RecordCoverageExclusion("Ambiguous delivery revision", isChild);
-                _log($"SKIP MP {identification}: ambiguous delivery statuses ({revisionResolution.ActiveStatuses.Count} InDelivery=true){TypeSuffix()}");
+                _log($"SKIP MP {identification}: ambiguous delivery statuses (different start reasons on the first in-delivery day){TypeSuffix()}");
                 RecordAmbiguousRevision(
                     null,
                     identification,
@@ -1652,6 +1668,18 @@ public class TimeSeriesRunner
                     revisionResolution.Revision,
                     null,
                     revisionResolution.SkipReason ?? "");
+                continue;
+            }
+            // Settl's first delivery is not a change of supplier (a move-in, or no reason): not migrated.
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.NotMigrated)
+            {
+                RecordNotMigrated(revisionResolution.SkipReason ?? "", FirstDeliveryNotMigratedReason(revisionResolution.SkipReason));
+                continue;
+            }
+            if (revisionResolution.Outcome == RevisionResolutionOutcome.Unclear)
+            {
+                CountBlocked(UnknownStartReason, identification, mpGuid, null, revisionResolution.SkipReason ?? "");
+                _log($"BLOCKED:   MP {identification}: {revisionResolution.SkipReason}");
                 continue;
             }
             if (revisionResolution.Outcome == RevisionResolutionOutcome.Error)
@@ -1773,39 +1801,8 @@ public class TimeSeriesRunner
             _log("");
             _log($"  MP {identification}: end={endDate:yyyy-MM-dd}  start={startDate:yyyy-MM-dd}");
 
-            // The window must end where Settl's delivery starts — the start of the metering point's
-            // current delivery status (Settl's own page: Delivery Status → Period). Anything else
-            // means the revision came from somewhere it should not; post nothing. Not the list's
-            // delivery period: it can disagree (featuretest MP 571313115200140503, 2026-09: list
-            // period from 2023-08-02, current delivery status from 2026-03-17). A revision that already
-            // came from the current delivery status (the Settl-bug fallback) is that date by
-            // construction and is not fetched again. The featuretest "latest 3 years" override
-            // deliberately ends today and is exempt. A child whose window came from its parent is
-            // checked against the parent — that is where the delivery status is.
-            if (windowEndDateOverride is null && !revisionResolution.FromCurrentDeliveryStatus)
-            {
-                var (currentMp, currentErr) = await GetCurrentMeteringPointAsync(revisionGuid, cancellationToken);
-                if (currentErr != null)
-                {
-                    RecordCoverageExclusion("Settl delivery status lookup failed", isChild);
-                    CountState("Failed", "Settl delivery status could not be read");
-                    if (!RecordFailure($"  Settl delivery status lookup failed for MP {identification} ({revisionGuid}): {currentErr}")) return 1;
-                    continue;
-                }
-                var settlDeliveryDate = currentMp?.DeliveryStatus?.Start is { } deliveryStart
-                    ? ToDanishDate(new DateTimeOffset(DateTime.SpecifyKind(deliveryStart,
-                        deliveryStart.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : deliveryStart.Kind)))
-                    : (DateOnly?)null;
-                if (settlDeliveryDate != DateOnly.FromDateTime(endDate))
-                {
-                    RecordCoverageExclusion("Window end differs from Settl delivery date", isChild);
-                    CountBlocked("window end differs from Settl delivery date", identification, mpGuid, accountNumber,
-                        $"window end {endDate:yyyy-MM-dd}, Settl delivery date {(settlDeliveryDate is { } sd ? sd.ToString("yyyy-MM-dd") : "(none)")}");
-                    _log($"BLOCKED:   Window end {endDate:yyyy-MM-dd} for MP {identification} does not match Settl delivery date " +
-                         $"{(settlDeliveryDate is { } d ? d.ToString("yyyy-MM-dd") : "(none)")}.");
-                    continue;
-                }
-            }
+            // The window end is not checked against the metering point's current delivery status in Settl: it shows
+            // later events (the customer left, a new period), not the migration (production 2026-10-21: 1,706 such).
 
             // The snapshot seed's done check: everything above decided this metering point would be
             // posted with this window. It is collected here and asked about afterwards, in parallel
@@ -2498,18 +2495,39 @@ public class TimeSeriesRunner
             return RevisionResolutionResult.Failed("GetDeliveryStatuses returned a null DeliveryStatuses list.");
 
         var active = response.DeliveryStatuses.Where(status => status.InDelivery).ToList();
-        if (active.Count > 1)
-            return RevisionResolutionResult.Ambiguous(active);
         if (active.Count == 0)
             return await ResolveWithoutInDeliveryAsync(meteringPointId, response.DeliveryStatuses, cancellationToken, quiet);
 
-        var status = active[0];
-        if (status.Period == null)
-            return RevisionResolutionResult.Failed("The active delivery status has no Period.");
-        if (status.Period.Start == default)
-            return RevisionResolutionResult.Failed("The active delivery status has a default Period.Start.");
+        // The migration is the first delivery, as DataMigration decides it (MoveInDeliveryFilter.FirstDelivery):
+        // the earliest in-delivery period, and it must have started as a change of supplier. A later move-in,
+        // gap or return never replaces it, and the metering point's current delivery status does not matter.
+        var starts = active
+            .Where(s => s.Period is { } p && p.Start != default)
+            .OrderBy(s => s.Period!.Start)
+            .ToList();
+        if (starts.Count == 0)
+            return RevisionResolutionResult.Failed("No in-delivery status has a Period.Start.");
+        var firstDay = ToDanishDate(starts[0].Period!.Start);
+        var firstReasons = starts.Where(s => ToDanishDate(s.Period!.Start) == firstDay).Select(s => s.StartReason).Distinct().ToList();
+        if (firstReasons.Count != 1)
+            return RevisionResolutionResult.Ambiguous(active);
+        switch (firstReasons[0])
+        {
+            case DeliveryStartReason.ChangeOfSupplier:
+                break;
+            case DeliveryStartReason.MoveIn:
+                return RevisionResolutionResult.NotMigrated(
+                    $"the first delivery in Settl ({firstDay:yyyy-MM-dd}) is a move-in, not a change of supplier", active);
+            case DeliveryStartReason.Unknown:
+                return RevisionResolutionResult.Unclear(
+                    $"the first delivery in Settl ({firstDay:yyyy-MM-dd}) has start reason Unknown", active);
+            default:
+                return RevisionResolutionResult.NotMigrated(
+                    $"the first delivery in Settl ({firstDay:yyyy-MM-dd}) does not start as a change of supplier (start reason {firstReasons[0]})", active);
+        }
 
-        var revision = status.Period.Start;
+        var status = starts[0];
+        var revision = status.Period!.Start;
         var inactive = response.DeliveryStatuses.Where(deliveryStatus => !deliveryStatus.InDelivery).ToList();
         if (inactive.Count == 0)
             return RevisionResolutionResult.Resolved(revision, null, active);
@@ -2839,7 +2857,11 @@ public class TimeSeriesRunner
         Resolved,
         Ambiguous,
         SafetySkip,
-        Error
+        Error,
+        /// <summary>Settl's first delivery is not a change of supplier: the metering point was not migrated.</summary>
+        NotMigrated,
+        /// <summary>Settl's first delivery has start reason Unknown: someone has to say what it was.</summary>
+        Unclear
     }
     private sealed record RevisionResolutionResult(
         RevisionResolutionOutcome Outcome,
@@ -2871,6 +2893,12 @@ public class TimeSeriesRunner
 
         public static RevisionResolutionResult Failed(string error) =>
             new(RevisionResolutionOutcome.Error, default, null, [], error, null, null);
+
+        public static RevisionResolutionResult NotMigrated(string reason, IReadOnlyList<DeliveryStatusDto> activeStatuses) =>
+            new(RevisionResolutionOutcome.NotMigrated, default, null, activeStatuses, null, reason, null);
+
+        public static RevisionResolutionResult Unclear(string reason, IReadOnlyList<DeliveryStatusDto> activeStatuses) =>
+            new(RevisionResolutionOutcome.Unclear, default, null, activeStatuses, null, reason, null);
     }
 
     /// <summary>
