@@ -15,10 +15,7 @@ var settlEnv = envArgIndex >= 0 && envArgIndex + 1 < args.Length
     : Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "featuretest";
 
 var config = LoadConfiguration(settlEnv);
-var machineReadableCoverage = args.Any(a => string.Equals(a, "coverage", StringComparison.OrdinalIgnoreCase))
-    && args.Any(a => string.Equals(a, "--json", StringComparison.OrdinalIgnoreCase));
-if (!machineReadableCoverage)
-    Console.WriteLine($"[env: {settlEnv}]");
+Console.WriteLine($"[env: {settlEnv}]");
 
 // Shared options
 var accountOption = new Option<string?>("--account") { Description = "Xellent account number" };
@@ -191,42 +188,6 @@ resolutionChangesCommand.SetAction(async (parseResult, cancellationToken) =>
         cancellationToken);
 });
 
-// === coverage command ===
-var coverageJsonOption = new Option<bool>("--json") { Description = "Write machine-readable JSON" };
-var coverageByAccountOption = new Option<bool>("--by-account") { Description = "Show coverage grouped by Xellent account" };
-var coverageAccountLimitOption = new Option<int>("--account-limit")
-{
-    Description = "Maximum incomplete accounts to print (0 shows all)",
-    DefaultValueFactory = _ => 50
-};
-var coverageCommand = new Command("coverage",
-    "Show time-series migration coverage from the existing environment snapshot (strictly offline)")
-{
-    envOption, coverageJsonOption, coverageByAccountOption, coverageAccountLimitOption
-};
-
-coverageCommand.SetAction(async (parseResult, cancellationToken) =>
-{
-    var accountLimit = parseResult.GetValue(coverageAccountLimitOption);
-    if (accountLimit < 0)
-    {
-        Console.Error.WriteLine("ERROR: --account-limit cannot be negative.");
-        return 1;
-    }
-
-    var (connectionString, outputDir, years) = LoadXellentConfig(config);
-    await using var provider = BuildSettlServices(config);
-    var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
-    if (parseResult.GetValue(coverageJsonOption))
-        runner.OnStepProgress = (_, _, _) => { };
-    return await runner.RunCoverageAsync(
-        settlEnv,
-        parseResult.GetValue(coverageJsonOption),
-        parseResult.GetValue(coverageByAccountOption),
-        accountLimit,
-        cancellationToken);
-});
-
 // === progress command ===
 var progressWatchOption = new Option<bool>("--watch") { Description = "Repaint the report in place every --refresh seconds until Ctrl+C" };
 var progressRefreshOption = new Option<int>("--refresh")
@@ -249,7 +210,6 @@ progressCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 var rootCommand = new RootCommand("Time Series Migration CLI — extract from Xellent, post to Settl");
-rootCommand.Subcommands.Add(coverageCommand);
 rootCommand.Subcommands.Add(resolutionChangesCommand);
 rootCommand.Subcommands.Add(extractCommand);
 rootCommand.Subcommands.Add(postCommand);

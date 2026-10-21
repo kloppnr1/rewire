@@ -19,8 +19,8 @@ dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offlin
 # 4. Run the snapshot again to mark what is now in Settl as done; the next post leaves it out
 dotnet run --project src/TimeSeries.Cli -- snapshot --env featuretest
 
-# 5. Print the migration coverage from that snapshot (no live reads)
-dotnet run --project src/TimeSeries.Cli -- coverage --env featuretest
+# 5. See the states of the last run, and how far a running snapshot is (read-only)
+dotnet run --project src/TimeSeries.Cli -- progress --env featuretest
 ```
 
 ### Done marks
@@ -45,7 +45,7 @@ Reads everything `post --all` needs and stores it in `output/snapshot/<env>/`:
 - **From Settl:** the metering point list, and per metering point its delivery statuses, its current delivery status (only that section — no consumer names or addresses) and its time series.
 - **From Xellent:** child relations (only to know which metering points are children, so they can be left out) and contracts.
 
-Time series points are **not** stored. A batch dry run asks Xellent for counts per dated segment and checks whether hourly values can be split exactly; it reads only the first offending value when validation fails. The seed now counts them for every metering point it would post and keeps the counts (`xellent-point-counts-v3.jsonl`), so `coverage`, `resolution-changes` and offline dry runs read them back instead of counting in Xellent again. That is the slowest part of a seed; a run that only needs the Settl reads is done before it. A live run reads the points fresh. Neither Settl nor Xellent changes while the migration runs, so one snapshot serves many runs.
+Time series points are **not** stored. A batch dry run asks Xellent for counts per dated segment and checks whether hourly values can be split exactly; it reads only the first offending value when validation fails. The seed now counts them for every metering point it would post and keeps the counts (`xellent-point-counts-v3.jsonl`), so `resolution-changes` and offline dry runs read them back instead of counting in Xellent again. That is the slowest part of a seed; a run that only needs the Settl reads is done before it. A live run reads the points fresh. Neither Settl nor Xellent changes while the migration runs, so one snapshot serves many runs.
 
 | Option | Meaning |
 |--------|---------|
@@ -107,34 +107,7 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 
 ### Excluded by hand
 
-`output/snapshot/<env>/excluded.csv` is the operator's list of metering points that are never sent. One row per metering point: identification, then the reason; further columns (who, when) are for the operator. Semicolon or comma between fields; a header row is ignored. `post --all` leaves them out before anything else and counts them as Excluded with their reason. `coverage` counts them as "Excluded by hand".
-
-## `coverage`
-
-Prints one read-only migration summary from the existing environment snapshot. It makes no Settl or
-Xellent calls. Completed metering points come from `done.jsonl`; every remaining migration candidate
-is classified by its values and Settl series.
-
-```bash
-dotnet run --project src/TimeSeries.Cli -- coverage --env production
-dotnet run --project src/TimeSeries.Cli -- coverage --env production --by-account
-dotnet run --project src/TimeSeries.Cli -- coverage --env production --json
-```
-
-The report reconciles every unique metering point in the Settl snapshot to either the migration scope
-or an explicit exclusion reason. Exclusions include children (never in scope), 6##### payers,
-never-delivered and not-migrated points, missing or ambiguous Xellent ownership, delivery-revision safety
-skips, and migration/delivery validation failures. It then shows completed coverage, ready-to-migrate and
-blocked totals, remaining statuses, parent/child totals, and fully completed account totals.
-Run `snapshot` first to refresh the underlying data; an incomplete snapshot causes the command to fail
-instead of reading live.
-
-| Option | Meaning |
-|--------|---------|
-| `--env <name>` | Which environment snapshot to read |
-| `--json` | Write the full report as machine-readable JSON, including every account |
-| `--by-account` | Print incomplete accounts with completed, ready and blocked totals |
-| `--account-limit <N>` | Maximum incomplete accounts to print (default 50; `0` shows all) |
+`output/snapshot/<env>/excluded.csv` is the operator's list of metering points that are never sent. One row per metering point: identification, then the reason; further columns (who, when) are for the operator. Semicolon or comma between fields; a header row is ignored. `post --all` leaves them out before anything else and counts them as Excluded with their reason.
 
 ## `resolution-changes`
 
@@ -206,7 +179,7 @@ In CI/deploy, the pipeline writes the same paths into `appsettings.json` directl
 
 ## Project Structure
 
-- **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `coverage`, `resolution-changes`, `extract`)
+- **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `resolution-changes`, `extract`)
 - **TimeSeries.Migration** — the runner, Xellent extraction and the snapshot store; published as the `NewSettlement.TimeSeriesMigration` package (used by MigrationDashboard)
 - **TimeSeries.Core** — shared DTOs; published as `NewSettlement.TimeSeriesMigration.Core`
 - Xellent and Settl access come from the `NewSettlement.XellentDomain.*` and `NewSettlement.SettlClient.Api` packages
@@ -221,6 +194,6 @@ Target: `C:\Services\DataMigration\TimeSeriesCli\`
 
 All included converted values and required target series are checked before any point or externally-invoiced-period write for that meter. An inexact five-decimal split fails the whole meter, with the timestamp and value reported; `--force` retains its existing continue-with-failures behaviour. Settl series must already exist. The feature applies to future sends only and does not repair previous posts or reset done marks.
 
-Refresh the snapshot to populate `xellent-point-counts-v3.jsonl` before offline reports. Older count files cannot establish conversion readiness. Strictly offline `coverage` reports missing v3 evidence instead of reusing v2 counts; other offline commands retain their documented fetch-on-miss behaviour. Done marks are preserved.
+Refresh the snapshot to populate `xellent-point-counts-v3.jsonl` before offline reports. Older count files cannot establish conversion readiness. Offline commands retain their documented fetch-on-miss behaviour. Done marks are preserved.
 
 Run headers and delivery-filter counts describe source points; segment POST lines and `RESULT MP` / run totals describe outgoing points. `--skip-resolution-change` tests outgoing resolutions, so a mixed Hour/Quarter window is still skipped and a fully converted Quarter window is not.

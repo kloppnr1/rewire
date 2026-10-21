@@ -61,58 +61,11 @@ public enum TimeSeriesSkipCategory
     NotInstalled
 }
 
-public sealed record CoverageStatusCount(string Status, int Count);
-
 public sealed record MissingReadingsEntry(string MeteringPointId, Guid SettlId, string? Account,
     DateOnly? WindowStart, DateOnly? WindowEnd, string Status, string? Detail);
 
 public sealed record MissingReadingsScanResult(IReadOnlyList<MissingReadingsEntry> Entries, int ExitCode);
 
-public sealed record CoverageExclusionCount(string Reason, int Count, int Parents, int Children);
-
-public sealed record AccountCoverageReport(
-    string Account,
-    int MeteringPointsInScope,
-    int Completed,
-    int Ready,
-    int Blocked)
-{
-    public int Remaining => MeteringPointsInScope - Completed;
-    public decimal CoveragePercent => Percentage(Completed, MeteringPointsInScope);
-
-    private static decimal Percentage(int count, int total) =>
-        total == 0 ? 100m : Math.Round(count * 100m / total, 2);
-}
-
-public sealed record TimeSeriesCoverageReport(
-    DateTimeOffset GeneratedAtUtc,
-    string Environment,
-    DateTimeOffset? SnapshotCheckedAt,
-    int SettlSnapshotRows,
-    int DuplicateSettlRows,
-    int SettlRowsWithoutIdentification,
-    int MeteringPointsExamined,
-    int MeteringPointsInScope,
-    int ExcludedFromScope,
-    int Completed,
-    int Ready,
-    int Blocked,
-    int ParentMeteringPoints,
-    int ChildMeteringPoints,
-    int AccountsInScope,
-    int AccountsComplete,
-    IReadOnlyList<CoverageExclusionCount> Exclusions,
-    IReadOnlyList<CoverageStatusCount> RemainingStatuses,
-    IReadOnlyList<AccountCoverageReport>? Accounts)
-{
-    public int Remaining => MeteringPointsInScope - Completed;
-    public decimal CoveragePercent => Percentage(Completed, MeteringPointsInScope);
-    public decimal ReadyOrCompletedPercent => Percentage(Completed + Ready, MeteringPointsInScope);
-    public decimal AccountCoveragePercent => Percentage(AccountsComplete, AccountsInScope);
-
-    private static decimal Percentage(int count, int total) =>
-        total == 0 ? 100m : Math.Round(count * 100m / total, 2);
-}
 
 public class TimeSeriesRunner
 {
@@ -1029,7 +982,7 @@ public class TimeSeriesRunner
             _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
             var doneBefore = meteringPoints.Count(m => _done.Contains(SnapshotDone, m.Identification));
             _log = _ => { };
-            // Tally the scope rules the batch applies (the same reasons coverage reports), so progress can
+            // Tally the scope rules the batch applies, so progress can
             // show what holds back the metering points that are not done.
             _coverageTrace = new CoverageScopeTrace();
             try
@@ -1061,7 +1014,7 @@ public class TimeSeriesRunner
             _done = null;
 
             // Xellent point counts for every candidate, in the same window the reports use, stored in the
-            // snapshot. coverage, resolution-changes and offline dry runs then read them back instead of
+            // snapshot. resolution-changes and offline dry runs then read them back instead of
             // counting in Xellent again.
             _progressWriter?.StartPhase(4, "Xellent counts");
             _log("Counting points in Xellent for each metering point that would be posted...");
@@ -1250,220 +1203,6 @@ public class TimeSeriesRunner
         }
     }
 
-    /// <summary>
-    /// Prints migration coverage from the environment snapshot. Completed metering points come from
-    /// <c>done.jsonl</c>; the remaining candidates are classified by their values and Settl series. This command deliberately uses the snapshot rather than refreshing
-    /// it: run <c>snapshot</c> first when a newer view is wanted.
-    /// </summary>
-    public async Task<int> RunCoverageAsync(
-        string environment,
-        bool json = false,
-        bool byAccount = false,
-        int accountLimit = 50,
-        CancellationToken cancellationToken = default)
-    {
-        if (_settlMeteringPointClient == null)
-            return Error("Settl API clients not configured. DI registration missing.");
-        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
-
-        var snapshotDirectory = SnapshotDirectory(environment);
-        if (!Directory.Exists(snapshotDirectory) ||
-            !File.Exists(Path.Combine(snapshotDirectory, SnapshotSettlList + ".jsonl")))
-            return Error($"No snapshot found for environment '{environment}' at {snapshotDirectory}. Run the snapshot command first.");
-
-        _snapshot = new RunSnapshot(snapshotDirectory, reuse: true, fetchMissing: false);
-        var runLog = _log;
-        try
-        {
-            _markDoneMode = true;
-            _doneCandidates.Clear();
-            _coverageTrace = new CoverageScopeTrace();
-            var snapshotErrors = new List<string>();
-            _log = line =>
-            {
-                if (line.Contains("snapshot has no", StringComparison.OrdinalIgnoreCase))
-                    snapshotErrors.Add(line);
-            };
-            await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true,
-                skipResolutionChange: false, skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null,
-                windowEndDateOverride: null, skip: null, cancellationToken);
-            _log = runLog;
-            _markDoneMode = false;
-            _done = null;
-            if (snapshotErrors.Count > 0)
-                return Error($"The offline snapshot is incomplete. Run the snapshot command again. {snapshotErrors[0].Trim()}");
-
-            var doneList = new RunSnapshot(snapshotDirectory, reuse: true, fetchMissing: false);
-            doneList.TryGet<DoneSummary>(SnapshotDoneSummary, "last", out var summary);
-            var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
-            var results = new List<(DoneCandidate Candidate, string Status)>();
-
-            await using var context = BuildXellentContext();
-            for (var i = 0; i < candidates.Count; i++)
-            {
-                var candidate = candidates[i];
-                ReportProgress("Coverage", i + 1, candidates.Count);
-                if (doneList.Contains(SnapshotDone, candidate.Identification))
-                {
-                    results.Add((candidate, "Completed"));
-                    continue;
-                }
-
-                var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
-                    candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
-                var valueResolutions = counted.Segments
-                    .Where(s => PointCount(s) > 0)
-                    .Select(OutgoingTimeSeries.Resolution)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
-                if (seriesError != null)
-                    return Error($"Snapshot data missing for MP {candidate.Identification}: {seriesError}");
-                var settlResolutions = (series ?? [])
-                    .Select(t => SettlResolutionName(t.TimeResolution))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
-
-                string status;
-                if (counted.SeriesWithoutAgreement.Count > 0)
-                    status = "SeriesWithoutAgreement";
-                else if (counted.Segments.Any(s => OutgoingTimeSeries.Validate(s) != null))
-                    status = "ConversionError";
-                else if (valueResolutions.Count == 0)
-                    status = await MeterPointStatusAsync(context, candidate.Identification) == MeterPointStatusCreated
-                        ? "NotInstalled"
-                        : "NoValues";
-                else if (missing.Count > 0)
-                    status = MissingSeriesStatus(missing);
-                else if (valueResolutions.Count > 1)
-                    status = "ResolutionChange";
-                else
-                    status = "Ready";
-                results.Add((candidate, status));
-            }
-
-            var completed = results.Count(r => r.Status == "Completed");
-            var ready = results.Count(r => r.Status == "Ready");
-            var exclusions = _coverageTrace.Exclusions
-                .Select(pair => new CoverageExclusionCount(pair.Key, pair.Value.Total, pair.Value.Parents, pair.Value.Children))
-                .OrderByDescending(e => e.Count)
-                .ThenBy(e => e.Reason, StringComparer.Ordinal)
-                .ToList();
-            var examined = _coverageTrace.MeteringPointsExamined;
-            var unexplained = examined - results.Count - exclusions.Sum(e => e.Count);
-            if (unexplained > 0)
-                exclusions.Add(new CoverageExclusionCount("Other selection outcome", unexplained, unexplained, 0));
-            var statusCounts = results
-                .Where(r => r.Status != "Completed")
-                .GroupBy(r => r.Status, StringComparer.Ordinal)
-                .Select(g => new CoverageStatusCount(g.Key, g.Count()))
-                .OrderByDescending(s => s.Count)
-                .ThenBy(s => s.Status, StringComparer.Ordinal)
-                .ToList();
-            var accountReports = results
-                .GroupBy(r => r.Candidate.Account, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new AccountCoverageReport(
-                    group.Key,
-                    group.Count(),
-                    group.Count(r => r.Status == "Completed"),
-                    group.Count(r => r.Status == "Ready"),
-                    group.Count(r => r.Status is not ("Completed" or "Ready"))))
-                .OrderByDescending(a => a.Remaining)
-                .ThenBy(a => a.Account, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var accountsComplete = accountReports.Count(a => a.Remaining == 0);
-            var report = new TimeSeriesCoverageReport(
-                DateTimeOffset.UtcNow,
-                environment,
-                summary?.CheckedAt,
-                _coverageTrace.SettlSnapshotRows,
-                _coverageTrace.DuplicateSettlRows,
-                _coverageTrace.SettlRowsWithoutIdentification,
-                examined,
-                results.Count,
-                examined - results.Count,
-                completed,
-                ready,
-                results.Count - completed - ready,
-                results.Count(r => r.Candidate.Type == "Parent"),
-                results.Count(r => r.Candidate.Type == "Child"),
-                accountReports.Count,
-                accountsComplete,
-                exclusions,
-                statusCounts,
-                byAccount || json ? accountReports : null);
-
-            if (json)
-                _log(JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-            else
-                PrintCoverage(report, snapshotDirectory, accountLimit);
-            return 0;
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Error($"Offline coverage could not be calculated: {ex.Message}");
-        }
-        finally
-        {
-            _log = runLog;
-            _markDoneMode = false;
-            _snapshot = null;
-            _done = null;
-            _coverageTrace = null;
-        }
-    }
-
-    private void PrintCoverage(TimeSeriesCoverageReport report, string snapshotDirectory, int accountLimit)
-    {
-        _log($"=== Time series migration coverage — {report.Environment} ===");
-        _log($"Generated: {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
-        _log($"Source: {snapshotDirectory}");
-        _log(report.SnapshotCheckedAt is { } checkedAt
-            ? $"Snapshot checked: {checkedAt.ToLocalTime():yyyy-MM-dd HH:mm}"
-            : "Snapshot checked: unknown (done-summary missing)");
-        _log("");
-        _log($"Settl snapshot rows:             {report.SettlSnapshotRows,9:N0}");
-        if (report.DuplicateSettlRows > 0)
-            _log($"Duplicate Settl rows:          {report.DuplicateSettlRows,9:N0}  (not additional metering points)");
-        if (report.SettlRowsWithoutIdentification > 0)
-            _log($"Rows without identification:   {report.SettlRowsWithoutIdentification,9:N0}");
-        _log($"Unique metering points examined: {report.MeteringPointsExamined,9:N0}");
-        _log($"Metering points in scope: {report.MeteringPointsInScope,12:N0}");
-        _log($"Excluded from scope:      {report.ExcludedFromScope,12:N0}");
-        _log("");
-        _log("Excluded from scope:");
-        foreach (var exclusion in report.Exclusions)
-            _log($"  {exclusion.Count,8:N0} x {exclusion.Reason} ({exclusion.Parents:N0} parents, {exclusion.Children:N0} children)");
-        _log("");
-        _log($"Completed:                 {report.Completed,12:N0}  ({report.CoveragePercent:N2}%)");
-        _log($"Ready to migrate:          {report.Ready,12:N0}");
-        _log($"Blocked / needs decision:  {report.Blocked,12:N0}");
-        _log($"Remaining:                 {report.Remaining,12:N0}");
-        _log($"Completed or ready:        {report.Completed + report.Ready,12:N0}  ({report.ReadyOrCompletedPercent:N2}%)");
-        _log($"Parents / children:        {report.ParentMeteringPoints:N0} / {report.ChildMeteringPoints:N0}");
-        _log("");
-        _log($"Accounts in scope:         {report.AccountsInScope,12:N0}");
-        _log($"Fully completed accounts:  {report.AccountsComplete,12:N0}  ({report.AccountCoveragePercent:N2}%)");
-        _log("");
-        _log("Remaining status:");
-        foreach (var status in report.RemainingStatuses)
-            _log($"  {status.Count,8:N0} x {status.Status}");
-
-        if (report.Accounts is null)
-            return;
-        var incomplete = report.Accounts.Where(a => a.Remaining > 0).ToList();
-        var rows = accountLimit == 0 ? incomplete : incomplete.Take(accountLimit).ToList();
-        _log("");
-        _log("Accounts with remaining metering points:");
-        _log("Account                 Scope    Completed      Ready    Blocked   Coverage");
-        foreach (var account in rows)
-            _log($"{account.Account,-20} {account.MeteringPointsInScope,8:N0} {account.Completed,12:N0} " +
-                 $"{account.Ready,10:N0} {account.Blocked,10:N0} {account.CoveragePercent,9:N2}%");
-        if (accountLimit > 0 && incomplete.Count > accountLimit)
-            _log($"Showing {accountLimit:N0} of {incomplete.Count:N0} incomplete accounts. Use --account-limit 0 to show all.");
-    }
-
     /// <summary>One row of the resolution list: a switch date (null when there is none), what the points are
     /// in, what Settl has, and what Settl is missing.</summary>
     private sealed record ResolutionRow(string MeteringPoint, string Type, DateOnly? ChangeDate, string XellentResolutions,
@@ -1472,14 +1211,6 @@ public class TimeSeriesRunner
     // EXU_METERPOINTSTATUSPERIOD.METERPOINTSTATUS: "Oprettet" — the metering point exists, but no meter
     // is installed at the address yet, so it never gets values. A delivering meter point sits at 6.
     private const int MeterPointStatusCreated = 5;
-
-    // Which Settl series the metering point is missing, named after the resolution when it is just one.
-    private static string MissingSeriesStatus(List<string> missing) =>
-        missing.Count == 1 && missing.Contains("Hour", StringComparer.OrdinalIgnoreCase)
-            ? "MissingHourSeries"
-            : missing.Count == 1 && missing.Contains("Quarter", StringComparer.OrdinalIgnoreCase)
-                ? "MissingQuarterSeries"
-                : "MissingSeries";
 
     // Settl states a resolution as length + unit; this run speaks of Hour and Quarter.
     private static string SettlResolutionName(TimeResolutionInfoDto? resolution) => resolution switch
@@ -2393,8 +2124,7 @@ public class TimeSeriesRunner
     private Dictionary<string, MissingReadingsEntry>? _missingReadingsScan;
     private string? _scanCurrentMeteringPoint;
 
-    // Populated only by coverage. It explains every metering point that the batch candidate pass leaves
-    // outside its denominator, so the report reconciles the full Settl population to the migration scope.
+    // Populated only by the snapshot's done check: the scope rules that set metering points aside, for progress.
     private CoverageScopeTrace? _coverageTrace;
 
     private sealed class CoverageScopeTrace
