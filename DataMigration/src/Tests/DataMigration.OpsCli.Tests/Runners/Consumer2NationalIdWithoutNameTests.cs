@@ -85,13 +85,11 @@ public class Consumer2NationalIdWithoutNameTests
     [InlineData("other-name", " ", "Yes")]
     [InlineData("other-name", null, "")]
     [InlineData("other-name", FakeNationalId, "")]
-    [InlineData("company", "", "")]
     public async Task Report_flags_a_named_consumer_2_with_an_empty_national_id(string scenario, string? secondId, string expected)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
         var point = Point(id, new(2026, 1, 1), scenario);
-        if (scenario == "company") point.Consumer!.SecondConsumerParty = new() { Name = new() { FullName = "Someone else" } };
         client.ConsumerPoints[id] = point;
         client.SecondNationalIds[id] = secondId;
         using var csv = new StringWriter();
@@ -99,11 +97,11 @@ public class Consumer2NationalIdWithoutNameTests
             .RunAsync("featuretest", [id.ToString()], null, csv));
         var rows = csv.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
-        Assert.Equal("Consumer2NameWithEmptyNationalId", rows[0][^1]);
+        Assert.Equal("Consumer2NameWithEmptyNationalId", rows[0][19]);
         // A point is only listed when it is a duplicate, has an empty id or could not be read.
         if (expected == "") { Assert.Single(rows); return; }
         // The first delivery period has no consumer version, so its cell is empty.
-        Assert.Equal(["", "Yes"], rows.Skip(1).Select(row => row[^1]).ToArray());
+        Assert.Equal(["", "Yes"], rows.Skip(1).Select(row => row[19]).ToArray());
         Assert.All(rows.Skip(1), row => Assert.Equal("No", row[13]));
 
         // The fix never selects these versions.

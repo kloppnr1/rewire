@@ -1,7 +1,9 @@
 namespace DataMigration.OpsCli.Services;
 
-/// <summary>The report's per-period decision, also used by cleanup without reading a CSV.</summary>
-internal sealed record ConsumerDuplicateSelection(DeliveryPeriod Period, DeliveryConsumerCorrelation Correlation, bool? Duplicate)
+/// <summary>The report's per-period decision, also used by cleanup without reading a CSV.
+/// <see cref="FictitiousCpr2"/> follows the same period rules: false on the first period.</summary>
+internal sealed record ConsumerDuplicateSelection(DeliveryPeriod Period, DeliveryConsumerCorrelation Correlation, bool? Duplicate,
+    bool? FictitiousCpr2 = null)
 {
     internal static IReadOnlyList<ConsumerDuplicateSelection> For(ConsumerDeliveryEvidence delivery, ConsumerVersionEvidence versions)
     {
@@ -13,7 +15,9 @@ internal sealed record ConsumerDuplicateSelection(DeliveryPeriod Period, Deliver
             var correlation = DeliveryConsumerCorrelation.For(period, versions);
             bool? duplicate = first is null ? null : ReferenceEquals(period, first) ? false
                 : correlation.Latest?.Point?.Consumer is null ? null : correlation.Latest.Duplicate;
-            return new ConsumerDuplicateSelection(period, correlation, duplicate);
+            bool? fictitious = first is null ? null : ReferenceEquals(period, first) ? false
+                : correlation.Latest?.Point?.Consumer is null ? null : correlation.Latest.FictitiousSecondCpr == true;
+            return new ConsumerDuplicateSelection(period, correlation, duplicate, fictitious);
         }).ToArray();
     }
 }

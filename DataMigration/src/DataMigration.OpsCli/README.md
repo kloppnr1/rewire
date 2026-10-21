@@ -543,6 +543,13 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
   the file; every point is read fresh from Settl and selected by the rules above.
   The header must match the current report exactly, and it cannot be combined
   with `--mp-id`.
+- `--clear-fictitious-cpr2` also clears consumer 2's CPR where it is DataHub's
+  fictitious 1111110000 and consumer 1 has a real CPR. Only the CPR is cleared;
+  the name is sent back unchanged, because Settl replaces the whole second party
+  and a patch without the name clears it. Same period rules as above. It needs
+  `--mp-id` and cannot be combined with `--from-report`, so it only touches the
+  points you list. Afterwards consumer 2 has a name and an empty CPR, which
+  DataHub also rejects until Settl leaves an empty CPR out.
 
 For a read-only preview:
 
@@ -596,7 +603,7 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
   first period), with the warning.
 - DeliveryWarning and ConsumerWarning are blank when valid. A missing delivery
   history retains one diagnostic row with blank delivery values and a warning.
-- The CSV has 20 columns. RowType, environment, current delivery summaries, LastUpdated,
+- The CSV has 23 columns. RowType, environment, current delivery summaries, LastUpdated,
   change signals and calculated overlaps have been removed. Include the
   environment in the output filename, for example consumer2-production.csv.
 - MarketUpdate contains the selected Consumer version's MarketUpdate value as
@@ -604,11 +611,19 @@ dotnet run --project src/DataMigration.OpsCli -- report-consumer2-duplicate --en
 - Consumer2Reason says why DuplicateConsumer2 is Yes: `Same name` or
   `National id without name`. It is blank on every other row. The national id
   value itself is never exported.
-- Consumer2NameWithEmptyNationalId (last column) is Yes when the row's private
-  Consumer version has a consumer 2 name and Settl holds consumer 2's national id
-  as an empty string, not null. DataHub rejects a customer update that carries a
-  name with a blank CPR (BRS-015). Report only: the fix never selects these, and
-  a point with no duplicate is listed when any of its versions has this.
+- Consumer2NameWithEmptyNationalId is Yes when the row's private Consumer
+  version has a consumer 2 name and Settl holds consumer 2's national id as an
+  empty string, not null. DataHub rejects a customer update that carries a name
+  with a blank CPR (BRS-015). Report only.
+- CompanyWithConsumer2 is Yes when a company has a named consumer 2. DataHub
+  allows one customer on a company; Settl reports it as "Organization ID / CVR 2
+  is not filled in". Report only.
+- Consumer2FictitiousCpr is Yes when consumer 2's CPR is 1111110000 and consumer
+  1 has a real CPR: what `--clear-fictitious-cpr2` clears.
+- CprInvalidFormat is Yes when a filled-in CPR 1 or CPR 2 is not 10 digits.
+- These four columns describe the row's newest version. A point with no
+  duplicate is listed when any of its versions has a Yes in one of them. CPR
+  values are never exported; every private version gets a national-id read.
 - All four date columns use Danish time with daylight-saving offsets (+01:00 or
   +02:00), and names ending Dk. Null and year-9999 ends show (open).
   Consumer dates without an offset are interpreted as UTC. Missing or inconsistent

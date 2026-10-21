@@ -18,6 +18,10 @@ public class FixConsumer2DuplicateRunOptions
     public int? Limit { get; set; }
 
     public bool DryRun { get; set; }
+
+    /// <summary>Also clear consumer 2's CPR where it is the fictitious 1111110000 and CPR 1 is real. The name is kept.
+    /// Only allowed with <see cref="MeteringPointIds"/>, so it only touches points the user listed.</summary>
+    public bool ClearFictitiousCpr2 { get; set; }
 }
 
 /// <summary>Uses the report decision for each delivery period; writes each selected Consumer version once.</summary>
@@ -42,6 +46,8 @@ public class FixConsumer2DuplicateRunner
     {
         if (options.Limit is <= 0) throw new ArgumentOutOfRangeException(nameof(options.Limit));
         if (!options.DryRun && _cleanup is null) throw new InvalidOperationException("Dated Consumer cleanup client is not configured.");
+        if (options.ClearFictitiousCpr2 && options.MeteringPointIds.Length == 0)
+            throw new ArgumentException("--clear-fictitious-cpr2 needs --mp-id.");
         using var progress = new Consumer2ProgressDisplay(ProgressOutput, ProgressInterval);
         void Log(string message) { progress.Dispose(); _log(message); }
         var errors = 0;
@@ -134,24 +140,29 @@ public class FixConsumer2DuplicateRunner
                     Log($"  {result.Id}: skipped: {string.Join(" | ", warnings)}");
                     continue;
                 }
-                var targets = decisions.Where(d => d.Duplicate == true).Select(d => d.Correlation.Latest!)
-                    .DistinctBy(v => ConsumerDeliveryEvidence.Utc(v.Start!.Value)).ToArray();
+                // A same-version duplicate wins: blanking it clears the CPR too.
+                var targets = decisions.Where(d => d.Duplicate == true).Select(d => (Version: d.Correlation.Latest!, ClearCpr: false))
+                    .Concat(options.ClearFictitiousCpr2
+                        ? decisions.Where(d => d.FictitiousCpr2 == true && d.Duplicate != true).Select(d => (Version: d.Correlation.Latest!, ClearCpr: true))
+                        : [])
+                    .DistinctBy(t => ConsumerDeliveryEvidence.Utc(t.Version.Start!.Value)).ToArray();
                 if (targets.Length == 0) continue;
                 matched++;
-                foreach (var target in targets)
+                foreach (var (target, clearCpr) in targets)
                 {
                     var start = ConsumerDeliveryEvidence.Utc(target.Start!.Value).UtcDateTime;
                     var identification = target.Point?.Identification?.MeteringPointIdentification ?? result.Id.ToString();
                     var label = $"{identification} ({result.Id}): Consumer {ConsumerReportDates.Format(new DateTimeOffset(start))}";
                     if (options.DryRun)
                     {
-                        Log($"  {label} - would blank second party Name + NationalIdentificationNumber ({target.Reason})");
+                        Log(clearCpr ? $"  {label} - would clear second party NationalIdentificationNumber ({FictitiousCprReason})"
+                            : $"  {label} - would blank second party Name + NationalIdentificationNumber ({target.Reason})");
                         continue;
                     }
                     // Re-read the histories so a newly added version cannot silently change selection.
                     var fresh = await progress.ReadAsync(() => Read(result.Id), "rechecking Consumer selection", Status, cancellationToken);
                     var stillSelected = fresh.Versions.Errors.Count == 0 && fresh.Delivery.Errors.Count == 0
-                        && ConsumerDuplicateSelection.For(fresh.Delivery, fresh.Versions).Any(d => d.Duplicate == true
+                        && ConsumerDuplicateSelection.For(fresh.Delivery, fresh.Versions).Any(d => (clearCpr ? d.FictitiousCpr2 == true : d.Duplicate == true)
                             && ConsumerDeliveryEvidence.Utc(d.Correlation.Latest!.Start!.Value).UtcDateTime == start);
                     if (!stillSelected)
                     {
@@ -159,7 +170,9 @@ public class FixConsumer2DuplicateRunner
                         Log($"  {label}: skipped: selection changed or evidence is incomplete.");
                         continue;
                     }
-                    var (outcome, error) = await progress.ReadAsync(() => _cleanup!.BlankAsync(result.Id, start, cancellationToken),
+                    var (outcome, error) = await progress.ReadAsync(() => clearCpr
+                            ? _cleanup!.ClearFictitiousSecondCprAsync(result.Id, start, cancellationToken)
+                            : _cleanup!.BlankAsync(result.Id, start, cancellationToken),
                         "dated Consumer update and verification", Status, cancellationToken);
                     switch (outcome)
                     {
@@ -212,6 +225,7 @@ public class FixConsumer2DuplicateRunner
 
     internal const string SameNameReason = "Same name";
     internal const string NationalIdWithoutNameReason = "National id without name";
+    internal const string FictitiousCprReason = "Fictitious CPR";
 
     /// <summary>
     /// Why the second Consumer party should be blanked, or null when it should not. Private MPs only:
@@ -242,13 +256,27 @@ public class FixConsumer2DuplicateRunner
 
     /// <summary>True when consumer 2 on a private MP has a name. DataHub rejects a customer update that carries a
     /// name with a blank CPR (BRS-015), so the report flags such versions. Report only: the fix never selects them.</summary>
-    internal static bool HasSecondName(MeteringPointV4Dto mp)
-    {
-        var consumer = mp.Consumer;
-        if (consumer?.Start is null || !string.Equals(consumer.CustomerType, "Person", StringComparison.Ordinal)) return false;
-        var name = consumer.SecondConsumerParty?.Name;
-        return name != null && (Normalize(name.FullName) != "" || Normalize(name.FirstName) != "" || Normalize(name.LastName) != "");
-    }
+    internal static bool HasSecondName(MeteringPointV4Dto mp) => IsPrivate(mp) && SecondNamed(mp);
+
+    /// <summary>A company with a named consumer 2. DataHub allows only one customer on a company; Settl reports it as
+    /// "Organization ID / CVR 2 is not filled in". Report only.</summary>
+    internal static bool CompanyWithSecondName(MeteringPointV4Dto mp) => mp.Consumer?.Start is not null
+        && !string.IsNullOrWhiteSpace(mp.Consumer.CustomerType) && !IsPrivate(mp) && SecondNamed(mp);
+
+    /// <summary>A private version with a start: the versions whose CPRs are read and checked.</summary>
+    internal static bool IsPrivate(MeteringPointV4Dto mp) =>
+        mp.Consumer?.Start is not null && string.Equals(mp.Consumer.CustomerType, "Person", StringComparison.Ordinal);
+
+    /// <summary>DataHub's fictitious CPR (BRS-015).</summary>
+    internal const string FictitiousCpr = "1111110000";
+    internal static bool IsFictitiousCpr(string? cpr) => Normalize(cpr) == FictitiousCpr;
+    internal static bool IsRealCpr(string? cpr) => Normalize(cpr) is { Length: > 0 } value && value != FictitiousCpr;
+    /// <summary>A filled-in CPR that is not 10 digits.</summary>
+    internal static bool IsInvalidCprFormat(string? cpr) => Normalize(cpr) is { Length: > 0 } value
+        && (value.Length != 10 || !value.All(char.IsAsciiDigit));
+
+    private static bool SecondNamed(MeteringPointV4Dto mp) => mp.Consumer?.SecondConsumerParty?.Name is { } name
+        && (Normalize(name.FullName) != "" || Normalize(name.FirstName) != "" || Normalize(name.LastName) != "");
 
     private static bool NamesEqual(MeteringPointV4NameDto a, MeteringPointV4NameDto b) =>
         Normalize(a.FullName) == Normalize(b.FullName)

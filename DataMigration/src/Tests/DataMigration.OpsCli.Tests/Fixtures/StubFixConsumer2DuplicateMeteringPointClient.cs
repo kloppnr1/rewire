@@ -70,6 +70,9 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
     public string? RefuseBeforeWrite { get; set; }
     /// <summary>Consumer 2's national id per point, as Settl's separate national-id read returns it.</summary>
     public Dictionary<Guid, string?> SecondNationalIds { get; } = [];
+    /// <summary>Consumer 1's national id per point.</summary>
+    public Dictionary<Guid, string?> FirstNationalIds { get; } = [];
+    public List<(Guid Id, DateTime Start)> ClearedCprs { get; } = [];
     /// <summary>Points whose national-id read fails.</summary>
     public HashSet<Guid> NationalIdReadFailures { get; } = [];
     /// <summary>When true, a successful write leaves consumer 2's national id in place.</summary>
@@ -86,6 +89,7 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
                 return Task.FromResult<(MeteringPointConsumerNationalIdsDto?, string?)>((null, "Fixture national id failure"));
             return Task.FromResult<(MeteringPointConsumerNationalIdsDto?, string?)>((new MeteringPointConsumerNationalIdsDto
             {
+                FirstConsumerPartyNationalIdentificationNumber = FirstNationalIds.GetValueOrDefault(meteringPointId),
                 SecondConsumerPartyNationalIdentificationNumber = SecondNationalIds.GetValueOrDefault(meteringPointId)
             }, null));
         }
@@ -102,6 +106,16 @@ public sealed class StubFixConsumer2DuplicateMeteringPointClient : ISettlMeterin
         var hasId = !string.IsNullOrWhiteSpace(SecondNationalIds.GetValueOrDefault(id));
         return point is not null && point.Consumer?.Start == start && FixConsumer2DuplicateRunner.Consumer2Reason(point, hasId) is null
             ? (ConsumerCleanupOutcome.Fixed, null) : (ConsumerCleanupOutcome.Unverified, "still shows duplicate or verification failed: " + error);
+    }
+
+    public Task<(ConsumerCleanupOutcome Outcome, string? Error)> ClearFictitiousSecondCprAsync(Guid id, DateTime start, CancellationToken ct)
+    {
+        ClearedCprs.Add((id, start));
+        if (RefuseBeforeWrite is not null) return Task.FromResult<(ConsumerCleanupOutcome, string?)>((ConsumerCleanupOutcome.NotSent, RefuseBeforeWrite));
+        if (!BlankResult.Success) return Task.FromResult<(ConsumerCleanupOutcome, string?)>((ConsumerCleanupOutcome.Rejected, BlankResult.Error));
+        if (!KeepNationalIdAfterWrite) SecondNationalIds[id] = "";
+        return Task.FromResult<(ConsumerCleanupOutcome, string?)>(string.IsNullOrWhiteSpace(SecondNationalIds.GetValueOrDefault(id))
+            ? (ConsumerCleanupOutcome.Fixed, null) : (ConsumerCleanupOutcome.Unverified, "CPR 2 still filled in"));
     }
 
     private static T Unused<T>() => throw new NotImplementedException("Not used by these tests");

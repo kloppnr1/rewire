@@ -12,7 +12,7 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         "DeliveryStartDk", "DeliveryEndDk", "InDelivery", "DeliveryStartReason", "DeliveryStopReason",
         "ConsumerVersionCount", "Consumer1Name", "Consumer2Name", "ConsumerStartDk", "ConsumerEndDk",
         "DuplicateConsumer2", "AnyDuplicateConsumer2", "ConsumerWarning", "DeliveryWarning", "MarketUpdate", "Consumer2Reason",
-        "Consumer2NameWithEmptyNationalId"];
+        "Consumer2NameWithEmptyNationalId", "CompanyWithConsumer2", "Consumer2FictitiousCpr", "CprInvalidFormat"];
 
     public TextWriter ProgressOutput { get; init; } = Console.Error;
     public string? OutputPath { get; init; }
@@ -89,8 +89,11 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
         var prefixMatches = 0;
         var duplicateVersions = 0;
         var emptyIdVersions = 0;
+        var companyVersions = 0;
+        var fictitiousVersions = 0;
+        var invalidCprVersions = 0;
         var stoppedAtLimit = false;
-        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Prefix matches: {Volatile.Read(ref prefixMatches):N0}   Versions read: {Volatile.Read(ref versionReads):N0}   Duplicate versions: {duplicateVersions:N0}   Name with empty national id: {emptyIdVersions:N0}   Read errors: {errors:N0}";
+        string CheckStatus() => $"Checking consumers: Checked: {Volatile.Read(ref checkedCount):N0} / {selected.Count:N0}   Duplicates: {matched:N0}   Prefix matches: {Volatile.Read(ref prefixMatches):N0}   Versions read: {Volatile.Read(ref versionReads):N0}   Duplicate versions: {duplicateVersions:N0}   Name with empty national id: {emptyIdVersions:N0}   Company with consumer 2: {companyVersions:N0}   Fictitious CPR 2: {fictitiousVersions:N0}   Invalid CPR: {invalidCprVersions:N0}   Read errors: {errors:N0}";
         progress.StartPhase();
         progress.Update(CheckStatus(), force: true);
         for (var offset = 0; offset < selected.Count;)
@@ -124,9 +127,12 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 foreach (var message in messages)
                     progress.Message($"{result.Id}: {message}; report incomplete.");
                 var affected = result.Versions.Versions.Any(v => v.Duplicate);
-                var emptyIds = result.Versions.Versions.Count(v => v.NameWithEmptyNationalId);
-                emptyIdVersions += emptyIds;
-                if (!affected && emptyIds == 0 && messages.Count == 0) continue;
+                var found = result.Versions.Versions;
+                emptyIdVersions += found.Count(v => v.NameWithEmptyNationalId);
+                companyVersions += found.Count(v => v.CompanyWithSecondName);
+                fictitiousVersions += found.Count(v => v.Status == "As returned" && v.FictitiousSecondCpr == true);
+                invalidCprVersions += found.Count(v => v.Status == "As returned" && v.InvalidCprFormat == true);
+                if (!affected && !found.Any(v => v.DataHubIssue) && messages.Count == 0) continue;
                 if (affected)
                 {
                     matched++;
@@ -155,24 +161,26 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                         correlation.AnyDuplicate is null ? "Unknown" : correlation.AnyDuplicate.Value ? "Yes" : "No", correlation.Warning, deliveryWarning,
                         mp?.Consumer is null ? "" : mp.Consumer.MarketUpdate ? "true" : "false",
                         selection.Duplicate == true ? version!.Reason ?? "" : "",
-                        version is null ? "" : version.NameWithEmptyNationalId ? "Yes" : "No"]);
+                        version is null ? "" : YesNo(version.NameWithEmptyNationalId), version is null ? "" : YesNo(version.CompanyWithSecondName),
+                        version is null ? "" : YesNo(version.FictitiousSecondCpr == true), version is null ? "" : YesNo(version.InvalidCprFormat == true)]);
                 }
                 if (periods.Count == 0)
                     await WriteRow(output, [identification, result.Id.ToString(), pattern, "", "", "", "", "", "Unknown",
                         "", "", "", "", "Unknown", "Unknown", "Consumer correlation unavailable: " + string.Join(" | ", result.Versions.Errors.Distinct()),
-                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", "", "", ""]);
+                        deliveryWarning.Length > 0 ? deliveryWarning : "No delivery periods returned; Consumer correlation unavailable.", "", "", "", "", "", ""]);
             }
             progress.Update(CheckStatus());
         }
         progress.Update(CheckStatus(), force: true);
         if (stoppedAtLimit) progress.Message($"Stopped at --limit {limit}: remaining metering points were not checked.");
         progress.Message(errors > 0 ? "Report incomplete: some metering points could not be read." : "Complete");
-        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}; versions read: {versionReads:N0}; duplicate versions: {duplicateVersions:N0}; name with empty national id: {emptyIdVersions:N0}; delivery-prefix matches: {prefixMatches:N0}.");
+        progress.Message($"Checked: {checkedCount:N0}; duplicates: {matched:N0}; read errors: {errors:N0}; versions read: {versionReads:N0}; duplicate versions: {duplicateVersions:N0}; name with empty national id: {emptyIdVersions:N0}; company with consumer 2: {companyVersions:N0}; fictitious CPR 2: {fictitiousVersions:N0}; invalid CPR: {invalidCprVersions:N0}; delivery-prefix matches: {prefixMatches:N0}.");
         if (OutputPath is not null) progress.Message($"Report: {OutputPath}");
         progress.Message("No Settl writes.");
         return errors > 0 ? 1 : 0;
     }
 
+    private static string YesNo(bool value) => value ? "Yes" : "No";
     private static string Name(MeteringPointV4NameDto? name) => name is null ? "" : name.FullName ?? $"{name.FirstName} {name.LastName}".Trim();
     private static string VersionDate(DateTime? date, bool end = false) => date is null ? "(missing)" : ConsumerReportDates.Format(ConsumerDeliveryEvidence.Utc(date.Value), end);
     private static string DeliveryDate(DateTimeOffset? date, string raw, bool end) => date is { } value

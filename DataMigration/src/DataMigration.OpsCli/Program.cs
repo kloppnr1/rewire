@@ -1279,12 +1279,17 @@ var fixC2dFromReportOption = new Option<string?>("--from-report")
     Description = "report-consumer2-duplicate CSV; scopes the run to the SettlIds of rows with DuplicateConsumer2=Yes. Points are still read fresh from Settl. Cannot be combined with --mp-id."
 };
 
+var fixC2dClearFictitiousOption = new Option<bool>("--clear-fictitious-cpr2")
+{
+    Description = "Also clear consumer 2's CPR where it is the fictitious 1111110000 and consumer 1 has a real CPR. The name is kept. Needs --mp-id."
+};
+
 var fixConsumer2DuplicateCommand = new Command(
     "fix-consumer2-duplicate",
     "Use the report rules to select duplicate Consumer versions per delivery period, then " +
     "blank Name + NationalIdentificationNumber on the second party. VatIdentificationNumber and everything else is untouched.")
 {
-    fixC2dMpIdOption, fixC2dLimitOption, fixC2dDryRunOption, fixC2dEnvOption, fixC2dFromReportOption
+    fixC2dMpIdOption, fixC2dLimitOption, fixC2dDryRunOption, fixC2dEnvOption, fixC2dFromReportOption, fixC2dClearFictitiousOption
 };
 
 fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -1293,6 +1298,7 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
     var limit = parseResult.GetValue(fixC2dLimitOption);
     var dryRun = parseResult.GetValue(fixC2dDryRunOption);
     var fromReport = parseResult.GetValue(fixC2dFromReportOption);
+    var clearFictitious = parseResult.GetValue(fixC2dClearFictitiousOption);
 
     var mpIds = mpIdsRaw
         .SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -1301,6 +1307,8 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
 
     try
     {
+        if (clearFictitious && (fromReport is not null || mpIds.Length == 0))
+            throw new ArgumentException("--clear-fictitious-cpr2 needs --mp-id and cannot be combined with --from-report.");
         if (fromReport is not null)
         {
             if (mpIds.Length > 0) throw new ArgumentException("--from-report cannot be combined with --mp-id.");
@@ -1312,7 +1320,7 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
                 return 0;
             }
         }
-        Console.WriteLine($"fix-consumer2-duplicate env='{settlEnv}' mp-ids={mpIds.Length} limit={(limit?.ToString() ?? "unlimited")} dry-run={dryRun}");
+        Console.WriteLine($"fix-consumer2-duplicate env='{settlEnv}' mp-ids={mpIds.Length} limit={(limit?.ToString() ?? "unlimited")} dry-run={dryRun} clear-fictitious-cpr2={clearFictitious}");
 
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
 
@@ -1322,6 +1330,7 @@ fixConsumer2DuplicateCommand.SetAction(async (parseResult, cancellationToken) =>
             MeteringPointIds = mpIds,
             Limit = limit,
             DryRun = dryRun,
+            ClearFictitiousCpr2 = clearFictitious,
         }, cancellationToken);
     }
     catch (Exception ex)

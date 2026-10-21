@@ -70,6 +70,79 @@ public class ConsumerVersionCleanupHttpTests
         Assert.Equal(0, handler.Writes);
     }
 
+    [Theory]
+    [InlineData("cleared", ConsumerCleanupOutcome.Fixed)]
+    [InlineData("name-changed", ConsumerCleanupOutcome.Unverified)]
+    [InlineData("retained-id", ConsumerCleanupOutcome.Unverified)]
+    [InlineData("first-fictitious", ConsumerCleanupOutcome.NotSent)]
+    public async Task Fictitious_cpr_2_clear_sends_only_the_cpr_and_keeps_the_name(string outcome, ConsumerCleanupOutcome expected)
+    {
+        using var handler = new FictitiousHandler(outcome);
+        using var http = new HttpClient(handler);
+        var options = Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid", SubscriptionKey = "fixture" });
+        var auth = new Auth();
+        var read = new SettlMeteringPointClient(http, auth, options, NullLogger<SettlMeteringPointClient>.Instance);
+        var write = new ConsumerVersionCleanup(http, auth, options, NullLogger<ConsumerVersionCleanup>.Instance);
+        var logs = new List<string>();
+        var runner = new FixConsumer2DuplicateRunner(read, logs.Add, write) { ProgressOutput = TextWriter.Null };
+        Assert.Equal(expected is ConsumerCleanupOutcome.Fixed or ConsumerCleanupOutcome.NotSent ? 0 : 1,
+            await runner.RunAsync(new() { MeteringPointIds = [handler.Id.ToString()], ClearFictitiousCpr2 = true }));
+        if (expected == ConsumerCleanupOutcome.NotSent)
+        {
+            // The report rule already rejects a fictitious CPR 1, so nothing is selected.
+            Assert.Equal(0, handler.Writes);
+            return;
+        }
+        Assert.Equal(1, handler.Writes);
+        using var payload = JsonDocument.Parse(Assert.IsType<string>(handler.Payload));
+        var patch = Assert.Single(payload.RootElement.GetProperty("MeteringPointPatches").EnumerateArray());
+        Assert.Equal("2026-01-01T00:00:00Z", patch.GetProperty("PatchTime").GetString());
+        var party = patch.GetProperty("ConsumerPatch").GetProperty("SecondConsumerParty");
+        Assert.Equal("", party.GetProperty("NationalIdentificationNumber").GetString());
+        // Settl replaces the whole party, so the name is sent back unchanged.
+        Assert.Equal("Other", party.GetProperty("Name").GetProperty("FullName").GetString());
+        Assert.Equal(2, party.EnumerateObject().Count());
+        Assert.Contains($"  Failed writes: {(expected == ConsumerCleanupOutcome.Fixed ? 0 : 1)}", logs);
+        Assert.DoesNotContain("1234567890", string.Join("\n", logs));
+    }
+
+    private sealed class FictitiousHandler(string outcome) : HttpMessageHandler
+    {
+        internal Guid Id { get; } = Guid.NewGuid();
+        internal string? Payload { get; private set; }
+        internal int Writes { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.Method == HttpMethod.Patch)
+            {
+                Payload = await request.Content!.ReadAsStringAsync(ct);
+                Writes++;
+                return new(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+            var path = request.RequestUri!.AbsolutePath;
+            string json;
+            if (path.EndsWith("/history")) json = """{"consumerDates":["2026-01-01T00:00:00Z"]}""";
+            else if (path.EndsWith("/deliveryStatuses")) json = """{"deliveryStatuses":[{"inDelivery":false,"period":{"start":"2025-12-01T00:00:00Z","end":"2026-01-01T00:00:00Z"},"startReason":"Na","stopReason":"Na"},{"inDelivery":true,"period":{"start":"2026-01-01T00:00:00Z","end":null},"startReason":"MoveIn","stopReason":"Na"}]}""";
+            else if (path.EndsWith("/nationalIdentificationNumber"))
+                json = JsonSerializer.Serialize(new
+                {
+                    firstConsumerPartyNationalIdentificationNumber = outcome == "first-fictitious" ? "1111110000" : "1234567890",
+                    secondConsumerPartyNationalIdentificationNumber = Writes == 0 || outcome == "retained-id" ? "1111110000" : ""
+                });
+            else
+                json = JsonSerializer.Serialize(new
+                {
+                    id = Id, consumer = new
+                    {
+                        start = "2026-01-01T00:00:00Z", customerType = "Person",
+                        firstConsumerParty = new { name = new { fullName = "Fixture" } },
+                        secondConsumerParty = new { name = new { fullName = Writes > 0 && outcome == "name-changed" ? "" : "Other" } }
+                    }
+                });
+            return new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        }
+    }
+
     private sealed class Auth : ISettlAuthService
     {
         public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult("offline");

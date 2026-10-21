@@ -19,6 +19,15 @@ internal sealed record ConsumerVersion(MeteringPointV4Dto? Point, DateTime? Requ
     /// <summary>Consumer 2 has a name but an empty national id: DataHub rejects that update (BRS-015). Report only.</summary>
     public bool NameWithEmptyNationalId => SecondNationalIdEmpty == true && Point is { } point
         && Status == "As returned" && FixConsumer2DuplicateRunner.HasSecondName(point);
+    /// <summary>CPR 2 is DataHub's fictitious 1111110000 while CPR 1 is real. Null when not read.</summary>
+    public bool? FictitiousSecondCpr { get; init; }
+    /// <summary>A filled-in CPR 1 or CPR 2 that is not 10 digits. Null when not read.</summary>
+    public bool? InvalidCprFormat { get; init; }
+    public bool CompanyWithSecondName => Point is { } point && Status == "As returned"
+        && FixConsumer2DuplicateRunner.CompanyWithSecondName(point);
+    /// <summary>Breaks a DataHub customer rule that the report flags in its own column.</summary>
+    public bool DataHubIssue => Status == "As returned"
+        && (NameWithEmptyNationalId || CompanyWithSecondName || FictitiousSecondCpr == true || InvalidCprFormat == true);
     public string? Reason => Point is null ? null : FixConsumer2DuplicateRunner.Consumer2Reason(Point, SecondHasNationalId);
     public bool Duplicate => Reason is not null;
 }
@@ -68,13 +77,13 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
             if (current?.Consumer?.Start is { } start && !dates.Contains(ConsumerDeliveryEvidence.Utc(start).UtcDateTime))
                 errors.Add("Current Consumer start is absent from ConsumerDates.");
         }
-        // Settl's metering-point read never carries national ids; read them separately, but only for the
-        // versions where the answer decides selection or the empty-id flag.
+        // Settl's metering-point read never carries national ids; read them separately for every private
+        // version. Only yes/no answers are kept, never the values.
         for (var i = 0; i < versions.Count; i++)
         {
             var version = versions[i];
             if (version.Point is not { } candidate || version.Status != "As returned"
-                || !FixConsumer2DuplicateRunner.NeedsNationalIdCheck(candidate) && !FixConsumer2DuplicateRunner.HasSecondName(candidate)) continue;
+                || !FixConsumer2DuplicateRunner.IsPrivate(candidate)) continue;
             ct.ThrowIfCancellationRequested();
             var date = ConsumerDeliveryEvidence.Utc(candidate.Consumer!.Start!.Value).UtcDateTime;
             var (ids, idError) = await client.GetConsumerNationalIdsAsync(id, date, ct);
@@ -85,11 +94,18 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
                 errors.Add(message + (idError is null ? "" : " " + idError));
                 versions[i] = version with { Status = message };
             }
-            else versions[i] = version with
+            else
             {
-                SecondHasNationalId = !string.IsNullOrWhiteSpace(ids.SecondConsumerPartyNationalIdentificationNumber),
-                SecondNationalIdEmpty = ids.SecondConsumerPartyNationalIdentificationNumber is { } second && string.IsNullOrWhiteSpace(second)
-            };
+                var first = ids.FirstConsumerPartyNationalIdentificationNumber;
+                var second = ids.SecondConsumerPartyNationalIdentificationNumber;
+                versions[i] = version with
+                {
+                    SecondHasNationalId = !string.IsNullOrWhiteSpace(second),
+                    SecondNationalIdEmpty = second is not null && string.IsNullOrWhiteSpace(second),
+                    FictitiousSecondCpr = FixConsumer2DuplicateRunner.IsFictitiousCpr(second) && FixConsumer2DuplicateRunner.IsRealCpr(first),
+                    InvalidCprFormat = FixConsumer2DuplicateRunner.IsInvalidCprFormat(first) || FixConsumer2DuplicateRunner.IsInvalidCprFormat(second)
+                };
+            }
         }
         var ordered = versions.OrderBy(v => v.Start ?? DateTime.MaxValue).ToList();
         for (var i = 0; i + 1 < ordered.Count; i++)

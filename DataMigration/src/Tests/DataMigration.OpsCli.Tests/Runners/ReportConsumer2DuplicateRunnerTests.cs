@@ -36,7 +36,12 @@ public class ReportConsumer2DuplicateRunnerTests
         client.Reads.Enqueue(mp);
         using var output = new StringWriter();
         Assert.Equal(0, await new ReportConsumer2DuplicateRunner(client).RunAsync("featuretest", [id.ToString()], null, output));
-        Assert.Single(output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+        // Listed only for the company rule, never as a duplicate.
+        var rows = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Skip(1)
+            .Select(row => row.Split(';').Select(cell => cell.Trim('"')).ToArray()).ToArray();
+        // The fixture names contain ';', so count columns from the end: duplicate is 10th last, company 3rd last.
+        Assert.All(rows, row => Assert.NotEqual("Yes", row[^10]));
+        Assert.Equal("Yes", rows[^1][^3]);
         Assert.Equal(0, client.BlankCalls);
     }
 
