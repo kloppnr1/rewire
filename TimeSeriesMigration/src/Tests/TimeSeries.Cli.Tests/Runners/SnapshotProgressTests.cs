@@ -152,31 +152,7 @@ public class SnapshotProgressTests : IDisposable
     }
 
     [Fact]
-    public void Blockers_are_written_and_rendered_by_rule_largest_first()
-    {
-        var writer = Writer();
-        writer.StartPhase(3, "Done check (asking Settl)");
-        writer.SetBlockers(new Dictionary<string, int>
-        {
-            ["Missing Xellent contract"] = 12,
-            ["Multiple Xellent account holders"] = 3,
-            ["Ambiguous delivery revision"] = 40,
-        });
-
-        var report = SnapshotProgressReader.Read(_dir);
-        Assert.Equal(40, report.State!.Blockers!["Ambiguous delivery revision"]);
-
-        var lines = SnapshotProgressRenderer.Render(report, "featuretest", _now).ToList();
-        var header = lines.FindIndex(l => l.StartsWith("Set aside"));
-        Assert.True(header >= 0);
-        Assert.Contains((55).ToString("N0"), lines[header]);
-        Assert.Contains("Ambiguous delivery revision", lines[header + 1]);
-        Assert.Contains("Missing Xellent contract", lines[header + 2]);
-        Assert.Contains("Multiple Xellent account holders", lines[header + 3]);
-    }
-
-    [Fact]
-    public void No_blockers_section_before_the_done_check()
+    public void There_is_no_set_aside_section()
     {
         var writer = Writer();
         writer.StartPhase(2, "Settl reads per metering point");

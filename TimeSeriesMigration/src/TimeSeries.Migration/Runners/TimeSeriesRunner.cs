@@ -159,6 +159,25 @@ public class TimeSeriesRunner
     private readonly Dictionary<string, SortedDictionary<string, int>> _states = new(StringComparer.Ordinal);
     private TimeSeriesSkipCategory? _lastSkip;
 
+    // One wording per reason, whichever check finds it.
+    private const string NoContractReason = "no Xellent contract at COS − 1";
+    private const string SeveralHoldersReason = "several Xellent account holders at COS − 1";
+    private const string NotClosedReason = "contract not closed as a migration at COS − 1";
+
+    private static string SkipReason(TimeSeriesSkipCategory category) => category switch
+    {
+        TimeSeriesSkipCategory.NotInstalled => "no meter installed (Xellent status Oprettet)",
+        TimeSeriesSkipCategory.NoPointsAfterBoundary => "no values after the delivery boundary",
+        TimeSeriesSkipCategory.ResolutionChange => "resolution change (--skip-resolution-change)",
+        TimeSeriesSkipCategory.ExistingSettlData => "Settl already has points (--skip-if-existing-points)",
+        TimeSeriesSkipCategory.DeliveryBoundaryUnresolved or TimeSeriesSkipCategory.DeliveryBoundaryAmbiguous
+            or TimeSeriesSkipCategory.DeliveryBoundaryInvalid => $"unclear delivery dates in Settl ({category})",
+        TimeSeriesSkipCategory.MissingInXellent => NoContractReason,
+        TimeSeriesSkipCategory.NotMigrated => NotClosedReason,
+        TimeSeriesSkipCategory.ExcludedPayer => "payer in the 6##### series",
+        _ => category.ToString(),
+    };
+
     private void CountState(string state, string reason, int count = 1)
     {
         if (_markDoneMode || count <= 0)
@@ -1038,23 +1057,16 @@ public class TimeSeriesRunner
             _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
             var doneBefore = meteringPoints.Count(m => _done.Contains(SnapshotDone, m.Identification));
             _log = _ => { };
-            // Tally the scope rules the batch applies, so progress can
-            // show what holds back the metering points that are not done.
-            _coverageTrace = new CoverageScopeTrace();
             try
             {
                 await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
                     skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
                     cancellationToken);
-                _progressWriter?.SetBlockers(_coverageTrace.Exclusions
-                    .Where(e => e.Value.Total > 0)
-                    .ToDictionary(e => e.Key, e => e.Value.Total, StringComparer.Ordinal));
             }
             finally
             {
                 _log = runLog;
                 _markDoneMode = false;
-                _coverageTrace = null;
             }
             var (doneMarked, doneFailures) = await CheckDoneCandidatesAsync(parallelism, cancellationToken);
             foreach (var failure in doneFailures)
@@ -1628,7 +1640,7 @@ public class TimeSeriesRunner
             if (revisionResolution.Outcome == RevisionResolutionOutcome.SafetySkip)
             {
                 RecordCoverageExclusion($"Delivery safety: {revisionResolution.SkipCategory}", isChild);
-                CountBlocked($"unclear delivery dates in Settl ({revisionResolution.SkipCategory})", identification, mpGuid, null,
+                CountBlocked(SkipReason(revisionResolution.SkipCategory!.Value), identification, mpGuid, null,
                     revisionResolution.SkipReason ?? "");
                 _log($"REVISION MP {identification}: {revisionResolution.Revision:O}");
                 _log($"SKIP MP {identification}: {revisionResolution.SkipReason}{TypeSuffix()}");
@@ -1681,11 +1693,11 @@ public class TimeSeriesRunner
                 var reason = $"no Xellent contract on {periodStart:yyyy-MM-dd} (the day before delivery starts in Settl)";
                 if (!inDelivery)
                 {
-                    RecordNotMigrated(reason, "Not migrated: missing Xellent contract");
+                    RecordNotMigrated(reason, NoContractReason);
                     continue;
                 }
                 RecordCoverageExclusion("Missing Xellent contract", isChild);
-                CountState("Skipped", "no Xellent contract at COS − 1");
+                CountState("Skipped", NoContractReason);
                 _log($"SKIP MP {identification}: {reason}{TypeSuffix()}");
                 RecordSkip(TimeSeriesSkipCategory.MissingInXellent, null, identification, mpGuid,
                     revisionResolution.Revision, revisionResolution.DeliveryBoundary, reason);
@@ -1696,12 +1708,12 @@ public class TimeSeriesRunner
                 var reason = $"held by several accounts on {periodStart:yyyy-MM-dd} ({string.Join("/", holders)})";
                 if (!inDelivery)
                 {
-                    RecordNotMigrated(reason, "Not migrated: multiple Xellent account holders");
+                    RecordNotMigrated(reason, SeveralHoldersReason);
                     continue;
                 }
                 RecordCoverageExclusion("Multiple Xellent account holders", isChild);
                 // Blocked, not failed: the run goes on (only a failed call to Settl stops it).
-                CountBlocked("several Xellent account holders at COS − 1", identification, mpGuid, null, reason);
+                CountBlocked(SeveralHoldersReason, identification, mpGuid, null, reason);
                 _log($"BLOCKED:   MP {identification}: {reason}");
                 continue;
             }
@@ -1721,12 +1733,12 @@ public class TimeSeriesRunner
             {
                 if (!inDelivery)
                 {
-                    RecordNotMigrated($"customer {accountNumber}: {closeProblem}", "Not migrated: migration close validation failed");
+                    RecordNotMigrated($"customer {accountNumber}: {closeProblem}", NotClosedReason);
                     continue;
                 }
                 // Decided 2026-10-16: not closed as a migration at COS − 1 means it was not migrated, so it is a skip.
                 RecordCoverageExclusion("Migration close validation failed", isChild);
-                CountState("Skipped", "contract not closed as a migration at COS − 1");
+                CountState("Skipped", NotClosedReason);
                 var closeReason = $"customer {accountNumber}{(contractIdentification != identification ? $", on the parent {contractIdentification}" : "")}: {closeProblem}";
                 _log($"SKIP MP {identification}: not closed as a migration — {closeReason}{TypeSuffix()}");
                 RecordSkip(TimeSeriesSkipCategory.NotMigrated, accountNumber, identification, mpGuid,
@@ -1863,11 +1875,7 @@ public class TimeSeriesRunner
                 CountState("Skipped",
                     _lastSkip switch
                     {
-                        TimeSeriesSkipCategory.NotInstalled => "no meter installed (Xellent status Oprettet)",
-                        TimeSeriesSkipCategory.NoPointsAfterBoundary => "no values after the delivery boundary",
-                        TimeSeriesSkipCategory.ResolutionChange => "resolution change (--skip-resolution-change)",
-                        TimeSeriesSkipCategory.ExistingSettlData => "Settl already has points (--skip-if-existing-points)",
-                        { } other => other.ToString(),
+                        { } category => SkipReason(category),
                         null => "skipped during the post (see log)",
                     });
                 continue;
@@ -1967,8 +1975,6 @@ public class TimeSeriesRunner
             };
         }
         var childCount = meteringPoints.Count(m => m.ParentIdentification != null);
-        if (_coverageTrace != null)
-            _coverageTrace.MeteringPointsExamined = allByIdentification.Count;
         // Children are never in scope. The relations above are still read: they are how a child is known.
         RecordCoverageExclusion("Children (never in scope)", isChild: true, childCount);
         if (childCount > 0)
@@ -1988,16 +1994,6 @@ public class TimeSeriesRunner
         DateOnly? cosFrom, DateOnly? cosTo, CancellationToken cancellationToken)
     {
         var list = await GetSettlListAsync(cancellationToken);
-        if (_coverageTrace != null)
-        {
-            _coverageTrace.SettlSnapshotRows = list.Count;
-            _coverageTrace.SettlRowsWithoutIdentification = list.Count(mp => string.IsNullOrEmpty(mp.Identification));
-            _coverageTrace.DuplicateSettlRows = list.Count(mp => !string.IsNullOrEmpty(mp.Identification))
-                - list.Where(mp => !string.IsNullOrEmpty(mp.Identification))
-                    .Select(mp => mp.Identification)
-                    .Distinct(StringComparer.Ordinal)
-                    .Count();
-        }
         // The parent is looked up by GUID: the relation carries the GUID, the fallback needs its
         // identification (Xellent contracts) and whether Settl has it in delivery.
         var byGuid = list
@@ -2084,7 +2080,7 @@ public class TimeSeriesRunner
             RecordSkip(TimeSeriesSkipCategory.ExcludedPayer, null, mp.Identification, mp.Id, null, null, $"payer {payers[mp.Id]}");
         }
         _meteringPointType = "";
-        CountState("Skipped", "payer in the 6##### series", excluded.Count);
+        CountState("Skipped", SkipReason(TimeSeriesSkipCategory.ExcludedPayer), excluded.Count);
         _log($"Payer 6#####: {excluded.Count} metering point(s) left out ({SkipCsvFileNames[TimeSeriesSkipCategory.ExcludedPayer]})");
         var excludedIds = excluded.Select(m => m.Id).ToHashSet();
         return meteringPoints.Where(m => !excludedIds.Contains(m.Id)).ToList();
@@ -2180,28 +2176,11 @@ public class TimeSeriesRunner
     private Dictionary<string, MissingReadingsEntry>? _missingReadingsScan;
     private string? _scanCurrentMeteringPoint;
 
-    // Populated only by the snapshot's done check: the scope rules that set metering points aside, for progress.
-    private CoverageScopeTrace? _coverageTrace;
-
-    private sealed class CoverageScopeTrace
-    {
-        public int SettlSnapshotRows { get; set; }
-        public int DuplicateSettlRows { get; set; }
-        public int SettlRowsWithoutIdentification { get; set; }
-        public int MeteringPointsExamined { get; set; }
-        public Dictionary<string, Tally> Exclusions { get; } = new(StringComparer.Ordinal);
-    }
-
+    // The missing-readings scan (dashboard) shows why a metering point it looked at was set aside.
     private void RecordCoverageExclusion(string reason, bool isChild, int count = 1)
     {
         if (_scanCurrentMeteringPoint is { } mp && _missingReadingsScan?.TryGetValue(mp, out var entry) == true)
             _missingReadingsScan[mp] = entry with { Detail = reason };
-        if (_coverageTrace == null || count <= 0)
-            return;
-        var tally = _coverageTrace.Exclusions.GetValueOrDefault(reason);
-        if (isChild) tally.Children += count;
-        else tally.Parents += count;
-        _coverageTrace.Exclusions[reason] = tally;
     }
 
     /// <summary><paramref name="FromCurrentDeliveryStatus"/>: Settl marks no delivery status InDelivery=true for

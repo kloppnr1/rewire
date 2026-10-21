@@ -6,8 +6,6 @@ namespace TimeSeries.Cli.Services;
 /// What a running <c>snapshot</c> says about itself in <c>progress.json</c>, next to the snapshot files, so
 /// <c>progress</c> can show it from another session. <paramref name="Done"/>/<paramref name="Total"/> are
 /// the current step inside the phase. <paramref name="Status"/> is Running, Completed or Stopped.
-/// <paramref name="Blockers"/>: once the done check has run, how many of the metering points not yet done
-/// each scope rule set aside (rule → metering points), the same reasons <c>coverage</c> lists.
 /// </summary>
 public sealed record SnapshotProgressState(
     string Environment,
@@ -19,8 +17,7 @@ public sealed record SnapshotProgressState(
     int Total,
     string Status,
     DateTimeOffset StartedAt,
-    DateTimeOffset UpdatedAt,
-    IReadOnlyDictionary<string, int>? Blockers = null);
+    DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Writes <c>progress.json</c> for a running snapshot. The snapshot's own work always wins: a step update is
@@ -70,10 +67,6 @@ public sealed class SnapshotProgressWriter
     /// <summary>Progress through a step, called often and from parallel work: written at most every interval.</summary>
     public void Report(string step, int done, int total) =>
         Update(s => s with { Step = step, Done = done, Total = total }, force: false);
-
-    /// <summary>The scope rules' tally from the done check: written straight away.</summary>
-    public void SetBlockers(IReadOnlyDictionary<string, int> blockers) =>
-        Update(s => s with { Blockers = new Dictionary<string, int>(blockers, StringComparer.Ordinal) }, force: true);
 
     public void Complete() => Update(s => s with { Status = "Completed" }, force: true);
 
@@ -381,15 +374,6 @@ public static class SnapshotProgressRenderer
         lines.Add("Remaining    " + (report.MigrationTotal is { } total
             ? $"{Math.Max(0, total - report.DoneMarks):N0}  (of {total:N0} to migrate, total from {report.MigrationTotalAt?.ToLocalTime():yyyy-MM-dd HH:mm})"
             : "n/a until the done check has finished once"));
-
-        if (state?.Blockers is { Count: > 0 } blockers)
-        {
-            lines.Add($"Set aside    {blockers.Values.Sum():N0} metering points not done, by rule:");
-            var width = blockers.Keys.Max(k => k.Length);
-            foreach (var (rule, count) in blockers.OrderByDescending(b => b.Value).ThenBy(b => b.Key, StringComparer.Ordinal))
-                lines.Add($"  {rule.PadRight(width)}  {count,8:N0}");
-            lines.Add("  Which metering points: run post --all --dry-run on this snapshot.");
-        }
 
         lines.AddRange(RenderLastRun(report.LastRun));
 

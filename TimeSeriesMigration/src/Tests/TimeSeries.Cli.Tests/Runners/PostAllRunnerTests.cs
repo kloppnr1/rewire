@@ -1031,6 +1031,8 @@ public class PostAllRunnerTests : IDisposable
             Assert.Empty(_ts.PostCalls);
             Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: not migrated — customer {Account}: contract does not end on 2023-12-31", StringComparison.Ordinal));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skip-not-migrated.csv")));
+            // The same wording as for a metering point Settl has in delivery.
+            Assert.Contains(logs, l => l.EndsWith("1  contract not closed as a migration at COS − 1", StringComparison.Ordinal));
         }
         finally
         {
