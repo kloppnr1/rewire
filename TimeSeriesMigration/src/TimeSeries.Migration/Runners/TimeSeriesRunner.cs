@@ -758,6 +758,24 @@ public class TimeSeriesRunner
                     return ($"  Conversion failed for MP {mpTs.MeteringPointId}: {conversionError}", points, false);
             filteredSegments = filteredSegments.Select(OutgoingTimeSeries.Prepare).ToList();
 
+            // Settl needs a series for every resolution Xellent's reading periods (EXU_TIMEREADINGSPERIOD) give in
+            // the window: hourly values are converted to the reading period's resolution, so that is what Settl
+            // receives. The same rule as resolution-changes' MissingSeries. Without reading periods, the values decide.
+            // A batch window already starts at the delivery boundary; a single post cuts it here, so the reading
+            // periods before the boundary (nothing is sent there) are left out.
+            var required = inBatch || effectiveWindowStart <= DateOnly.FromDateTime(startDate)
+                ? RequiredResolutions(mpTs)
+                : await RequiredResolutionsAsync(context, deliveryCategory, mpTs.MeteringPointId, effectiveWindowStart,
+                    DateOnly.FromDateTime(endDate), filteredSegments);
+            foreach (var resolution in required)
+            {
+                var (length, unit) = ToSettlResolution(resolution);
+                if (!tsList.Any(t => t.TimeResolution?.Length == length &&
+                    string.Equals(t.TimeResolution?.Unit, unit, StringComparison.OrdinalIgnoreCase)))
+                    return ($"  No Settl TimeSeries found for MP {mpTs.MeteringPointId} segment {resolution} " +
+                            $"(reading period in the window, resolution={length} {unit}). Required time series must already exist in Settl.", points, false);
+            }
+
             foreach (var segment in filteredSegments)
             {
                 var (length, unit) = ToSettlResolution(segment.TimeResolution);
@@ -1142,8 +1160,10 @@ public class TimeSeriesRunner
 
     /// <summary>
     /// Writes the existing CSV supplied to Settl/Systemate for missing hourly series.
-    /// Only outgoing hourly values require an hourly target; fully converted windows are omitted.
-    /// Existing source switch dates, columns, done marks and unclear-delivery handling are retained.
+    /// Both come from Xellent's reading periods (EXU_TIMEREADINGSPERIOD), since hourly values are converted to the
+    /// reading period's resolution: ChangeDate is the start of the first 15-minute reading period after an hourly
+    /// one inside the window, and MissingSeries the reading-period resolutions in the window Settl has no series for
+    /// (the values' resolutions when Xellent records no reading period there). Listed: a missing hourly series. Columns, done marks and unclear-delivery handling are unchanged.
     /// Default file: &lt;output&gt;/resolution-changes-&lt;env&gt;.csv.
     /// </summary>
     public async Task<int> RunResolutionChangesAsync(string environment, bool offline = false, string? outputPath = null,
@@ -1187,33 +1207,39 @@ public class TimeSeriesRunner
             var doneNotListed = 0;
             var needed = 0;
             var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
+            // The switch comes from Xellent's reading periods (EXU_TIMEREADINGSPERIOD): hourly values are converted
+            // to the reading period's resolution, so Settl receives what the table says.
+            Dictionary<string, List<TimeSeriesExtractionService.ReadingPeriod>> readingPeriods;
+            try
+            {
+                readingPeriods = await new TimeSeriesExtractionService(context, BatchDeliveryCategory)
+                    .GetReadingPeriodsAsync(candidates.Select(c => c.Identification));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Error(ex.Message);
+            }
             for (var i = 0; i < candidates.Count; i++)
             {
                 var candidate = candidates[i];
                 ReportProgress("Resolution changes", i + 1, candidates.Count);
 
-                // Keep the existing source-based ChangeDate for rows that still need an hourly target.
                 var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
                     candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
-                DateOnly? FirstPointOf(string resolution, DateOnly? after) => counted.Segments
-                    .Where(s => PointCount(s) > 0 && string.Equals(s.TimeResolution, resolution, StringComparison.OrdinalIgnoreCase))
-                    .Select(s => ToDanishDate(FirstPoint(s)))
-                    .Where(d => after is not { } a || d > a)
-                    .Select(d => (DateOnly?)d)
+
+                // ChangeDate: the start of the first 15-minute reading period after an hourly one, inside the window.
+                var inWindow = (readingPeriods.TryGetValue(candidate.Identification, out var periods) ? periods : [])
+                    .Where(p => p.Start < candidate.To && (p.End is not { } end || end > candidate.From))
+                    .ToList();
+                var switchDate = inWindow
+                    .Where(q => q.Resolution == "Quarter" && q.Start >= candidate.From && q.Start < candidate.To
+                                && inWindow.Any(h => h.Resolution == "Hour" && h.Start < q.Start))
+                    .Select(q => (DateOnly?)q.Start)
                     .Min();
 
-                var switchDate = FirstPointOf("Hour", null) is { } firstHourly
-                    ? FirstPointOf("Quarter", firstHourly)
-                    : null;
-
-                // The other half of the list: the resolutions the points are in that Settl has no series
-                // for. Systemate has to create those, or the metering point can't be posted at all.
-                var valueResolutions = counted.Segments
-                    .Where(s => PointCount(s) > 0)
-                    .Select(OutgoingTimeSeries.Resolution)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(r => r, StringComparer.Ordinal)
-                    .ToList();
+                // The other half of the list: the reading-period resolutions in the window that Settl has no
+                // series for (the post blocks on the same). Systemate has to create those.
+                var valueResolutions = RequiredResolutions(counted);
                 var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
                 if (seriesError != null)
                     return Error($"Settl GetTimeSeries failed for MP {candidate.Identification}: {seriesError}");
@@ -1285,6 +1311,27 @@ public class TimeSeriesRunner
             _log = runLog;
             _snapshot = null;
         }
+    }
+
+    // The resolutions Settl must have a series for: those of the reading periods in the window, or, when Xellent
+    // records none there, those of the values.
+    private static List<string> RequiredResolutions(MeteringPointTimeSeriesDto counted) =>
+        counted.ReadingResolutionsInWindow.Count > 0
+            ? counted.ReadingResolutionsInWindow.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r, StringComparer.Ordinal).ToList()
+            : counted.Segments.Where(s => PointCount(s) > 0).Select(OutgoingTimeSeries.Resolution)
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r, StringComparer.Ordinal).ToList();
+
+    // The same rule for a window cut at the delivery boundary: the reading periods from the cut on.
+    private static async Task<List<string>> RequiredResolutionsAsync(XellentDbContext context, string deliveryCategory,
+        string meteringPoint, DateOnly from, DateOnly to, IEnumerable<TimeSeriesSegmentDto> sentSegments)
+    {
+        var periods = await new TimeSeriesExtractionService(context, deliveryCategory).GetReadingPeriodsAsync([meteringPoint]);
+        var inWindow = (periods.TryGetValue(meteringPoint, out var list) ? list : [])
+            .Where(p => p.Start < to && (p.End is not { } end || end > from))
+            .Select(p => p.Resolution);
+        var values = sentSegments.Where(s => PointCount(s) > 0).Select(OutgoingTimeSeries.Resolution);
+        var required = inWindow.Any() ? inWindow : values;
+        return required.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>One row of the resolution list: a switch date (null when there is none), what the points are

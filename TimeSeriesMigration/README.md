@@ -154,9 +154,9 @@ dotnet run --project src/TimeSeries.Cli -- progress --env production --watch
 
 ## `resolution-changes`
 
-Writes the report supplied to Settl/Systemate to create missing hourly time series. Include only meters whose outgoing data still contains hourly values and whose Settl setup has no hourly series. Fully converted windows need no hourly series and are omitted; a switch alone does not require a row when the target series already exist.
+Writes the report supplied to Settl/Systemate to create missing hourly time series. Both columns come from Xellent's reading periods (`EXU_TIMEREADINGSPERIOD`): hourly values are converted to the reading period's resolution, so Settl receives what the table says. A metering point is listed when Settl has no hourly series for an hourly reading period in the post window; a switch alone does not need a row when the series already exist.
 
-Existing dates and columns are retained: `ChangeDate` is the first native quarter-hour point following hourly source values, or the delivery start when no such source switch exists. `XellentResolutions` describes stored source resolutions; `MissingSeries` is checked against outgoing resolutions after conversion.
+`ChangeDate` is the start of the first 15-minute reading period after an hourly one, inside the post window, or the delivery start when there is no such switch. `MissingSeries` is the reading-period resolutions in the window that Settl has no series for (the values' resolutions when Xellent records no reading period there). `post` blocks on the same rule (`blocked-missing-hour-series-in-settl.csv`, `blocked-missing-quarter-series-in-settl.csv`). `XellentResolutions` describes the stored values.
 
 Read-only. Already-posted meters count towards totals but receive no row; existing done marks and 6##### payer exclusions remain unchanged. Unchanged hourly periods before a dated quarter-hour reading period still require an hourly target.
 

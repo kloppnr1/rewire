@@ -546,11 +546,12 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true)]   // Settl has the hourly series the points need: nothing to decide
-    [InlineData(false)]  // Settl has only a 15-minute series: no switch, but the hourly series is missing
-    public async Task ResolutionChanges_RetainsMissingHourlySeriesForEarlierHoursWithExistingReportDate(bool settlHasHour)
+    [InlineData(true)]   // Settl has the hourly series: only the 15-minute one is missing, which is not this list
+    [InlineData(false)]  // Settl has only a 15-minute series: the hourly series is missing
+    public async Task ResolutionChanges_TakeTheSwitchFromTheReadingPeriods(bool settlHasHour)
     {
-        // Every posted point is hourly; only the Xellent reading period says 15-minute. No switch.
+        // Every stored point is hourly, but the reading periods go hourly to 15-minute on 2023-04-26: the post
+        // converts the 15-minute stretch, so Settl receives both, and the switch is the reading period's.
         InDeliveryFrom(new DateTime(2026, 1, 1));
         SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
         InSettl((MpId1, Guid.NewGuid()));
@@ -567,10 +568,9 @@ public class PostAllRunnerTests : IDisposable
             Assert.Single(lines);
             return;
         }
-        // On the list because Settl has no hourly series for the hourly points. The change is between
-        // the posted data and Settl's own, so ChangeDate is the delivery start.
+        // On the list because Settl has no hourly series; ChangeDate is where the 15-minute reading period starts.
         Assert.Equal(2, lines.Length);
-        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2026-01-01\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
+        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
     }
 
     [Fact]
@@ -693,7 +693,7 @@ public class PostAllRunnerTests : IDisposable
         Assert.All(text.TrimEnd((char)10).Split((char)10), line => Assert.EndsWith(((char)13).ToString(), line));
     }
     [Fact]
-    public async Task MissingHourReport_OmitsFullyConvertedWindow()
+    public async Task ResolutionChanges_AnHourlyReadingPeriodInTheWindow_IsListed_AndBlocksThePost()
     {
         InDeliveryFrom(new DateTime(2026, 1, 1));
         _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), 24, companyId: "for",
@@ -708,11 +708,17 @@ public class PostAllRunnerTests : IDisposable
         Directory.CreateDirectory(OutputDir);
         File.WriteAllText(unclearFile, "stale row from an earlier report");
         Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
-        Assert.Single(File.ReadAllLines(file));
+        // The values are all in the 15-minute stretch, but the window also holds an hourly reading period and
+        // Settl has no hourly series: listed, and the post is blocked on the same rule.
+        var lines = File.ReadAllLines(file);
+        Assert.Equal(2, lines.Length);
+        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\";", lines[1]);
+        Assert.Contains("\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
         Assert.Single(File.ReadAllLines(unclearFile));
         Assert.DoesNotContain("stale row", File.ReadAllText(unclearFile));
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: true));
-        Assert.Equal(96, Assert.Single(_ts.PostCalls).Payload.Points.Count);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "blocked-missing-hour-series-in-settl.csv")));
     }
 
     [Theory]
