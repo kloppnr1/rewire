@@ -252,37 +252,9 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(mpGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
     }
 
-    // A child metering point (Xellent relation table) with a delivery status and a contract of its own
-    // is posted on its own, like any other metering point.
+    // Children are never in scope: a child known from the Xellent relation table is left out.
     [Fact]
-    public async Task RunPostAllAsync_PostsChildMeteringPointsThatCarryTheirOwn()
-    {
-        var parentGuid = Guid.NewGuid();
-        var childGuid = Guid.NewGuid();
-        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
-        InDeliveryFrom(supplyStart);
-
-        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
-        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
-        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
-        _xellent.SeedContract(Account, MpId2, migratedOn: supplyStart);
-        _xellent.SeedChildRelation(MpId1, MpId2);
-        InSettl((MpId1, parentGuid), (MpId2, childGuid));
-        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
-        var logs = new List<string>();
-
-        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
-
-        Assert.Equal(0, rc);
-        Assert.Equal(2, _mp.AddEipCalls.Count);
-        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
-        Assert.Contains(childGuid, _mp.GetDeliveryStatusesCalls);
-        Assert.Contains(logs, l => l.Contains("2 (1 parents, 1 children) processed", StringComparison.Ordinal));
-    }
-
-    // Without --include-children a batch run is parents only, as it always was.
-    [Fact]
-    public async Task RunPostAllAsync_SkipsChildMeteringPointsWithoutTheFlag()
+    public async Task RunPostAllAsync_NeverPostsChildMeteringPoints()
     {
         var parentGuid = Guid.NewGuid();
         var childGuid = Guid.NewGuid();
@@ -305,9 +277,9 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(logs, l => l.EndsWith("1 children skipped.", StringComparison.Ordinal));
     }
 
-    // A Settl child with no Xellent contract of its own is held by whoever holds its parent.
+    // Children are never in scope: a child Settl relates to its parent is left out too.
     [Fact]
-    public async Task RunPostAllAsync_SettlChildWithoutOwnContractUsesTheParents()
+    public async Task RunPostAllAsync_NeverPostsSettlChildMeteringPoints()
     {
         var parentGuid = Guid.NewGuid();
         var childGuid = Guid.NewGuid();
@@ -325,47 +297,12 @@ public class PostAllRunnerTests : IDisposable
         _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
         var logs = new List<string>();
 
-        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
+        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false);
 
         Assert.Equal(0, rc);
-        Assert.Contains(parentGuid, _mp.GetDeliveryStatusesCalls);
-        Assert.Contains(childGuid, _mp.GetDeliveryStatusesCalls);
-        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
-        Assert.Contains(logs, l => l.Contains($"contract from the parent ({MpId1})", StringComparison.Ordinal));
-    }
-
-    // A child with no delivery status of its own is delivered under its parent: the window comes from there.
-    [Fact]
-    public async Task RunPostAllAsync_ChildWithoutOwnDeliveryStatusUsesTheParentsWindow()
-    {
-        var parentGuid = Guid.NewGuid();
-        var childGuid = Guid.NewGuid();
-        var supplyStart = new DateTime(2023, 6, 15);
-        var start = DanishMidnight(supplyStart);
-
-        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
-        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
-        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
-        _xellent.SeedChildRelation(MpId1, MpId2);
-        InSettl((MpId1, parentGuid), (MpId2, childGuid));
-        _mp.MeteringPoints[1].InDelivery = false;
-        // The child has no delivery statuses at all; the parent has the migration's.
-        _mp.GetDeliveryStatusesResponse = id => id == parentGuid
-            ? (new GetDeliveryStatusesResponse
-            {
-                DeliveryStatuses = [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = start } }]
-            }, null)
-            : (new GetDeliveryStatusesResponse { DeliveryStatuses = [] }, null);
-        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
-        var logs = new List<string>();
-
-        var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, includeChildren: true);
-
-        Assert.Equal(0, rc);
-        Assert.Contains(childGuid, _mp.AddEipCalls.Select(c => c.MpGuid));
-        // Both metering points get the parent's window.
-        Assert.Equal(2, logs.Count(l => l.EndsWith("end=2023-06-15  start=2020-06-15", StringComparison.Ordinal)));
-        Assert.Contains(logs, l => l.Contains("(window from the parent)", StringComparison.Ordinal));
+        Assert.Equal(parentGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.DoesNotContain(childGuid, _mp.GetDeliveryStatusesCalls);
+        Assert.Contains(logs, l => l.EndsWith("1 children skipped.", StringComparison.Ordinal));
     }
 
     // Settl bug (2026-09): a migrated metering point can be shown as not in delivery everywhere — the list,
@@ -1184,7 +1121,6 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId2}: no meter installed", StringComparison.Ordinal));
         Assert.Contains(MpId2, File.ReadAllText(Path.Combine(OutputDir, "skip-not-installed.csv")));
         Assert.Contains(logs, l => l.StartsWith("Run completed:", StringComparison.Ordinal) && l.Contains(" 1 posted,", StringComparison.Ordinal));
-        Assert.Contains(logs, l => l.Contains("1 (1 parents, 0 children) skipped (see skip files)", StringComparison.Ordinal));
         Assert.Contains(logs, l => l.Contains("1  no meter installed (Xellent status Oprettet)", StringComparison.Ordinal));
         Assert.Contains(logs, l => l.StartsWith(dryRun ? "  Ready: 1" : "  Done: 1", StringComparison.Ordinal));
         if (!dryRun)
@@ -1364,8 +1300,8 @@ public class PostAllRunnerTests : IDisposable
     public async Task ListBatchMeteringPointsAsync_ReturnsWhatTheBatchRunTakes()
     {
         // MP1 in delivery in range, MP2 a Xellent child of MP1, "…03" not in delivery (kept whatever the
-        // range), "…04" in delivery outside the range, "…05" a Settl child. Only "…04" is left out;
-        // the two children are kept, each carrying MP1 as its parent.
+        // range), "…04" in delivery outside the range, "…05" a Settl child. "…04" and the two children
+        // are left out: children are never in scope.
         var parentGuid = Guid.NewGuid();
         _xellent.SeedContract(Account, MpId1);
         _xellent.SeedContract(Account, MpId2);
@@ -1382,14 +1318,12 @@ public class PostAllRunnerTests : IDisposable
                 ParentMeteringPoint = new ResLinkDto { Id = parentGuid } },
         ];
 
-        var list = await BuildRunner().ListBatchMeteringPointsAsync(new DateOnly(2023, 6, 1), new DateOnly(2023, 6, 30), includeChildren: true);
+        var list = await BuildRunner().ListBatchMeteringPointsAsync(new DateOnly(2023, 6, 1), new DateOnly(2023, 6, 30));
 
         Assert.Equal(
             [
                 new BatchMeteringPoint(MpId1, parentGuid, true, new DateOnly(2023, 6, 15)),
-                new BatchMeteringPoint(MpId2, list[1].Id, true, new DateOnly(2023, 6, 15), MpId1, parentGuid, true),
-                new BatchMeteringPoint("571313100000000003", list[2].Id, false, null),
-                new BatchMeteringPoint("571313100000000005", list[3].Id, true, null, MpId1, parentGuid, true),
+                new BatchMeteringPoint("571313100000000003", list[1].Id, false, null),
             ],
             list);
         Assert.Equal(TimeSeriesRunner.BatchDeliveryCategory, _mp.LastDeliveryCategory);

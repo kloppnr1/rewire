@@ -88,7 +88,6 @@ public sealed record TimeSeriesCoverageReport(
     DateTimeOffset GeneratedAtUtc,
     string Environment,
     DateTimeOffset? SnapshotCheckedAt,
-    bool IncludesChildren,
     int SettlSnapshotRows,
     int DuplicateSettlRows,
     int SettlRowsWithoutIdentification,
@@ -875,12 +874,8 @@ public class TimeSeriesRunner
         DateTime? windowEndDateOverride = null,
         int? skip = null,
         bool offline = false,
-        bool includeChildren = false,
         CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
-        if (includeChildren)
-            _log("Include children: Yes — child metering points are posted too");
         // Metering points a live run has posted are marked done in the environment's snapshot folder,
         // online or offline, and every batch run leaves them out from the start.
         _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
@@ -925,9 +920,8 @@ public class TimeSeriesRunner
     /// marks are kept — a metering point with points in Settl stays done — and the done check adds new ones.</para>
     /// </summary>
     public async Task<int> RunSeedSnapshotAsync(string environment, int parallelism = 6, bool refresh = false,
-        bool includeChildren = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
@@ -1077,9 +1071,8 @@ public class TimeSeriesRunner
     /// Default file: &lt;output&gt;/resolution-changes-&lt;env&gt;.csv.
     /// </summary>
     public async Task<int> RunResolutionChangesAsync(string environment, bool offline = false, string? outputPath = null,
-        bool includeChildren = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
@@ -1226,9 +1219,8 @@ public class TimeSeriesRunner
     /// snapshot. Default file: <c>&lt;output&gt;/readiness-&lt;env&gt;.csv</c>.
     /// </summary>
     public async Task<int> RunReadinessAsync(string environment, bool offline = false, string? outputPath = null,
-        bool includeChildren = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
@@ -1387,10 +1379,8 @@ public class TimeSeriesRunner
         bool json = false,
         bool byAccount = false,
         int accountLimit = 50,
-        bool includeChildren = false,
         CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
@@ -1506,7 +1496,6 @@ public class TimeSeriesRunner
                 DateTimeOffset.UtcNow,
                 environment,
                 summary?.CheckedAt,
-                includeChildren,
                 _coverageTrace.SettlSnapshotRows,
                 _coverageTrace.DuplicateSettlRows,
                 _coverageTrace.SettlRowsWithoutIdentification,
@@ -1552,7 +1541,6 @@ public class TimeSeriesRunner
         _log(report.SnapshotCheckedAt is { } checkedAt
             ? $"Snapshot checked: {checkedAt.ToLocalTime():yyyy-MM-dd HH:mm}"
             : "Snapshot checked: unknown (done-summary missing)");
-        _log($"Children: {(report.IncludesChildren ? "included" : "excluded")}");
         _log("");
         _log($"Settl snapshot rows:             {report.SettlSnapshotRows,9:N0}");
         if (report.DuplicateSettlRows > 0)
@@ -1629,7 +1617,7 @@ public class TimeSeriesRunner
     /// </summary>
     public async Task<MissingReadingsScanResult> ScanMissingReadingsAsync(
         string environment, DateOnly? cosFrom = null, DateOnly? cosTo = null,
-        int? skip = null, int? limit = null, bool includeChildren = false,
+        int? skip = null, int? limit = null,
         CancellationToken cancellationToken = default)
     {
         if (_settlTimeSeriesClient == null || _settlMeteringPointClient == null)
@@ -1637,14 +1625,12 @@ public class TimeSeriesRunner
         var savedSnapshot = _snapshot;
         var savedDone = _done;
         var savedMode = _markDoneMode;
-        var savedChildren = _includeChildren;
         var savedType = _meteringPointType;
         var savedCandidates = _doneCandidates.ToList();
         try
         {
             _snapshot = null;
             _done = null;
-            _includeChildren = includeChildren;
             _markDoneMode = true;
             _doneCandidates.Clear();
             _missingReadingsScan = new(StringComparer.Ordinal);
@@ -1675,7 +1661,6 @@ public class TimeSeriesRunner
             _snapshot = savedSnapshot;
             _done = savedDone;
             _markDoneMode = savedMode;
-            _includeChildren = savedChildren;
             _meteringPointType = savedType;
             _doneCandidates.Clear();
             _doneCandidates.AddRange(savedCandidates);
@@ -1763,7 +1748,6 @@ public class TimeSeriesRunner
 
         _states.Clear();
         var totalPosted = new Tally();
-        var totalSkipped = new Tally();
         var totalFailed = new Tally();
         var totalAmbiguousRevisions = new Tally();
         var failures = new List<string>();
@@ -2204,7 +2188,6 @@ public class TimeSeriesRunner
             // A metering point the post skipped (no meter installed, safety checks) is in a skip file, not posted.
             if (postOptions.Skipped)
             {
-                totalSkipped.Add(isChild);
                 CountState("Skipped",
                     _lastSkip switch
                     {
@@ -2223,18 +2206,12 @@ public class TimeSeriesRunner
 
         _log("");
         // Format is contract to the dashboard's parser (useTimeSeriesRun.ts): plain totals, same order,
-        // ending in "N children skipped." The split per parent and child follows on its own line.
+        // ending in "N children skipped." Children are never in scope.
         _log($"Run completed: {settlMeteringPoints.Count} metering points in Settl, {totalInRange.Total} processed, {totalPosted.Total} posted, " +
              $"{totalNoDeliveryStart.Total} never delivered, {totalNotMigrated.Total} not migrated, " +
              (cosFrom != null || cosTo != null ? $"{totalOutOfRange.Total} outside the delivery-start range, " : "") +
              (skip is > 0 ? $"{totalPassedOver.Total} passed over (--skip), " : "") +
-             $"{totalAmbiguousRevisions.Total} ambiguous revision safety skips, {totalChildren} children " +
-             (_includeChildren ? "included." : "skipped."));
-        _log($"  Parents/children: {totalAlreadyDone} already done, {totalInRange} processed, {totalPosted} posted, {totalSkipped} skipped (see skip files), " +
-             $"{totalNoDeliveryStart} never delivered, {totalNotMigrated} not migrated, " +
-             (cosFrom != null || cosTo != null ? $"{totalOutOfRange} outside the delivery-start range, " : "") +
-             (skip is > 0 ? $"{totalPassedOver} passed over (--skip), " : "") +
-             $"{totalAmbiguousRevisions} ambiguous revision safety skips.");
+             $"{totalAmbiguousRevisions.Total} ambiguous revision safety skips, {totalChildren} children skipped.");
         OnStatus?.Invoke($"{settlMeteringPoints.Count:N0}/{settlMeteringPoints.Count:N0} checked · {StateLine()}");
         if (!_markDoneMode)
         {
@@ -2255,7 +2232,7 @@ public class TimeSeriesRunner
         }
         if (failures.Count > 0)
         {
-            _log($"{failures.Count} failure(s) skipped (--force){(totalFailed.Total == failures.Count ? $" — {totalFailed}" : "")}:");
+            _log($"{failures.Count} failure(s) skipped (--force):");
             foreach (var f in failures)
                 _log($"  - {f}");
             return 1;
@@ -2274,10 +2251,9 @@ public class TimeSeriesRunner
     /// Throws <see cref="InvalidOperationException"/> when Settl or Xellent cannot be read.
     /// </summary>
     public async Task<List<BatchMeteringPoint>> ListBatchMeteringPointsAsync(
-        DateOnly? cosFrom = null, DateOnly? cosTo = null, bool includeChildren = false,
+        DateOnly? cosFrom = null, DateOnly? cosTo = null,
         CancellationToken cancellationToken = default)
     {
-        _includeChildren = includeChildren;
         if (_settlMeteringPointClient == null)
             throw new InvalidOperationException("Settl API clients not configured. DI registration missing.");
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
@@ -2320,16 +2296,11 @@ public class TimeSeriesRunner
         var childCount = meteringPoints.Count(m => m.ParentIdentification != null);
         if (_coverageTrace != null)
             _coverageTrace.MeteringPointsExamined = allByIdentification.Count;
-        if (!_includeChildren)
-        {
-            RecordCoverageExclusion("Children excluded (use --include-children)", isChild: true, childCount);
-            if (childCount > 0)
-                _log($"  skipped {childCount} child MP(s) (--include-children takes them along)");
-            return (meteringPoints.Where(m => m.ParentIdentification == null).ToList(), childCount);
-        }
-        if (fromXellent > 0)
-            _log($"  {fromXellent} child MP(s) (Xellent relation table) included");
-        return (meteringPoints, childCount);
+        // Children are never in scope. The relations above are still read: they are how a child is known.
+        RecordCoverageExclusion("Children (never in scope)", isChild: true, childCount);
+        if (childCount > 0)
+            _log($"  skipped {childCount} child MP(s), {fromXellent} of them known from the Xellent relation table");
+        return (meteringPoints.Where(m => m.ParentIdentification == null).ToList(), childCount);
     }
 
     /// <summary>
@@ -2362,7 +2333,6 @@ public class TimeSeriesRunner
             .ToDictionary(g => g.Key, g => g.First());
 
         var byIdentification = new Dictionary<string, BatchMeteringPoint>(StringComparer.Ordinal);
-        var children = 0;
         var skippedOutOfRange = 0;
         foreach (var mp in list)
         {
@@ -2378,10 +2348,7 @@ public class TimeSeriesRunner
             }
             SettlListItem? parent = null;
             if (mp.ParentId is { } parentId && parentId != Guid.Empty)
-            {
-                children++;
                 byGuid.TryGetValue(parentId, out parent);
-            }
             byIdentification[mp.Identification] = new BatchMeteringPoint(
                 mp.Identification, mp.Id, mp.InDelivery == true || mp.DeliveryStart is not null,
                 mp.DeliveryStart is { } ds ? ToDanishDate(ds) : null,
@@ -2389,8 +2356,6 @@ public class TimeSeriesRunner
                 mp.ParentId is { } pid && pid != Guid.Empty ? pid : null,
                 parent is { } p && (p.InDelivery == true || p.DeliveryStart is not null));
         }
-        if (children > 0 && _includeChildren)
-            _log($"  {children} child MP(s) (Settl relations) included");
         if (skippedOutOfRange > 0)
             _log($"  skipped {skippedOutOfRange} MP(s) with delivery start outside the range");
 
@@ -2516,9 +2481,6 @@ public class TimeSeriesRunner
 
     /// <summary>Where the done marks live during a batch run or seed (the environment's snapshot folder).</summary>
     private RunSnapshot? _done;
-
-    /// <summary>Batch runs take child metering points along only when this is set (--include-children).</summary>
-    private bool _includeChildren;
 
     /// <summary>"Parent" or "Child" for the metering point being handled, "" where it is not known
     /// (a profile post). Written wherever a metering point is named: CSV rows and skip logs.</summary>
@@ -3356,6 +3318,7 @@ public class ExtractOptions
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public string? DeliveryCategory { get; set; }
+    /// <summary>Not set by the CLI: children are never in scope. Kept because the dashboard still sets it (always false).</summary>
     public bool IncludeChildren { get; set; }
     public bool SimulateMissing { get; set; }
     /// <summary>Export paired original and prepared values for read-only dashboard inspection.</summary>
@@ -3371,6 +3334,7 @@ public class PostOptions
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public string? DeliveryCategory { get; set; }
+    /// <summary>Not set by the CLI: children are never in scope. Kept because the dashboard still sets it (always false).</summary>
     public bool IncludeChildren { get; set; }
     public string Environment { get; set; } = "staging";
     public bool DryRun { get; set; }

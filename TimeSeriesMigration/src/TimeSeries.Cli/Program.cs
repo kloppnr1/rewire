@@ -26,7 +26,6 @@ var meteringPointOption = new Option<string?>("--metering-point") { Description 
 var startOption = new Option<DateTime?>("--start") { Description = "Start date (yyyy-MM-dd)" };
 var endOption = new Option<DateTime?>("--end") { Description = "End date (yyyy-MM-dd)" };
 var deliveryCategoryOption = new Option<string?>("--delivery-category") { Description = "Delivery category (default: El-ekstern)" };
-var includeChildrenOption = new Option<bool>("--include-children") { Description = "Include child metering points" };
 var envOption = new Option<string>("--env") { Description = "Target environment: featuretest, production, production-hev, production-vhel (default: featuretest)" };
 
 // Extract-specific
@@ -37,7 +36,7 @@ var dryRunOption = new Option<bool>("--dry-run") { Description = "Preview what w
 var forceOption = new Option<bool>("--force") { Description = "Continue past per-MP failures (default: stop at first failure). Run still exits non-zero if any MP failed." };
 var skipResolutionChangeOption = new Option<bool>("--skip-resolution-change") { Description = "Skip metering points with a resolution change (typically Hour → Quarter). Skipped MPs are logged but do not cause a non-zero exit." };
 var skipIfExistingPointsOption = new Option<bool>("--skip-if-existing-points") { Description = "Pre-check Settl via points-summary before POST. If any matched TS already has points in the window, the whole MP is skipped. Skipped MPs are logged but do not cause a non-zero exit." };
-var allOption = new Option<bool>("--all") { Description = "Post every El metering point in Settl that is in delivery; the account is whoever held it in Xellent the day before delivery starts. Mutually exclusive with --account/--metering-point/--start/--end/--delivery-category. With --include-children child metering points are posted too." };
+var allOption = new Option<bool>("--all") { Description = "Post every El metering point in Settl that is in delivery; the account is whoever held it in Xellent the day before delivery starts. Mutually exclusive with --account/--metering-point/--start/--end/--delivery-category. Child metering points are never posted." };
 var cosFromOption = new Option<DateOnly?>("--cos-from") { Description = "With --all: only metering points whose delivery in Settl starts on or after this date (yyyy-MM-dd)" };
 var cosToOption = new Option<DateOnly?>("--cos-to") { Description = "With --all: only metering points whose delivery in Settl starts on or before this date (yyyy-MM-dd)" };
 var skipOption = new Option<int?>("--skip") { Description = "With --all: pass over the first N metering points in range (by identification); combine with --limit to run in batches" };
@@ -52,7 +51,7 @@ var refreshOption = new Option<bool>("--refresh") { Description = "Throw the sto
 var extractCommand = new Command("extract", "Extract time series from Xellent to JSON files")
 {
     accountOption, meteringPointOption, startOption, endOption,
-    deliveryCategoryOption, includeChildrenOption, simulateOption, envOption
+    deliveryCategoryOption, simulateOption, envOption
 };
 
 extractCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -66,7 +65,6 @@ extractCommand.SetAction(async (parseResult, cancellationToken) =>
         StartDate = parseResult.GetValue(startOption),
         EndDate = parseResult.GetValue(endOption),
         DeliveryCategory = parseResult.GetValue(deliveryCategoryOption),
-        IncludeChildren = parseResult.GetValue(includeChildrenOption),
         SimulateMissing = parseResult.GetValue(simulateOption)
     });
 });
@@ -75,7 +73,7 @@ extractCommand.SetAction(async (parseResult, cancellationToken) =>
 var postCommand = new Command("post", "Extract time series from Xellent and POST to Settl API")
 {
     accountOption, meteringPointOption, startOption, endOption,
-    deliveryCategoryOption, includeChildrenOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption
+    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption
 };
 
 postCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -132,7 +130,6 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
             parseResult.GetValue(limitOption),
             skip: parseResult.GetValue(skipOption),
             offline: parseResult.GetValue(offlineOption),
-            includeChildren: parseResult.GetValue(includeChildrenOption),
             cancellationToken: cancellationToken);
     }
 
@@ -143,7 +140,6 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
         StartDate = parseResult.GetValue(startOption),
         EndDate = parseResult.GetValue(endOption),
         DeliveryCategory = parseResult.GetValue(deliveryCategoryOption),
-        IncludeChildren = parseResult.GetValue(includeChildrenOption),
         Environment = settlEnv,
         DryRun = parseResult.GetValue(dryRunOption),
         ContinueOnError = parseResult.GetValue(forceOption),
@@ -153,18 +149,11 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 // === snapshot command ===
-// The snapshot is a cache, so it takes children along by default: it then serves a post --all with or
-// without --include-children. Turn it off with --include-children false.
-var snapshotIncludeChildrenOption = new Option<bool>("--include-children")
-{
-    Description = "Include child metering points (default: yes). Pass --include-children false for parents only",
-    DefaultValueFactory = _ => true,
-};
 var snapshotCommand = new Command("snapshot",
     "Read everything post --all needs from Settl and Xellent (not the time series points) and store it under " +
     "<Output:BaseDirectory>/snapshot/<env>, for post --all --offline. Keeps what is already stored; delete the folder to start over.")
 {
-    envOption, parallelOption, refreshOption, snapshotIncludeChildrenOption
+    envOption, parallelOption, refreshOption
 };
 
 snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -173,7 +162,7 @@ snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
     await using var provider = BuildSettlServices(config);
     var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
     return await runner.RunSeedSnapshotAsync(settlEnv, parseResult.GetValue(parallelOption) ?? 6, parseResult.GetValue(refreshOption),
-        parseResult.GetValue(snapshotIncludeChildrenOption), cancellationToken);
+        cancellationToken);
 });
 
 // === resolution-changes command ===
@@ -183,7 +172,7 @@ var resolutionChangesCommand = new Command("resolution-changes",
     "Write the CSV for Settl to create missing hourly time series: include metering points with outgoing hourly values " +
     "and no hourly target after quarter-hour conversion. Preserve source switch dates. Read-only.")
 {
-    envOption, outOption, offlineListOption, includeChildrenOption
+    envOption, outOption, offlineListOption
 };
 
 resolutionChangesCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -192,7 +181,7 @@ resolutionChangesCommand.SetAction(async (parseResult, cancellationToken) =>
     await using var provider = BuildSettlServices(config);
     var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
     return await runner.RunResolutionChangesAsync(settlEnv, parseResult.GetValue(offlineListOption), parseResult.GetValue(outOption),
-        parseResult.GetValue(includeChildrenOption), cancellationToken);
+        cancellationToken);
 });
 
 // === readiness command ===
@@ -202,7 +191,7 @@ var readinessCommand = new Command("readiness",
     "Write a CSV with one row per metering point post --all would send: outgoing resolutions and counts, which time series " +
     "Settl has, what is missing, and a status (Ready, MissingHourSeries, ConversionError, …). Read-only; creates nothing in Settl.")
 {
-    envOption, readinessOutOption, readinessOfflineOption, includeChildrenOption
+    envOption, readinessOutOption, readinessOfflineOption
 };
 
 readinessCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -211,7 +200,7 @@ readinessCommand.SetAction(async (parseResult, cancellationToken) =>
     await using var provider = BuildSettlServices(config);
     var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
     return await runner.RunReadinessAsync(settlEnv, parseResult.GetValue(readinessOfflineOption), parseResult.GetValue(readinessOutOption),
-        parseResult.GetValue(includeChildrenOption), cancellationToken);
+        cancellationToken);
 });
 
 // === coverage command ===
@@ -225,7 +214,7 @@ var coverageAccountLimitOption = new Option<int>("--account-limit")
 var coverageCommand = new Command("coverage",
     "Show time-series migration coverage from the existing environment snapshot (strictly offline)")
 {
-    envOption, coverageJsonOption, coverageByAccountOption, coverageAccountLimitOption, includeChildrenOption
+    envOption, coverageJsonOption, coverageByAccountOption, coverageAccountLimitOption
 };
 
 coverageCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -247,7 +236,6 @@ coverageCommand.SetAction(async (parseResult, cancellationToken) =>
         parseResult.GetValue(coverageJsonOption),
         parseResult.GetValue(coverageByAccountOption),
         accountLimit,
-        parseResult.GetValue(includeChildrenOption),
         cancellationToken);
 });
 

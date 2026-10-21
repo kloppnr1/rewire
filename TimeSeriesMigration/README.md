@@ -43,7 +43,7 @@ On featuretest: 440 of 661 candidates were already in Settl. Checking the remain
 
 Reads everything `post --all` needs and stores it in `output/snapshot/<env>/`:
 - **From Settl:** the metering point list, and per metering point its delivery statuses, its current delivery status (only that section — no consumer names or addresses) and its time series.
-- **From Xellent:** child relations and contracts.
+- **From Xellent:** child relations (only to know which metering points are children, so they can be left out) and contracts.
 
 Time series points are **not** stored. A batch dry run asks Xellent for counts per dated segment and checks whether hourly values can be split exactly; it reads only the first offending value when validation fails. The seed now counts them for every metering point it would post and keeps the counts (`xellent-point-counts-v3.jsonl`), so `readiness`, `resolution-changes` and offline dry runs read them back instead of counting in Xellent again. That is the slowest part of a seed; a run that only needs the Settl reads is done before it. A live run reads the points fresh. Neither Settl nor Xellent changes while the migration runs, so one snapshot serves many runs.
 
@@ -52,7 +52,6 @@ Time series points are **not** stored. A batch dry run asks Xellent for counts p
 | `--env <name>` | Which environment to read. One snapshot per environment |
 | `--parallel <N>` | Settl reads per metering point, N at a time. Default 6 |
 | `--refresh` | Throw the stored reads away and read everything again. Done marks are kept |
-| `--include-children` | Take child metering points along. **On by default** — the snapshot is a cache, so it then serves a `post --all` with or without children. `--include-children false` for parents only |
 
 - Running it again keeps what is stored and only fills in what is missing (an interrupted seed resumes), then runs the done check again. So to mark new done metering points on an existing snapshot, just run `snapshot` again.
 - A failed read is listed at the end and the command exits non-zero; run it again to retry.
@@ -64,11 +63,10 @@ Time series points are **not** stored. A batch dry run asks Xellent for counts p
 
 Settl decides which metering points are posted; Xellent decides whose they are.
 
-1. Every electricity metering point in Settl's list. Parents only, unless `--include-children`.
+1. Every electricity metering point in Settl's list, parents only. Children (a Settl relation or the Xellent relation table) are never in scope.
 2. Per metering point, the delivery start comes from its delivery statuses. Settl can fail to mark delivery (2026-09), so metering points shown as not in delivery are checked too, using the start of their current delivery status.
 3. The account is whoever held the metering point in Xellent (`El-ekstern` contracts) on the day before delivery starts. That relationship must be closed as a migration.
 4. Window: `end` = delivery start, `start = max(end − 3 years, delivery boundary, the account's own contract start)`. Before posting, `end` must match the delivery start on the metering point in Settl.
-5. With `--include-children`, child metering points (Settl relation or the Xellent relation table) are taken along. A child uses its own delivery status and its own Xellent contract when it has them. When it has neither, the window and the account come from its parent, and the window end is checked against the parent too. What gets posted is the child's own time series, to the child's own Settl GUID.
 
 | Option | Meaning |
 |--------|---------|
@@ -79,7 +77,6 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 | `--cos-from` / `--cos-to <yyyy-MM-dd>` | Only metering points whose delivery in Settl starts in this range (Danish dates, both included) |
 | `--skip <N>` / `--limit <N>` | Pass over the first N metering points in range, then stop after N more, in identification order. Metering points already done don't count. With done marks, `--limit` alone is usually enough |
 | `--skip-if-existing-points` | Skip a metering point if Settl already has points in its window |
-| `--include-children` | Take child metering points along. Off by default: a run without it is parents only |
 | `--skip-resolution-change` | Skip a metering point that changes resolution in the window (typically Hour → Quarter): in its series, or in what Xellent says it was read at |
 
 What happens to each metering point:
@@ -87,7 +84,7 @@ What happens to each metering point:
 - **Failed** (Settl marks it in delivery, but Xellent shows no clean migration, or a safety check fails): logged as `ERROR`.
 - **Skipped** to a CSV file (below). Metering points Settl shows as not in delivery count as "never delivered" if they have no delivery start, and as "not migrated" if Xellent shows no migration.
 
-The last two log lines give the counts, for example: `Run completed: 2219 metering points in Settl, 2148 processed, 601 posted, 71 never delivered, 1426 not migrated, …` and, under it, `Parents/children: 2702 (2600 parents, 102 children) already done, 2148 (1500 parents, 648 children) processed, …` with the same counts split by kind, the done ones first. Failures skipped with `--force` are split the same way on their own line. With `--offline` a line before it says how many reads came from the snapshot and how many were read live.
+The summary starts with the counts, for example: `Run completed: 2219 metering points in Settl, 2148 processed, 601 posted, 71 never delivered, 1426 not migrated, …, 168 children skipped.` Failures skipped with `--force` follow on their own line. With `--offline` a line after it says how many reads came from the snapshot and how many were read live.
 
 ### Skip files
 
@@ -125,7 +122,6 @@ dotnet run --project src/TimeSeries.Cli -- readiness --env production --offline
 | `--env <name>` | Which environment |
 | `--offline` | Read Settl and Xellent from the snapshot instead of asking them |
 | `--out <file>` | Where to write. Default `output/readiness-<env>.csv` |
-| `--include-children` | Take child metering points along, matching `post --all --include-children` |
 
 Columns: `MeteringPointId;Type;SettlId;Account;WindowStart;WindowEnd;ValueResolutions;ValuePoints;SettlSeries;MissingSeries;Status;Reasons;Detail`. `Type` is Parent or Child.
 
@@ -157,7 +153,7 @@ dotnet run --project src/TimeSeries.Cli -- coverage --env production --json
 ```
 
 The report reconciles every unique metering point in the Settl snapshot to either the migration scope
-or an explicit exclusion reason. Exclusions include children when they were not requested, 6##### payers,
+or an explicit exclusion reason. Exclusions include children (never in scope), 6##### payers,
 never-delivered and not-migrated points, missing or ambiguous Xellent ownership, delivery-revision safety
 skips, and migration/delivery validation failures. It then shows completed coverage, ready-to-migrate and
 blocked totals, remaining readiness statuses, parent/child totals, and fully completed account totals.
@@ -170,7 +166,6 @@ instead of reading live.
 | `--json` | Write the full report as machine-readable JSON, including every account |
 | `--by-account` | Print incomplete accounts with completed, ready and blocked totals |
 | `--account-limit <N>` | Maximum incomplete accounts to print (default 50; `0` shows all) |
-| `--include-children` | Include child metering points, matching `post --all --include-children` |
 
 ## `resolution-changes`
 
@@ -191,7 +186,6 @@ dotnet run --project src/TimeSeries.Cli -- resolution-changes --env production -
 | `--env <name>` | Which environment |
 | `--offline` | Read Settl and Xellent from the snapshot instead of asking them |
 | `--out <file>` | Where to write. Default `output/resolution-changes-<env>.csv` |
-| `--include-children` | Take child metering points along, matching `post --all --include-children` |
 
 Columns: `MeteringPointId;Type;ChangeDate;XellentResolutions;SettlSeries;MissingSeries;WindowStart;WindowEnd` (`Type` is Parent or Child; WindowEnd = delivery start, not included). The dashboard's "Opløsningsskift" card lists a switch at any time, so it can have more meters.
 
@@ -216,7 +210,6 @@ dotnet run --project src/TimeSeries.Cli -- extract --account 405013
 | `--start <yyyy-MM-dd>` | Window start, included. Default: today − 3 years (`TimeSeries:DefaultYears`) |
 | `--end <yyyy-MM-dd>` | Window end, **not included**. Default: today |
 | `--delivery-category <name>` | Default `El-ekstern` |
-| `--include-children` | Also child metering points (Xellent relation table) |
 | `--simulate-missing` | `extract` only: fill gaps with simulated values |
 
 `post` in these modes also takes `--dry-run`, `--force`, `--skip-if-existing-points` and `--skip-resolution-change`. It drops points before the metering point's delivery boundary in Settl, and skips a metering point with none left.
