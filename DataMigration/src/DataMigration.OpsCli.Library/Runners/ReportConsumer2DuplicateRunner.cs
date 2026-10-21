@@ -123,9 +123,11 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                 if (result.PrefixError is { } prefixError && !messages.Contains(prefixError)) messages.Add(prefixError);
                 if (result.Versions.Versions.Any(v => v.Duplicate) && result.Delivery?.Periods.Count == 0 && result.Delivery.Errors.Count == 0)
                     messages.Add("No delivery periods returned; Consumer correlation unavailable.");
+                var identification = result.Versions.Versions.Select(v => v.Point?.Identification?.MeteringPointIdentification)
+                    .FirstOrDefault(value => !string.IsNullOrEmpty(value)) ?? result.Evidence?.MeteringPointIdentification ?? "(missing)";
                 errors += messages.Count;
                 foreach (var message in messages)
-                    progress.Message($"{result.Id}: {message}; report incomplete.");
+                    progress.Message($"{identification} ({result.Id}): {message}; report incomplete.");
                 var affected = result.Versions.Versions.Any(v => v.Duplicate);
                 var found = result.Versions.Versions;
                 emptyIdVersions += found.Count(v => v.NameWithEmptyNationalId);
@@ -138,8 +140,6 @@ public sealed class ReportConsumer2DuplicateRunner(ISettlMeteringPointClient cli
                     matched++;
                     duplicateVersions += result.Versions.Versions.Count(v => v.Duplicate);
                 }
-                var identification = result.Versions.Versions.Select(v => v.Point?.Identification?.MeteringPointIdentification)
-                    .FirstOrDefault(value => !string.IsNullOrEmpty(value)) ?? result.Evidence?.MeteringPointIdentification ?? "(missing)";
                 var pattern = result.PatternMatch is null ? "Unknown" : result.PatternMatch.Value ? "Yes" : "No";
                 var deliveryWarnings = (result.Delivery?.Errors ?? []).Concat(result.PrefixError is null ? [] : new[] { result.PrefixError });
                 var deliveryWarning = string.Join(" | ", deliveryWarnings.Distinct());

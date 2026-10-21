@@ -100,6 +100,24 @@ public class Consumer2DataHubRuleTests
         Assert.Contains("  Failed writes: 1", logs);
     }
 
+    [Fact]
+    public async Task A_skipped_point_is_named_by_its_metering_point_id()
+    {
+        var id = Guid.NewGuid();
+        const string identification = "571313100000000009";
+        var client = new StubFixConsumer2DuplicateMeteringPointClient();
+        client.MarketPoints.Add(new() { Id = id, MeteringPointIdentification = identification });
+        client.ConsumerHistories[id] = (null, "Unavailable");
+        var logs = new List<string>();
+        Assert.Equal(1, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [identification], DryRun = true }));
+        Assert.Contains(logs, line => line.Contains($"{identification} ({id}): skipped:"));
+
+        using var progress = new StringWriter();
+        await new ReportConsumer2DuplicateRunner(client) { ProgressOutput = progress }.RunAsync("featuretest", [identification], null, TextWriter.Null);
+        Assert.Contains($"{identification} ({id}): ", progress.ToString());
+    }
+
     private static StubFixConsumer2DuplicateMeteringPointClient Fictitious2(Guid id)
     {
         var client = new StubFixConsumer2DuplicateMeteringPointClient();

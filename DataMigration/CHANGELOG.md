@@ -6,6 +6,7 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
+| 2026-10-21 | `fix-consumer2-duplicate` + `report-consumer2-duplicate` | Skipped and incomplete points are logged with their metering point id in front of the Settl GUID. | *(this commit)* |
 | 2026-10-21 | `fix-consumer2-duplicate` | Only the Consumer version in effect today is written, for every rule and `--clear-fictitious-cpr2`; selected older or future versions are left alone and counted in the summary. The first-delivery-period exclusion still applies. | *(this commit)* |
 | 2026-10-21 | `fix-consumer2-duplicate` + `report-consumer2-duplicate` | New `--clear-fictitious-cpr2` (needs `--mp-id`): clears consumer 2's CPR where it is 1111110000 and consumer 1 has a real CPR, keeping the name (sent back, since Settl replaces the whole party). Report adds `CompanyWithConsumer2`, `Consumer2FictitiousCpr` and `CprInvalidFormat`; every private version now gets a national-id read. | *(this commit)* |
 | 2026-10-19 | `report-consumer2-duplicate` | New last column `Consumer2NameWithEmptyNationalId`: Yes when a private Consumer version has a consumer 2 name but Settl holds its national id as an empty string, which DataHub rejects (BRS-015). Such points are listed even without a duplicate; the fix never selects them. Named consumer 2 versions now also get a national-id read. | *(this commit)* |

@@ -54,6 +54,8 @@ public class FixConsumer2DuplicateRunner
         Log(options.DryRun ? "Duplicate Consumer 2 dry-run (up to 8 concurrent reads; no writes)"
             : "Duplicate Consumer 2 cleanup (sequential updates)");
         List<Guid> candidateIds;
+        // Lets a skipped point be named by its metering point id even when Settl's reads failed.
+        var requestedIdentification = new Dictionary<Guid, string>();
 
         if (options.MeteringPointIds.Length > 0)
         {
@@ -78,6 +80,7 @@ public class FixConsumer2DuplicateRunner
                     continue;
                 }
                 candidateIds.Add(mp.Id);
+                requestedIdentification[mp.Id] = raw;
             }
         }
         else
@@ -138,7 +141,9 @@ public class FixConsumer2DuplicateRunner
                 if (warnings.Count > 0)
                 {
                     errors++;
-                    Log($"  {result.Id}: skipped: {string.Join(" | ", warnings)}");
+                    var skippedIdentification = result.Versions.Versions.Select(v => v.Point?.Identification?.MeteringPointIdentification)
+                        .FirstOrDefault(value => !string.IsNullOrEmpty(value)) ?? requestedIdentification.GetValueOrDefault(result.Id) ?? "(missing)";
+                    Log($"  {skippedIdentification} ({result.Id}): skipped: {string.Join(" | ", warnings)}");
                     continue;
                 }
                 // A same-version duplicate wins: blanking it clears the CPR too.
