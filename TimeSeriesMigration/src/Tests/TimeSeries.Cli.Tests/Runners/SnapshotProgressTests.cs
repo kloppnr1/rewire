@@ -187,6 +187,35 @@ public class SnapshotProgressTests : IDisposable
         Assert.All(lines, l => Assert.True(l.All(c => c < 128 || char.IsLetterOrDigit(c)), l));
     }
 
+    [Fact]
+    public void The_last_post_all_runs_states_are_shown_like_its_own_summary()
+    {
+        var run = new PostRunStates("featuretest", DryRun: true, "Completed", 10, 10, _now, _now,
+            new Dictionary<string, IReadOnlyDictionary<string, int>>
+            {
+                ["Ready"] = new Dictionary<string, int> { ["would be posted"] = 4 },
+                ["Blocked"] = new Dictionary<string, int> { ["missing Hour series in Settl"] = 5, ["window end differs from Settl delivery date"] = 1 },
+            });
+        run.TryWrite(_dir);
+
+        var lines = SnapshotProgressRenderer.Render(SnapshotProgressReader.Read(_dir), "featuretest", _now).ToList();
+
+        var header = lines.FindIndex(l => l.StartsWith("Last check   post --all --dry-run, completed", StringComparison.Ordinal));
+        Assert.True(header >= 0, string.Join("\n", lines));
+        Assert.Equal("States       done 0 · ready 4 · skipped 0 · excluded 0 · blocked 6 · failed 0", lines[header + 1]);
+        Assert.Equal("  Ready: 4", lines[header + 2]);
+        Assert.Equal("  Blocked: 6", lines[header + 4]);
+        Assert.EndsWith("missing Hour series in Settl", lines[header + 5]);
+    }
+
+    [Fact]
+    public void Without_a_post_all_run_progress_says_how_to_get_the_states()
+    {
+        var lines = SnapshotProgressRenderer.Render(SnapshotProgressReader.Read(_dir), "featuretest", _now);
+
+        Assert.Contains("Last check   none yet: run post --all --dry-run", lines);
+    }
+
     private static string Line(string key, object value) =>
         JsonSerializer.Serialize(new { key, value }) + "\n";
 }

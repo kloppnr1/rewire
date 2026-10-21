@@ -55,7 +55,7 @@ Time series points are **not** stored. A batch dry run asks Xellent for counts p
 
 - Running it again keeps what is stored and only fills in what is missing (an interrupted seed resumes), then runs the done check again. So to mark new done metering points on an existing snapshot, just run `snapshot` again.
 - A failed read is listed at the end and the command exits non-zero; run it again to retry.
-- Progress of the Settl reads and the done check shows as one line that updates in place (a line every 1,000 when the output goes to a file).
+- Progress of each step shows as one line that updates in place. Every line also goes to `output/snapshot-<env>-<time>.log`; the list of failed reads is only there.
 - Featuretest (2,219 metering points): about 1.5 minutes, 2.4 MB. Production (61,074): 305,381 reads, a few hours.
 - On featuretest a full offline dry run then takes about 1 minute the first time (Xellent counts) and a few seconds after that.
 

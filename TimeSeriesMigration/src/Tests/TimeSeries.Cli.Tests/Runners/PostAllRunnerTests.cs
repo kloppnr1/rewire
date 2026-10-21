@@ -1071,6 +1071,26 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPostAllAsync_WritesItsStatesForProgress()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        var states = TimeSeries.Cli.Services.PostRunStates.TryRead(Path.Combine(OutputDir, "snapshot", "test"));
+        Assert.NotNull(states);
+        Assert.Equal("Completed", states!.Status);
+        Assert.True(states.DryRun);
+        Assert.Equal(1, states.TotalOf("Ready"));
+        Assert.Equal((1, 1), (states.Checked, states.Total));
+    }
+
+    [Fact]
     public async Task Coverage_CountsMeteringPointsExcludedByHand()
     {
         var supplyStart = new DateTime(2023, 6, 15);

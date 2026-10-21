@@ -202,7 +202,7 @@ public class TimeSeriesRunner
     // The states of the time series migration process: every metering point a post --all run looks at ends
     // the run in exactly one, with a reason. "Wrong" (sent, but different from Xellent) needs a value
     // comparison and is not counted here.
-    private static readonly string[] StateOrder = ["Done", "Ready", "Skipped", "Excluded", "Blocked", "Failed"];
+    private static readonly string[] StateOrder = PostRunStates.Order;
     private readonly Dictionary<string, SortedDictionary<string, int>> _states = new(StringComparer.Ordinal);
     private TimeSeriesSkipCategory? _lastSkip;
 
@@ -257,7 +257,26 @@ public class TimeSeriesRunner
 
     private int StateTotal(string state) => _states.TryGetValue(state, out var reasons) ? reasons.Values.Sum() : 0;
 
-    private string StateLine() => string.Join(" · ", StateOrder.Select(s => $"{s.ToLowerInvariant()} {StateTotal(s):N0}"));
+    private string StateLine() => PostRunStates.FormatLine(StateTotal);
+
+    // states.json for the post --all run under way (null outside one), so progress can show it.
+    private (string Directory, string Environment, bool DryRun, DateTimeOffset StartedAt)? _statesRun;
+    private int _statesChecked, _statesTotal;
+    private DateTimeOffset _statesLastWrite = DateTimeOffset.MinValue;
+    private bool _statesCompleted;
+
+    private void WriteStates(string status, bool force)
+    {
+        if (_statesRun is not { } run || _markDoneMode)
+            return;
+        var now = DateTimeOffset.UtcNow;
+        if (!force && now - _statesLastWrite < TimeSpan.FromSeconds(5))
+            return;
+        _statesLastWrite = now;
+        new PostRunStates(run.Environment, run.DryRun, status, _statesChecked, _statesTotal, run.StartedAt, now,
+                _states.ToDictionary(s => s.Key, s => (IReadOnlyDictionary<string, int>)new Dictionary<string, int>(s.Value), StringComparer.Ordinal))
+            .TryWrite(run.Directory);
+    }
 
     // A send that stopped: failed when a call to Settl itself went wrong, blocked when something has to be fixed first.
     private static (string State, string Reason) ClassifyPostError(string? error)
@@ -875,6 +894,26 @@ public class TimeSeriesRunner
         int? skip = null,
         bool offline = false,
         CancellationToken cancellationToken = default)
+    {
+        // The run's states go to states.json in the snapshot folder while it runs and when it ends.
+        _statesRun = (SnapshotDirectory(environment), environment, dryRun, DateTimeOffset.UtcNow);
+        (_statesChecked, _statesTotal, _statesCompleted) = (0, 0, false);
+        _statesLastWrite = DateTimeOffset.MinValue;
+        try
+        {
+            return await RunPostAllWithDoneMarksAsync(environment, dryRun, continueOnError, skipResolutionChange,
+                skipIfExistingPoints, cosFrom, cosTo, limit, windowEndDateOverride, skip, offline, cancellationToken);
+        }
+        finally
+        {
+            WriteStates(_statesCompleted ? "Completed" : "Stopped", force: true);
+            _statesRun = null;
+        }
+    }
+
+    private async Task<int> RunPostAllWithDoneMarksAsync(string environment, bool dryRun, bool continueOnError,
+        bool skipResolutionChange, bool skipIfExistingPoints, DateOnly? cosFrom, DateOnly? cosTo, int? limit,
+        DateTime? windowEndDateOverride, int? skip, bool offline, CancellationToken cancellationToken)
     {
         // Metering points a live run has posted are marked done in the environment's snapshot folder,
         // online or offline, and every batch run leaves them out from the start.
@@ -1698,7 +1737,11 @@ public class TimeSeriesRunner
             if (_markDoneMode)
                 ReportProgress("Done check, deciding windows", i + 1, settlMeteringPoints.Count);
             else
+            {
                 OnStatus?.Invoke($"{i:N0}/{settlMeteringPoints.Count:N0} checked · {StateLine()}");
+                (_statesChecked, _statesTotal) = (i, settlMeteringPoints.Count);
+                WriteStates("Running", force: i == 0);
+            }
 
             if (limit is { } take && take > 0 && totalInRange.Total >= take)
             {
@@ -2055,6 +2098,7 @@ public class TimeSeriesRunner
              (skip is > 0 ? $"{totalPassedOver.Total} passed over (--skip), " : "") +
              $"{totalAmbiguousRevisions.Total} ambiguous revision safety skips, {totalChildren} children skipped.");
         OnStatus?.Invoke($"{settlMeteringPoints.Count:N0}/{settlMeteringPoints.Count:N0} checked · {StateLine()}");
+        (_statesChecked, _statesTotal, _statesCompleted) = (settlMeteringPoints.Count, settlMeteringPoints.Count, true);
         if (!_markDoneMode)
         {
             _log("");

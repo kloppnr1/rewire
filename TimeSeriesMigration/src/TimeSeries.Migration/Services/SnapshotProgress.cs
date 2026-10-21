@@ -152,7 +152,68 @@ public sealed class SnapshotProgressWriter
     }
 }
 
-/// <summary>What <c>progress</c> shows: the running snapshot's own state plus the done marks so far.</summary>
+/// <summary>
+/// The states of the last <c>post --all</c> run (dry or live), in <c>states.json</c> next to the snapshot
+/// files: the count per reason under each state. <paramref name="Status"/> is Running, Completed or Stopped;
+/// <paramref name="Checked"/>/<paramref name="Total"/> is how far a running one is.
+/// </summary>
+public sealed record PostRunStates(
+    string Environment,
+    bool DryRun,
+    string Status,
+    int Checked,
+    int Total,
+    DateTimeOffset StartedAt,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> States)
+{
+    public const string FileName = "states.json";
+
+    /// <summary>The order the states are always shown in.</summary>
+    public static readonly string[] Order = ["Done", "Ready", "Skipped", "Excluded", "Blocked", "Failed"];
+
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    public int TotalOf(string state) => States.TryGetValue(state, out var reasons) ? reasons.Values.Sum() : 0;
+
+    /// <summary>"done 440 · ready 166 · skipped 1,556 · excluded 0 · blocked 61 · failed 0"</summary>
+    public string Line() => FormatLine(TotalOf);
+
+    public static string FormatLine(Func<string, int> totalOf) =>
+        string.Join(" · ", Order.Select(s => $"{s.ToLowerInvariant()} {totalOf(s):N0}"));
+
+    /// <summary>Through a temp file and an atomic move; a failure is swallowed, the run always wins.</summary>
+    public void TryWrite(string directory)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, FileName);
+            File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(this, Json));
+            File.Move(path + ".tmp", path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    public static PostRunStates? TryRead(string directory)
+    {
+        try
+        {
+            var path = Path.Combine(directory, FileName);
+            if (!File.Exists(path))
+                return null;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return JsonSerializer.Deserialize<PostRunStates>(stream, Json);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>What <c>progress</c> shows: the running snapshot's own state plus the done marks so far, and the
+/// states of the last <c>post --all</c> run.</summary>
 public sealed record SnapshotProgressReport(
     string Directory,
     bool SnapshotExists,
@@ -160,7 +221,8 @@ public sealed record SnapshotProgressReport(
     int DoneMarks,
     int? MigrationTotal,
     DateTimeOffset? MigrationTotalAt,
-    DateTimeOffset? LastWrite);
+    DateTimeOffset? LastWrite,
+    PostRunStates? LastRun = null);
 
 /// <summary>
 /// Reads a snapshot folder while a snapshot may be writing to it: files opened with
@@ -193,7 +255,8 @@ public static class SnapshotProgressReader
                 lastWrite = written;
         }
 
-        return new SnapshotProgressReport(directory, true, state, doneMarks, total, totalAt, lastWrite);
+        return new SnapshotProgressReport(directory, true, state, doneMarks, total, totalAt, lastWrite,
+            PostRunStates.TryRead(directory));
     }
 
     private static SnapshotProgressState? ReadState(string path)
@@ -325,8 +388,10 @@ public static class SnapshotProgressRenderer
             var width = blockers.Keys.Max(k => k.Length);
             foreach (var (rule, count) in blockers.OrderByDescending(b => b.Value).ThenBy(b => b.Key, StringComparer.Ordinal))
                 lines.Add($"  {rule.PadRight(width)}  {count,8:N0}");
-            lines.Add("  Which metering points: run coverage, readiness or post --dry-run on this snapshot.");
+            lines.Add("  Which metering points: run post --all --dry-run on this snapshot.");
         }
+
+        lines.AddRange(RenderLastRun(report.LastRun));
 
         if (report.LastWrite is { } last)
         {
@@ -342,6 +407,30 @@ public static class SnapshotProgressRenderer
 
         lines.Add(Footer(now, refreshSeconds));
         return lines;
+    }
+
+    // The last post --all run's states, the same lines its own summary ends with.
+    private static IEnumerable<string> RenderLastRun(PostRunStates? run)
+    {
+        if (run == null)
+        {
+            yield return "Last check   none yet: run post --all --dry-run";
+            yield break;
+        }
+        var kind = run.DryRun ? "post --all --dry-run" : "post --all";
+        yield return $"Last check   {kind}, " + run.Status switch
+        {
+            "Running" => $"running: {run.Checked:N0} / {run.Total:N0} checked ({Percent(run.Checked, run.Total)})",
+            "Completed" => $"completed {run.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}",
+            _ => $"stopped before completing, {run.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}",
+        };
+        yield return $"States       {run.Line()}";
+        foreach (var name in PostRunStates.Order.Where(s => run.TotalOf(s) > 0))
+        {
+            yield return $"  {name}: {run.TotalOf(name):N0}";
+            foreach (var (reason, count) in run.States[name].OrderByDescending(r => r.Value).ThenBy(r => r.Key, StringComparer.Ordinal))
+                yield return $"    {count,8:N0}  {reason}";
+        }
     }
 
     private static string StatusSuffix(SnapshotProgressState state) => state.Status switch

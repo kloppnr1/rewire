@@ -114,7 +114,7 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
         // updating in place, and the summary at the end.
         Directory.CreateDirectory(outputDir);
         var logPath = Path.GetFullPath(Path.Combine(outputDir, $"post-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.log"));
-        using var runConsole = new RunConsole(logPath);
+        using var runConsole = RunConsole.ForPostAll(logPath);
         runner.OnLogLine = runConsole.Line;
         runner.OnStatus = runConsole.Status;
         runner.OnStepProgress = null;
@@ -161,6 +161,13 @@ snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
     var (connectionString, outputDir, years) = LoadXellentConfig(config);
     await using var provider = BuildSettlServices(config);
     var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
+    // Details go to a log file; the console shows the lines, the step progress in place and the summary.
+    Directory.CreateDirectory(outputDir);
+    var logPath = Path.GetFullPath(Path.Combine(outputDir, $"snapshot-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.log"));
+    using var runConsole = RunConsole.ForSnapshot(logPath);
+    runner.OnLogLine = runConsole.Line;
+    runner.OnStepProgress = runConsole.StepProgress;
+    Console.WriteLine($"Details: {logPath}");
     return await runner.RunSeedSnapshotAsync(settlEnv, parseResult.GetValue(parallelOption) ?? 6, parseResult.GetValue(refreshOption),
         cancellationToken);
 });
@@ -371,10 +378,11 @@ static (string ConnectionString, string OutputDir, int Years) LoadXellentConfig(
 public partial class Program;
 
 /// <summary>
-/// The console of a post --all run: every log line goes to the log file; the console shows the run's own
-/// lines (setup and summary) and one status line with the counts per state that updates in place.
+/// The console of a long command (post --all, snapshot): every log line goes to the log file; the console
+/// shows the command's own lines and one status line that updates in place. From the summary line on,
+/// everything is shown except the per-item lists ("  - …"), which stay in the file.
 /// </summary>
-sealed class RunConsole(string logPath) : IDisposable
+sealed class RunConsole(string logPath, string summaryPrefix, Func<string, bool> showBeforeSummary) : IDisposable
 {
     private readonly string _logPath = logPath;
     private readonly StreamWriter _file = new(logPath) { AutoFlush = true };
@@ -382,27 +390,37 @@ sealed class RunConsole(string logPath) : IDisposable
     private DateTime _lastStatus = DateTime.MinValue;
     private int _statusLength;
     private bool _summary;
+    private bool _listNoted;
 
-    // Lines before the per-metering-point part that say what the run is about to do.
-    private static readonly string[] SetupPrefixes =
+    // post --all: lines before the per-metering-point part that say what the run is about to do.
+    private static readonly string[] PostSetupPrefixes =
         ["Already done:", "Excluded by hand:", "Migration:", "Payer 6#####", "Payer check", "Limit of", "Aborting run"];
+
+    public static RunConsole ForPostAll(string logPath) =>
+        new(logPath, "Run completed:", line => PostSetupPrefixes.Any(p => line.StartsWith(p, StringComparison.Ordinal)));
+
+    // snapshot logs only a handful of lines before its summary; all of them are shown.
+    public static RunConsole ForSnapshot(string logPath) => new(logPath, "Snapshot seed completed:", _ => true);
 
     public void Line(string line)
     {
         lock (_gate)
         {
             _file.WriteLine(line);
-            if (line.StartsWith("Run completed:", StringComparison.Ordinal))
+            if (line.StartsWith(summaryPrefix, StringComparison.Ordinal))
                 _summary = true;
-            var show = _summary
-                ? !line.StartsWith("  - ", StringComparison.Ordinal) // the full failure list stays in the file
-                : SetupPrefixes.Any(p => line.StartsWith(p, StringComparison.Ordinal));
+            var listItem = line.StartsWith("  - ", StringComparison.Ordinal);
+            if (_summary && listItem && !_listNoted)
+            {
+                _listNoted = true;
+                ClearStatus();
+                Console.WriteLine($"  (listed in {_logPath})");
+            }
+            var show = _summary ? !listItem : showBeforeSummary(line);
             if (!show)
                 return;
             ClearStatus();
             Console.WriteLine(line);
-            if (_summary && line.EndsWith("skipped (--force):", StringComparison.Ordinal))
-                Console.WriteLine($"  (listed in {_logPath})");
         }
     }
 
@@ -420,6 +438,10 @@ sealed class RunConsole(string logPath) : IDisposable
             _statusLength = text.Length;
         }
     }
+
+    /// <summary>A long step's progress (snapshot): the same in-place line.</summary>
+    public void StepProgress(string step, int done, int total) =>
+        Status($"{step}: {done:N0}/{total:N0} ({(total == 0 ? 100 : done * 100 / total)}%)");
 
     private void ClearStatus()
     {
