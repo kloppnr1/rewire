@@ -208,6 +208,60 @@ public class TimeSeriesRunner
             [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail]);
     }
 
+    /// <summary>
+    /// snapshot --refresh-blocked: the metering points the last post --all listed in its blocked-*.csv files
+    /// get their stored Settl and Xellent reads dropped, so the seed that follows reads only those again.
+    /// Everything else stays as stored.
+    /// </summary>
+    private void ForgetBlockedReads()
+    {
+        var files = Directory.Exists(_outputBaseDirectory)
+            ? Directory.GetFiles(_outputBaseDirectory, "blocked-*.csv")
+            : [];
+        var identifications = new HashSet<string>(StringComparer.Ordinal);
+        var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files)
+        {
+            var rows = File.ReadAllLines(file)
+                .Select(l => l.TrimStart((char)0xFEFF).Split(';').Select(f => f.Trim().Trim('"')).ToArray())
+                .ToList();
+            if (rows.Count == 0)
+                continue;
+            var idColumn = Array.IndexOf(rows[0], "MeteringPointIdentification");
+            var guidColumn = Array.IndexOf(rows[0], "SettlMeteringPointId");
+            foreach (var row in rows.Skip(1))
+            {
+                if (idColumn >= 0 && idColumn < row.Length && row[idColumn].Length > 0)
+                    identifications.Add(row[idColumn]);
+                if (guidColumn >= 0 && guidColumn < row.Length && Guid.TryParse(row[guidColumn], out var g))
+                    guids.Add(g.ToString());
+            }
+        }
+        if (identifications.Count == 0)
+        {
+            _log($"Refresh blocked: no blocked metering points listed in {Path.GetFullPath(_outputBaseDirectory)} (blocked-*.csv). " +
+                 "Run post --all --dry-run first.");
+            return;
+        }
+
+        // The points-summary answers are keyed by time series; take those series before dropping the list.
+        var seriesIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var guid in guids)
+            if (_snapshot!.TryGet<List<TimeSeriesInfoDto>>(SnapshotTimeSeries, guid, out var series) && series != null)
+                foreach (var ts in series)
+                    seriesIds.Add(ts.Id.ToString());
+
+        var dropped = 0;
+        foreach (var kind in new[] { SnapshotDeliveryStatuses, SnapshotCurrentDeliveryStatus, SnapshotTimeSeries })
+            dropped += _snapshot!.Forget(kind, guids.Contains);
+        dropped += _snapshot!.Forget(SnapshotPointsSummary, key => seriesIds.Contains(key.Split('|')[0]));
+        foreach (var kind in new[] { SnapshotXellentContracts, SnapshotXellentChildren, SnapshotMeterPointStatus })
+            dropped += _snapshot.Forget(kind, identifications.Contains);
+        dropped += _snapshot.Forget(SnapshotXellentPointCounts, key => identifications.Contains(key.Split('|')[0]));
+        _log($"Refresh blocked: {identifications.Count} metering point(s) from {files.Length} blocked file(s); " +
+             $"{dropped} stored read(s) dropped and read again, the rest kept.");
+    }
+
     private int StateTotal(string state) => _states.TryGetValue(state, out var reasons) ? reasons.Values.Sum() : 0;
 
     private string StateLine() => PostRunStates.FormatLine(StateTotal);
@@ -912,7 +966,7 @@ public class TimeSeriesRunner
     /// marks are kept — a metering point with points in Settl stays done — and the done check adds new ones.</para>
     /// </summary>
     public async Task<int> RunSeedSnapshotAsync(string environment, int parallelism = 6, bool refresh = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool refreshBlocked = false)
     {
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
@@ -929,6 +983,8 @@ public class TimeSeriesRunner
             _log($"Refresh: removed {stale.Count} stored read file(s) from {directory}; done marks kept.");
         }
         _snapshot = new RunSnapshot(directory, reuse: true);
+        if (refreshBlocked && !refresh)
+            ForgetBlockedReads();
         _progressWriter = new SnapshotProgressWriter(directory, environment);
         try
         {

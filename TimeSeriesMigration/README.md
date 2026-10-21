@@ -52,6 +52,7 @@ Time series points are **not** stored. A batch dry run asks Xellent for counts p
 | `--env <name>` | Which environment to read. One snapshot per environment |
 | `--parallel <N>` | Settl reads per metering point, N at a time. Default 6 |
 | `--refresh` | Throw the stored reads away and read everything again. Done marks are kept |
+| `--refresh-blocked` | Read again only the metering points listed in the `blocked-*.csv` files of the last `post --all` (after someone fixed a group); every other stored read is kept. Featuretest: 61 metering points in 19 seconds |
 
 - Running it again keeps what is stored and only fills in what is missing (an interrupted seed resumes), then runs the done check again. So to mark new done metering points on an existing snapshot, just run `snapshot` again.
 - A failed read is listed at the end and the command exits non-zero; run it again to retry.

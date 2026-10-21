@@ -43,6 +43,7 @@ var offlineOption = new Option<bool>("--offline") { Description = "With --all: r
 // Snapshot-specific
 var parallelOption = new Option<int?>("--parallel") { Description = "Settl reads per metering point run this many at a time (default 6)" };
 var refreshOption = new Option<bool>("--refresh") { Description = "Throw the stored reads away and read everything again (done marks are kept). Without it, only what is missing is read." };
+var refreshBlockedOption = new Option<bool>("--refresh-blocked") { Description = "Read again only the metering points the last post --all listed in its blocked-*.csv files (after someone fixed a group); everything else stays as stored. Minutes, not hours." };
 
 // === extract command ===
 var extractCommand = new Command("extract", "Extract time series from Xellent to JSON files")
@@ -150,7 +151,7 @@ var snapshotCommand = new Command("snapshot",
     "Read everything post --all needs from Settl and Xellent (not the time series points) and store it under " +
     "<Output:BaseDirectory>/snapshot/<env>, for post --all --offline. Keeps what is already stored; delete the folder to start over.")
 {
-    envOption, parallelOption, refreshOption
+    envOption, parallelOption, refreshOption, refreshBlockedOption
 };
 
 snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -166,7 +167,7 @@ snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
     runner.OnStepProgress = runConsole.StepProgress;
     Console.WriteLine($"Details: {logPath}");
     return await runner.RunSeedSnapshotAsync(settlEnv, parseResult.GetValue(parallelOption) ?? 6, parseResult.GetValue(refreshOption),
-        cancellationToken);
+        cancellationToken, refreshBlocked: parseResult.GetValue(refreshBlockedOption));
 });
 
 // === resolution-changes command ===

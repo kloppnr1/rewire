@@ -82,6 +82,28 @@ public sealed class RunSnapshot
         }
     }
 
+    /// <summary>
+    /// Drops the stored reads whose key matches, so the next read goes to the source again. The kind's file
+    /// is rewritten without them (through a temp file and an atomic move). Returns how many were dropped.
+    /// </summary>
+    public int Forget(string kind, Func<string, bool> match)
+    {
+        lock (_gate)
+        {
+            var store = Store(kind);
+            var keys = store.Keys.Where(match).ToList();
+            if (keys.Count == 0)
+                return 0;
+            foreach (var key in keys)
+                store.Remove(key);
+            var path = PathOf(kind);
+            File.WriteAllLines(path + ".tmp",
+                store.Select(pair => JsonSerializer.Serialize(new Entry(pair.Key, pair.Value), Json)));
+            File.Move(path + ".tmp", path, overwrite: true);
+            return keys.Count;
+        }
+    }
+
     /// <summary>The snapshot's answer, or the source's — stored when it has no error.</summary>
     public async Task<(T? Value, string? Error)> GetOrFetchAsync<T>(
         string kind, string key, Func<Task<(T? Value, string? Error)>> fetch)

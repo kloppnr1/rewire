@@ -958,6 +958,43 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Snapshot_RefreshBlocked_ReadsOnlyTheBlockedMeteringPointsAgain()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        var (mp1Guid, mp2Guid) = (Guid.NewGuid(), Guid.NewGuid());
+        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
+        // MP2 has only a 15-minute series in Settl: blocked until Systemate creates the hourly one.
+        var mp2Fixed = false;
+        _mp.GetTimeSeriesResponse = id => [new TimeSeriesInfoDto
+        {
+            Id = Guid.NewGuid(),
+            TimeResolution = id == mp2Guid && !mp2Fixed
+                ? new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" }
+                : new TimeResolutionInfoDto { Length = 1, Unit = "Hour" },
+        }];
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false, offline: true));
+        Assert.Contains(MpId2, File.ReadAllText(Path.Combine(OutputDir, "blocked-missing-hour-series-in-settl.csv")));
+
+        mp2Fixed = true;
+        var mp1Reads = _mp.GetTimeSeriesCalls.Count(g => g == mp1Guid);
+        var logs = new List<string>();
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunSeedSnapshotAsync("test", refreshBlocked: true));
+
+        Assert.Contains(logs, l => l.StartsWith("Refresh blocked: 1 metering point(s) from 1 blocked file(s)", StringComparison.Ordinal));
+        Assert.Equal(mp1Reads, _mp.GetTimeSeriesCalls.Count(g => g == mp1Guid));
+        logs.Clear();
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false, offline: true));
+        Assert.Contains(logs, l => l.StartsWith("  Ready: 2", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, l => l.StartsWith("  Blocked:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunPostAllAsync_WritesItsStatesForProgress()
     {
         var supplyStart = new DateTime(2023, 6, 15);
