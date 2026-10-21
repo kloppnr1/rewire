@@ -1022,7 +1022,7 @@ public class TimeSeriesRunner
             _done = null;
 
             // Xellent point counts for every candidate, in the same window the reports use, stored in the
-            // snapshot. readiness, resolution-changes and offline dry runs then read them back instead of
+            // snapshot. coverage, resolution-changes and offline dry runs then read them back instead of
             // counting in Xellent again.
             _progressWriter?.StartPhase(4, "Xellent counts");
             _log("Counting points in Xellent for each metering point that would be posted...");
@@ -1210,168 +1210,10 @@ public class TimeSeriesRunner
             _snapshot = null;
         }
     }
-    /// <summary>
-    /// Writes one row per metering point a batch run would post: outgoing resolutions and counts,
-    /// the time series Settl has for it, what is missing, and a status — including
-    /// <c>Ready</c> for the ones with nothing wrong. The list of missing time series is what Systemate
-    /// needs; nothing is created here. Windows come from the batch run's own decisions. Metering points
-    /// already posted (done) are in it too; 6##### payers are out. <paramref name="offline"/> reads Settl and Xellent from the
-    /// snapshot. Default file: <c>&lt;output&gt;/readiness-&lt;env&gt;.csv</c>.
-    /// </summary>
-    public async Task<int> RunReadinessAsync(string environment, bool offline = false, string? outputPath = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (_settlMeteringPointClient == null)
-            return Error("Settl API clients not configured. DI registration missing.");
-        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
-        if (offline)
-            _snapshot = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
-        var runLog = _log;
-        try
-        {
-            _log($"=== Readiness — {environment} ===");
-            _log("Working out the window each metering point would be posted with...");
-            _markDoneMode = true;
-            _doneCandidates.Clear();
-            // No _done here: the report covers every metering point the migration touches, the ones
-            // already posted included. Only a real post run leaves done metering points out.
-            _log = _ => { };
-            try
-            {
-                await RunPostAllCoreAsync(environment, dryRun: true, continueOnError: true, skipResolutionChange: false,
-                    skipIfExistingPoints: false, cosFrom: null, cosTo: null, limit: null, windowEndDateOverride: null, skip: null,
-                    cancellationToken);
-            }
-            finally
-            {
-                _log = runLog;
-                _markDoneMode = false;
-                _done = null;
-            }
-
-            _log($"Checking {_doneCandidates.Count} metering point(s)...");
-            var rows = new List<string[]>();
-            var statusCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
-            // Metering points already posted count towards the status totals but get no row: there is
-            // nothing left to decide about them.
-            var doneList = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
-            var doneNotListed = 0;
-            await using var context = BuildXellentContext();
-            var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
-            for (var i = 0; i < candidates.Count; i++)
-            {
-                var candidate = candidates[i];
-                ReportProgress("Readiness", i + 1, candidates.Count);
-
-                var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
-                    candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
-                var valueResolutions = counted.Segments
-                    .Where(s => PointCount(s) > 0)
-                    .Select(OutgoingTimeSeries.Resolution)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(r => r, StringComparer.Ordinal)
-                    .ToList();
-                var points = counted.Segments.Sum(OutgoingTimeSeries.PointCount);
-
-                var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
-                if (seriesError != null)
-                    return Error($"Settl GetTimeSeries failed for MP {candidate.Identification}: {seriesError}");
-                var settlResolutions = (series ?? [])
-                    .Select(t => SettlResolutionName(t.TimeResolution))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(r => r, StringComparer.Ordinal)
-                    .ToList();
-                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
-
-                var reasons = new List<string>();
-                string status;
-                if (counted.SeriesWithoutAgreement.Count > 0)
-                {
-                    status = "SeriesWithoutAgreement";
-                    reasons.Add("XellentValuesOutsideAgreement");
-                }
-                else if (counted.Segments.Any(s => OutgoingTimeSeries.Validate(s) != null))
-                    status = "ConversionError";
-                else if (valueResolutions.Count == 0)
-                {
-                    // No values is only worth chasing when a meter is actually installed. Xellent status
-                    // "Oprettet" means the address has no meter yet, so there is nothing to wait for.
-                    status = await MeterPointStatusAsync(context, candidate.Identification) == MeterPointStatusCreated
-                        ? "NotInstalled"
-                        : "NoValues";
-                }
-                else if (missing.Count > 0)
-                {
-                    status = MissingSeriesStatus(missing);
-                }
-                else if (valueResolutions.Count > 1)
-                {
-                    status = "ResolutionChange";
-                }
-                else
-                {
-                    status = "Ready";
-                }
-
-                // Keep the source mismatch visible even when outgoing conversion resolves it.
-                if (counted.ValuesWithWrongResolution.Count > 0)
-                    reasons.Add("XellentResolutionMismatch");
-                if (counted.ReadingResolutionsInWindow.Count > 1)
-                    reasons.Add("XellentReadsBothResolutions");
-                if (counted.CountedPointsBeforeBoundary is > 0)
-                    reasons.Add("ValuesBeforeDeliveryBoundary");
-
-                statusCounts[status] = statusCounts.GetValueOrDefault(status) + 1;
-                if (doneList.Contains(SnapshotDone, candidate.Identification))
-                {
-                    doneNotListed++;
-                    continue;
-                }
-                rows.Add(
-                [
-                    candidate.Identification,
-                    candidate.Type,
-                    candidate.Id.ToString(),
-                    candidate.Account,
-                    $"{candidate.From:yyyy-MM-dd}",
-                    $"{candidate.To:yyyy-MM-dd}",
-                    string.Join(" + ", valueResolutions),
-                    points.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    string.Join(" + ", settlResolutions),
-                    string.Join(" + ", missing),
-                    status,
-                    string.Join(" | ", reasons),
-                    string.Join(" | ", counted.ValuesWithWrongResolution.Concat(counted.SeriesWithoutAgreement)
-                        .Concat(counted.Segments.Select(OutgoingTimeSeries.Validate).OfType<string>())),
-                ]);
-            }
-
-            var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"readiness-{environment}.csv");
-            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
-                Directory.CreateDirectory(folder);
-            var text = CsvLine(["MeteringPointId", "Type", "SettlId", "Account", "WindowStart", "WindowEnd", "ValueResolutions",
-                    "ValuePoints", "SettlSeries", "MissingSeries", "Status", "Reasons", "Detail"]) +
-                string.Concat(rows.Select(CsvLine));
-            await File.WriteAllTextAsync(path, text, CsvEncoding, cancellationToken);
-
-            _log("");
-            foreach (var (status, count) in statusCounts.OrderByDescending(s => s.Value))
-                _log($"  {count} {status}");
-            _log($"{rows.Count} metering point(s) → {path}" +
-                 (doneNotListed > 0 ? $" ({doneNotListed} already posted, counted above but not listed)" : ""));
-            return 0;
-        }
-        finally
-        {
-            _log = runLog;
-            _snapshot = null;
-        }
-    }
 
     /// <summary>
     /// Prints migration coverage from the environment snapshot. Completed metering points come from
-    /// <c>done.jsonl</c>; the remaining candidates are classified with the same value/series checks as
-    /// <see cref="RunReadinessAsync"/>. This command deliberately uses the snapshot rather than refreshing
+    /// <c>done.jsonl</c>; the remaining candidates are classified by their values and Settl series. This command deliberately uses the snapshot rather than refreshing
     /// it: run <c>snapshot</c> first when a newer view is wanted.
     /// </summary>
     public async Task<int> RunCoverageAsync(

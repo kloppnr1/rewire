@@ -649,8 +649,10 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Readiness_GivesEveryMeteringPointAStatus_AndOpensInExcel()
+    public async Task RunPostAllAsync_DryRun_BlocksMissingSeriesPerResolution_AndListsThemInExcel()
     {
+        // What readiness used to list: the dry run blocks a metering point whose series is missing in
+        // Settl, one CSV per resolution.
         const string mpId3 = "571313100000000003";
         var supplyStart = new DateTime(2026, 1, 1);
         InDeliveryFrom(supplyStart);
@@ -672,80 +674,24 @@ public class PostAllRunnerTests : IDisposable
                 ? new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" }
                 : new TimeResolutionInfoDto { Length = 1, Unit = "Hour" },
         }];
-        var file = Path.Combine(OutputDir, "readiness.csv");
+        var logs = new List<string>();
 
-        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
 
-        var lines = File.ReadAllLines(file);
-        Assert.Equal(4, lines.Length);
-        var status = lines.Skip(1).ToDictionary(l => l.Split(';')[0].Trim('"'), l => l.Split(';')[10].Trim('"'));
-        Assert.Equal("Ready", status[MpId1]);
-        Assert.Equal("MissingHourSeries", status[MpId2]);
-        // MP3 now needs a quarter-hour target for the converted part of its window.
-        Assert.Equal("MissingQuarterSeries", status[mpId3]);
-        // MP2's values are hourly, Settl only has 15-minute.
-        Assert.Contains("\"Hour\";\"24\";\"Quarter\";\"Hour\"", lines.Single(l => l.StartsWith($"\"{MpId2}\"", StringComparison.Ordinal)));
+        Assert.Contains(logs, l => l.StartsWith("  Ready: 1", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 2", StringComparison.Ordinal));
+        var hour = Path.Combine(OutputDir, "blocked-missing-hour-series-in-settl.csv");
+        var quarter = Path.Combine(OutputDir, "blocked-missing-quarter-series-in-settl.csv");
+        Assert.Contains(MpId2, File.ReadAllText(hour));
+        // MP3 needs a quarter-hour target for the converted part of its window.
+        Assert.Contains(mpId3, File.ReadAllText(quarter));
 
         // Opens straight in Excel here: BOM, semicolons, every field quoted, CRLF.
-        var bytes = File.ReadAllBytes(file);
-        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
-        var text = File.ReadAllText(file);
-        Assert.StartsWith("\"MeteringPointId\";\"Type\";\"SettlId\";\"Account\";\"WindowStart\";\"WindowEnd\"", text.TrimStart('﻿'));
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, File.ReadAllBytes(hour).Take(3));
+        var text = File.ReadAllText(hour);
+        Assert.StartsWith("\"MeteringPointIdentification\";\"Type\";\"SettlMeteringPointId\"", text.TrimStart((char)0xFEFF));
         Assert.All(text.TrimEnd((char)10).Split((char)10), line => Assert.EndsWith(((char)13).ToString(), line));
     }
-
-    [Fact]
-    public async Task Readiness_TellsAMeterWithNoReadingsFromAnAddressWithNoMeter()
-    {
-        const string mpId3 = "571313100000000003";
-        var supplyStart = new DateTime(2026, 1, 1);
-        InDeliveryFrom(supplyStart);
-        // Neither has a single value. MP1 has a meter that delivers; MP3 is only created in Xellent —
-        // no meter at the address, so no readings are coming.
-        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
-        _xellent.SeedMeterPointStatus(MpId1, "for", status: 6, start: new DateTime(2023, 1, 1));
-        _xellent.SeedContract("acct3", mpId3, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
-        _xellent.SeedMeterPointStatus(mpId3, "for", status: 5, start: new DateTime(2023, 1, 1));
-        InSettl((MpId1, Guid.NewGuid()), (mpId3, Guid.NewGuid()));
-        _mp.GetTimeSeriesResponse = _ => [];
-        var file = Path.Combine(OutputDir, "readiness.csv");
-
-        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
-
-        var status = File.ReadAllLines(file).Skip(1)
-            .ToDictionary(l => l.Split(';')[0].Trim('"'), l => l.Split(';')[10].Trim('"'));
-        Assert.Equal("NoValues", status[MpId1]);
-        Assert.Equal("NotInstalled", status[mpId3]);
-    }
-
-    [Fact]
-    public async Task Readiness_HourlyValuesXellentReadsAsQuarter_CountAsQuarter_AndNeedOnlyQuarterSeries()
-    {
-        // All the stored values sit after Xellent switched the meter to 15-minute reading. They are
-        // converted on send, so the existing quarter-hour series is sufficient.
-        var supplyStart = new DateTime(2026, 1, 1);
-        InDeliveryFrom(supplyStart);
-        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
-            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
-        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
-        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
-        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
-        InSettl((MpId1, Guid.NewGuid()));
-        _mp.GetTimeSeriesResponse = _ =>
-            [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
-        var file = Path.Combine(OutputDir, "readiness.csv");
-
-        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: file));
-
-        var row = File.ReadAllLines(file)[1].Split(';').Select(f => f.Trim('"')).ToArray();
-        Assert.Equal("Ready", row[10]);
-        Assert.Equal("", row[9]);
-        Assert.Equal("Quarter", row[6]);
-        Assert.Equal("96", row[7]);
-        Assert.Contains("XellentResolutionMismatch", row[11]);
-        Assert.Equal("Parent", row[1]);
-    }
-
     [Fact]
     public async Task MissingHourReport_OmitsFullyConvertedWindow()
     {
@@ -791,9 +737,7 @@ public class PostAllRunnerTests : IDisposable
         Assert.Empty(_mp.AddEipCalls);
         Assert.Contains(logs, l => l.Contains($"Conversion failed for MP {MpId1}") && l.Contains("0.0001"));
         Assert.Contains(logs, l => l.StartsWith($"OUTGOING MP {MpId1}: resolutions=Hour+Quarter, convertedHours="));
-        var readiness = Path.Combine(OutputDir, "readiness-conversion.csv");
-        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", outputPath: readiness));
-        Assert.Contains("ConversionError", File.ReadAllLines(readiness)[1]);
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "blocked-hourly-values-cannot-be-split-into-quarters.csv")));
     }
 
     [Fact]
@@ -832,58 +776,6 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(logs, line => line.Contains("snapshot has no 'xellent-point-counts-v3'"));
         Assert.Equal(calls, (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count));
         Assert.False(File.Exists(Path.Combine(directory, "xellent-point-counts-v3.jsonl")));
-    }
-
-    [Fact]
-    public async Task Readiness_CountsMeteringPointsAlreadyPosted_ButDoesNotListThem()
-    {
-        // MP1 already has points in Settl (done after the seed), MP2 has none.
-        var supplyStart = new DateTime(2023, 6, 15);
-        InDeliveryFrom(supplyStart);
-        var (mp1Guid, mp2Guid, ts1, ts2) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        foreach (var (mp, account) in new[] { (MpId1, Account), (MpId2, "acct2") })
-        {
-            _xellent.SeedHourlyTimeSeries(mp, supplyStart.AddYears(-1), hours: 24);
-            _xellent.SeedContract(account, mp, migratedOn: supplyStart);
-        }
-        InSettl((MpId1, mp1Guid), (MpId2, mp2Guid));
-        _mp.GetTimeSeriesResponse = id => HourTs(id == mp1Guid ? ts1 : ts2);
-        _ts.GetPointsResponse = (ts, _, _) => ts == ts1
-            ? (new SettlPointsSummaryDto { Count = 24 }, null)
-            : (new SettlPointsSummaryDto { Count = 0 }, null);
-        var file = Path.Combine(OutputDir, "readiness.csv");
-        var logs = new List<string>();
-
-        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
-        Assert.Equal(0, await BuildRunner(log: logs.Add).RunReadinessAsync("test", outputPath: file));
-
-        var lines = File.ReadAllLines(file);
-        Assert.Equal(2, lines.Length);
-        Assert.StartsWith($"\"{MpId2}\"", lines[1]);
-        // Both are counted: two Ready, one row.
-        Assert.Contains(logs, l => l == "  2 Ready");
-        Assert.Contains(logs, l => l.Contains("1 already posted, counted above but not listed", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Readiness_Offline_ReadsEverythingFromTheSnapshot()
-    {
-        var supplyStart = new DateTime(2026, 1, 1);
-        InDeliveryFrom(supplyStart);
-        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2025, 12, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
-            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
-        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: supplyStart);
-        InSettl((MpId1, Guid.NewGuid()));
-        var file = Path.Combine(OutputDir, "readiness.csv");
-
-        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
-        var (lists, statuses, series) = (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count);
-
-        Assert.Equal(0, await BuildRunner().RunReadinessAsync("test", offline: true, outputPath: file));
-
-        Assert.Equal(2, File.ReadAllLines(file).Length);
-        Assert.Equal((lists, statuses, series),
-            (_mp.FindMeteringPointsCalls, _mp.GetDeliveryStatusesCalls.Count, _mp.GetTimeSeriesCalls.Count));
     }
 
     [Fact]

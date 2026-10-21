@@ -45,7 +45,7 @@ Reads everything `post --all` needs and stores it in `output/snapshot/<env>/`:
 - **From Settl:** the metering point list, and per metering point its delivery statuses, its current delivery status (only that section — no consumer names or addresses) and its time series.
 - **From Xellent:** child relations (only to know which metering points are children, so they can be left out) and contracts.
 
-Time series points are **not** stored. A batch dry run asks Xellent for counts per dated segment and checks whether hourly values can be split exactly; it reads only the first offending value when validation fails. The seed now counts them for every metering point it would post and keeps the counts (`xellent-point-counts-v3.jsonl`), so `readiness`, `resolution-changes` and offline dry runs read them back instead of counting in Xellent again. That is the slowest part of a seed; a run that only needs the Settl reads is done before it. A live run reads the points fresh. Neither Settl nor Xellent changes while the migration runs, so one snapshot serves many runs.
+Time series points are **not** stored. A batch dry run asks Xellent for counts per dated segment and checks whether hourly values can be split exactly; it reads only the first offending value when validation fails. The seed now counts them for every metering point it would post and keeps the counts (`xellent-point-counts-v3.jsonl`), so `coverage`, `resolution-changes` and offline dry runs read them back instead of counting in Xellent again. That is the slowest part of a seed; a run that only needs the Settl reads is done before it. A live run reads the points fresh. Neither Settl nor Xellent changes while the migration runs, so one snapshot serves many runs.
 
 | Option | Meaning |
 |--------|---------|
@@ -109,42 +109,11 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 
 `output/snapshot/<env>/excluded.csv` is the operator's list of metering points that are never sent. One row per metering point: identification, then the reason; further columns (who, when) are for the operator. Semicolon or comma between fields; a header row is ignored. `post --all` leaves them out before anything else and counts them as Excluded with their reason. `coverage` counts them as "Excluded by hand".
 
-## `readiness`
-
-One row per metering point a `post --all` would send: which resolutions its values are in, which time series Settl has for it, what is missing, and a status. Read-only, and it creates nothing in Settl — the missing series are the list for Systemate.
-
-```bash
-dotnet run --project src/TimeSeries.Cli -- readiness --env production --offline
-```
-
-| Option | Meaning |
-|--------|---------|
-| `--env <name>` | Which environment |
-| `--offline` | Read Settl and Xellent from the snapshot instead of asking them |
-| `--out <file>` | Where to write. Default `output/readiness-<env>.csv` |
-
-Columns: `MeteringPointId;Type;SettlId;Account;WindowStart;WindowEnd;ValueResolutions;ValuePoints;SettlSeries;MissingSeries;Status;Reasons;Detail`. `Type` is Parent or Child.
-
-`ValueResolutions` and `ValuePoints` describe outgoing data after conversion. Each hourly source value within a quarter-hour reading period counts as four 15-minute points. `ConversionError` blocks a metering point whose included values cannot be split exactly within five decimal places. `Reasons` says `XellentResolutionMismatch` when the meter is one of those cases.
-
-Every row gets a status, including the ones with nothing wrong:
-
-| Status | Meaning |
-|--------|---------|
-| `Ready` | Values and Settl series match; it can be sent |
-| `MissingHourSeries` / `MissingQuarterSeries` / `MissingSeries` | Settl has no series for a resolution the values are in |
-| `ResolutionChange` | The values are in both resolutions inside the window |
-| `NoValues` | The meter has no values in the window |
-| `NotInstalled` | No values, and Xellent has no meter at the address yet (meter point status "Oprettet") — nothing to wait for |
-| `SeriesWithoutAgreement` | Xellent has values with no agreement period to put them in |
-
-The run ends with a count per status.
-
 ## `coverage`
 
 Prints one read-only migration summary from the existing environment snapshot. It makes no Settl or
 Xellent calls. Completed metering points come from `done.jsonl`; every remaining migration candidate
-is classified with the same value/series rules as `readiness`.
+is classified by its values and Settl series.
 
 ```bash
 dotnet run --project src/TimeSeries.Cli -- coverage --env production
@@ -156,7 +125,7 @@ The report reconciles every unique metering point in the Settl snapshot to eithe
 or an explicit exclusion reason. Exclusions include children (never in scope), 6##### payers,
 never-delivered and not-migrated points, missing or ambiguous Xellent ownership, delivery-revision safety
 skips, and migration/delivery validation failures. It then shows completed coverage, ready-to-migrate and
-blocked totals, remaining readiness statuses, parent/child totals, and fully completed account totals.
+blocked totals, remaining statuses, parent/child totals, and fully completed account totals.
 Run `snapshot` first to refresh the underlying data; an incomplete snapshot causes the command to fail
 instead of reading live.
 
@@ -237,7 +206,7 @@ In CI/deploy, the pipeline writes the same paths into `appsettings.json` directl
 
 ## Project Structure
 
-- **TimeSeries.Cli** — the CLI (`snapshot`, `coverage`, `readiness`, `resolution-changes`, `post`, `extract`)
+- **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `coverage`, `resolution-changes`, `extract`)
 - **TimeSeries.Migration** — the runner, Xellent extraction and the snapshot store; published as the `NewSettlement.TimeSeriesMigration` package (used by MigrationDashboard)
 - **TimeSeries.Core** — shared DTOs; published as `NewSettlement.TimeSeriesMigration.Core`
 - Xellent and Settl access come from the `NewSettlement.XellentDomain.*` and `NewSettlement.SettlClient.Api` packages

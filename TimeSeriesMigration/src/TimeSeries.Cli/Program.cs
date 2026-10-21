@@ -184,25 +184,6 @@ resolutionChangesCommand.SetAction(async (parseResult, cancellationToken) =>
         cancellationToken);
 });
 
-// === readiness command ===
-var readinessOutOption = new Option<string?>("--out") { Description = "CSV file to write (default: <Output:BaseDirectory>/readiness-<env>.csv)" };
-var readinessOfflineOption = new Option<bool>("--offline") { Description = "Read Settl and Xellent from the environment's snapshot instead of asking them" };
-var readinessCommand = new Command("readiness",
-    "Write a CSV with one row per metering point post --all would send: outgoing resolutions and counts, which time series " +
-    "Settl has, what is missing, and a status (Ready, MissingHourSeries, ConversionError, …). Read-only; creates nothing in Settl.")
-{
-    envOption, readinessOutOption, readinessOfflineOption
-};
-
-readinessCommand.SetAction(async (parseResult, cancellationToken) =>
-{
-    var (connectionString, outputDir, years) = LoadXellentConfig(config);
-    await using var provider = BuildSettlServices(config);
-    var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
-    return await runner.RunReadinessAsync(settlEnv, parseResult.GetValue(readinessOfflineOption), parseResult.GetValue(readinessOutOption),
-        cancellationToken);
-});
-
 // === coverage command ===
 var coverageJsonOption = new Option<bool>("--json") { Description = "Write machine-readable JSON" };
 var coverageByAccountOption = new Option<bool>("--by-account") { Description = "Show coverage grouped by Xellent account" };
@@ -263,7 +244,6 @@ progressCommand.SetAction(async (parseResult, cancellationToken) =>
 var rootCommand = new RootCommand("Time Series Migration CLI — extract from Xellent, post to Settl");
 rootCommand.Subcommands.Add(coverageCommand);
 rootCommand.Subcommands.Add(resolutionChangesCommand);
-rootCommand.Subcommands.Add(readinessCommand);
 rootCommand.Subcommands.Add(extractCommand);
 rootCommand.Subcommands.Add(postCommand);
 rootCommand.Subcommands.Add(snapshotCommand);
