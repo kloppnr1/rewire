@@ -6,22 +6,55 @@ Run everything from the repo root with `dotnet run --project src/TimeSeries.Cli 
 
 ## Migrating time series (the main workflow)
 
+Every parent metering point ends as **done**, **skipped** or **excluded**. On the way it can be **ready** (can be sent now), **blocked** (someone else has to fix something first) or **failed** (a call to Settl went wrong). Child metering points are never in scope. The operator runbook is the "Time series migration process" doc; these are its five steps.
+
 ```bash
-# 1. Read what the run needs from Settl and Xellent once, and keep it on disk
+# Once: read what the runs need from Settl and Xellent and keep it on disk (a few hours in production)
 dotnet run --project src/TimeSeries.Cli -- snapshot --env featuretest
 
-# 2. See what would be posted — from the snapshot, nothing posted
+# 1. Check where every metering point stands — the dry run is the check, nothing is sent
 dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offline --dry-run --force
 
-# 3. Look at the last log line and the skip files (output/*.csv), then post for real, 100 at a time
-dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offline --limit 100
+# 2. Send the ready ones: 100 first, then the rest (done ones are left out by themselves)
+dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offline --force --limit 100
+dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offline --force
 
-# 4. Run the snapshot again to mark what is now in Settl as done; the next post leaves it out
-dotnet run --project src/TimeSeries.Cli -- snapshot --env featuretest
+# 3. Retry the failed ones: the same command again
+dotnet run --project src/TimeSeries.Cli -- post --all --env featuretest --offline --force
 
-# 5. See the states of the last run, and how far a running snapshot is (read-only)
+# 4. Hand each output/blocked-*.csv to whoever fixes that group. When a group is fixed, re-read only
+#    the blocked metering points (minutes, not hours), then run step 1 again
+dotnet run --project src/TimeSeries.Cli -- snapshot --env featuretest --refresh-blocked
+
+# 5. Exclude by hand, with a reason: add a line to output/snapshot/<env>/excluded.csv
+
+# Any time: the states of the last run (also while it runs), and how far a running snapshot is
 dotnet run --project src/TimeSeries.Cli -- progress --env featuretest
 ```
+
+The migration is finished when step 1 shows ready 0, blocked 0 and failed 0.
+
+### The states summary
+
+`post --all` ends with one line per state and the count per reason under it:
+
+```
+States (dry run: ready = would be posted): done 440 · ready 166 · skipped 1,556 · excluded 0 · blocked 61 · failed 0
+  Done: 440
+         440  already in Settl
+  Ready: 166
+         166  would be posted
+  Skipped: 1,556
+         …
+  Blocked: 61
+          47  missing Hour series in Settl  → blocked-missing-hour-series-in-settl.csv
+           …
+```
+
+- While it runs, the console shows one line that updates in place (`1,200/1,766 checked · done 440 · ready 12 · …`). Every line per metering point goes to `output/post-<env>-<time>.log`; its path is the first line on screen.
+- The same states are written to `output/snapshot/<env>/states.json` every 5 seconds and at the end, and `progress` shows them.
+- **Blocked** never stops the run and never makes the exit code non-zero. Each blocked reason gets its own `output/blocked-<reason>.csv` (metering point, type, Settl id, customer number, reason, detail) to hand over. The files are written again by every `post --all`.
+- **Failed** means only that a call to Settl went wrong. Without `--force` the run stops at the first one; with it the run goes on. Either way the exit code is non-zero.
 
 ### Done marks
 
@@ -74,16 +107,17 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 | `--env <name>` | `featuretest` (default), `production`, `production-hev`, `production-vhel` |
 | `--dry-run` | Resolves everything but posts nothing |
 | `--offline` | Read Settl and Xellent from the snapshot instead of asking them again. Anything missing is read live and added. Points are read fresh; posts always go to Settl |
-| `--force` | Keep going past a failing metering point (the run still exits non-zero). Without it the run stops at the first failure |
+| `--force` | Keep going past a failed metering point (the run still exits non-zero). Without it the run stops at the first failure. Blocked ones never stop the run |
 | `--cos-from` / `--cos-to <yyyy-MM-dd>` | Only metering points whose delivery in Settl starts in this range (Danish dates, both included) |
 | `--skip <N>` / `--limit <N>` | Pass over the first N metering points in range, then stop after N more, in identification order. Metering points already done don't count. With done marks, `--limit` alone is usually enough |
 | `--skip-if-existing-points` | Skip a metering point if Settl already has points in its window |
 | `--skip-resolution-change` | Skip a metering point that changes resolution in the window (typically Hour → Quarter): in its series, or in what Xellent says it was read at |
 
 What happens to each metering point:
-- **Posted:** points to Settl, then an externally invoiced period with `BillableTypes=["Contracts", "ExtraInvoiceLines", "MarketPriceLists", "NationalContracts", "PaymentFee", "MovingFee"]`.
-- **Failed** (Settl marks it in delivery, but Xellent shows no clean migration, or a safety check fails): logged as `ERROR`.
-- **Skipped** to a CSV file (below). Metering points Settl shows as not in delivery count as "never delivered" if they have no delivery start, and as "not migrated" if Xellent shows no migration.
+- **Done:** points to Settl, then an externally invoiced period with `BillableTypes=["Contracts", "ExtraInvoiceLines", "MarketPriceLists", "NationalContracts", "PaymentFee", "MovingFee"]`. A dry run counts these as **ready**.
+- **Skipped** to a CSV file (below): a rule says it is not migrated, for example never delivered, no migration in Xellent at COS − 1, or no meter installed.
+- **Blocked** to a `blocked-*.csv` file: something has to be fixed first, for example a missing series in Settl or unclear delivery dates.
+- **Failed:** a call to Settl went wrong; logged as `ERROR`.
 
 The summary starts with the counts, for example: `Run completed: 2219 metering points in Settl, 2148 processed, 601 posted, 71 never delivered, 1426 not migrated, …, 168 children skipped.` Failures skipped with `--force` follow on their own line. With `--offline` a line after it says how many reads came from the snapshot and how many were read live.
 
@@ -95,10 +129,10 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 
 | File | Reason |
 |------|--------|
-| `skip-not-installed.csv` | No values in the window and Xellent status 5 "Oprettet": no meter installed or connected. Nothing to post; not counted as posted. A metering point with a meter but no values fails instead |
+| `skip-not-installed.csv` | No values in the window and Xellent status 5 "Oprettet": no meter installed or connected. Nothing to post; not counted as posted. A metering point with a meter but no values is blocked instead |
 | `skip-payer-6-series.csv` | The metering point's current payer in Settl is in the 6##### series (six digits starting with 6); those are not migrated. Left out before `--skip` / `--limit` count |
 | `skip-missing-in-xellent.csv` | Nobody held the metering point in Xellent the day before delivery |
-| `skip-not-migrated.csv` | Not in delivery in Settl, and no migration in Xellent |
+| `skip-not-migrated.csv` | No migration in Xellent at COS − 1: not in delivery in Settl and no migration, or a contract not closed as a migration |
 | `ambiguous-revisions.csv` | More than one `InDelivery=true` delivery status |
 | `skip-delivery-boundary-unresolved.csv` / `-ambiguous.csv` / `-invalid.csv` | The not-in-delivery period before delivery can't be pinned down |
 | `skip-no-points-after-boundary.csv` | Every point falls before the delivery boundary |
@@ -109,6 +143,14 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 ### Excluded by hand
 
 `output/snapshot/<env>/excluded.csv` is the operator's list of metering points that are never sent. One row per metering point: identification, then the reason; further columns (who, when) are for the operator. Semicolon or comma between fields; a header row is ignored. `post --all` leaves them out before anything else and counts them as Excluded with their reason.
+
+## `progress`
+
+Read-only. Shows how far a (running) snapshot is — phase, step, done marks, what remains — and the states of the last `post --all` run, live while it runs. Safe to run from another session. `--watch` repaints every `--refresh` seconds (default 10).
+
+```bash
+dotnet run --project src/TimeSeries.Cli -- progress --env production --watch
+```
 
 ## `resolution-changes`
 
