@@ -58,7 +58,9 @@ internal sealed record ConsumerVersionEvidence(List<ConsumerVersion> Versions, L
             foreach (var date in dates)
             {
                 ct.ThrowIfCancellationRequested();
-                if (date == default) { errors.Add("Consumer history contains an invalid start."); continue; }
+                // Settl dates its "from the beginning" placeholder version 0001-01-01 (seen in production, before
+                // the first real customer). It is not a customer version, so it is ignored rather than an error.
+                if (date == default) continue;
                 if (versions.Any(v => v.Point?.Consumer?.Start is { } existing && ConsumerDeliveryEvidence.Utc(existing).UtcDateTime == date)) continue;
                 var (point, error) = await client.GetByIdV4Async(id, date, ct);
                 versionRead();

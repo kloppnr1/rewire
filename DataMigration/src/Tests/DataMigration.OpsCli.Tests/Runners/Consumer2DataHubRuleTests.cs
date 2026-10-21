@@ -118,6 +118,20 @@ public class Consumer2DataHubRuleTests
         Assert.Contains($"{identification} ({id}): ", progress.ToString());
     }
 
+    [Fact]
+    public async Task Settls_placeholder_version_from_year_1_is_ignored()
+    {
+        var id = Guid.NewGuid();
+        var client = Fictitious2(id);
+        client.ConsumerHistories[id] = (new() { ConsumerDates = [default, new DateTime(2026, 1, 1)] }, null);
+        var logs = new List<string>();
+        Assert.Equal(0, await new FixConsumer2DuplicateRunner(client, logs.Add) { ProgressOutput = TextWriter.Null }
+            .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true, ClearFictitiousCpr2 = true }));
+        Assert.DoesNotContain(logs, line => line.Contains("skipped"));
+        Assert.Single(logs, line => line.Contains("would clear"));
+        Assert.DoesNotContain(client.ConsumerRequests, request => request.Date == default(DateTime));
+    }
+
     private static StubFixConsumer2DuplicateMeteringPointClient Fictitious2(Guid id)
     {
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
