@@ -511,6 +511,9 @@ Without `--include-history`, the existing delivery-start CSV stays unchanged.
   period, select its newest effective Consumer version, then assess the duplicate.
   The first delivery period is excluded. A clean newest version never falls back to
   an older duplicate. Pattern match and AnyDuplicateConsumer2 do not select fixes.
+- Only the Consumer version in effect today is written, for every rule and option.
+  A selected older or future version is left alone and counted in the summary as
+  "Selected but not current (left alone)". The report still shows all versions.
 - Each selected Consumer version is updated once, even when selected by several
   periods. No report file is read. Incomplete evidence is reported and the MP skipped.
 - Full scans include all delivery states, including false or missing `InDelivery`,

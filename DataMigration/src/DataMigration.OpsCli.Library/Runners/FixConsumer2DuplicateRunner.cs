@@ -100,6 +100,7 @@ public class FixConsumer2DuplicateRunner
         var matched = 0;
         var fixedCount = 0;
         var failedWrites = 0;
+        var notCurrent = 0;
         var checkedCount = 0;
         var versionReads = 0;
         string Status() => $"Checked: {Volatile.Read(ref checkedCount):N0} / {candidateIds.Count:N0}   Matched: {matched:N0}   Fixed versions: {fixedCount:N0}   Failed writes: {failedWrites:N0}   Errors: {errors:N0}   Versions read: {Volatile.Read(ref versionReads):N0}";
@@ -146,6 +147,9 @@ public class FixConsumer2DuplicateRunner
                         ? decisions.Where(d => d.FictitiousCpr2 == true && d.Duplicate != true).Select(d => (Version: d.Correlation.Latest!, ClearCpr: true))
                         : [])
                     .DistinctBy(t => ConsumerDeliveryEvidence.Utc(t.Version.Start!.Value)).ToArray();
+                // Only the version in effect today may be written; older and future versions are left alone.
+                notCurrent += targets.Count(t => !t.Version.IsCurrent);
+                targets = targets.Where(t => t.Version.IsCurrent).ToArray();
                 if (targets.Length == 0) continue;
                 matched++;
                 foreach (var (target, clearCpr) in targets)
@@ -163,7 +167,8 @@ public class FixConsumer2DuplicateRunner
                     var fresh = await progress.ReadAsync(() => Read(result.Id), "rechecking Consumer selection", Status, cancellationToken);
                     var stillSelected = fresh.Versions.Errors.Count == 0 && fresh.Delivery.Errors.Count == 0
                         && ConsumerDuplicateSelection.For(fresh.Delivery, fresh.Versions).Any(d => (clearCpr ? d.FictitiousCpr2 == true : d.Duplicate == true)
-                            && ConsumerDeliveryEvidence.Utc(d.Correlation.Latest!.Start!.Value).UtcDateTime == start);
+                            && d.Correlation.Latest!.IsCurrent
+                            && ConsumerDeliveryEvidence.Utc(d.Correlation.Latest.Start!.Value).UtcDateTime == start);
                     if (!stillSelected)
                     {
                         errors++;
@@ -194,6 +199,7 @@ public class FixConsumer2DuplicateRunner
         Log($"  Checked:  {checkedCount}");
         Log($"  Matched:  {matched}");
         Log($"  Fixed versions: {fixedCount}");
+        Log($"  Selected but not current (left alone): {notCurrent}");
         if (!options.DryRun) Log($"  Failed writes: {failedWrites}");
         Log($"  {(options.DryRun ? "Read errors" : "Errors")}: {errors}");
         if (options.DryRun) Log("  (dry-run - no writes)");

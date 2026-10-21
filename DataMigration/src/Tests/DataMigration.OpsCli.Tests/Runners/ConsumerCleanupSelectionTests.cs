@@ -8,14 +8,15 @@ namespace DataMigration.OpsCli.Tests.Runners;
 public class ConsumerCleanupSelectionTests
 {
     [Theory]
-    [InlineData("duplicate", 1)]
-    [InlineData("future-selected", 1)]
-    [InlineData("latest-clean", 0)]
-    [InlineData("first-only", 0)]
-    [InlineData("repeated-version", 1)]
-    [InlineData("inactive", 1)]
-    [InlineData("nonmatching-pattern", 1)]
-    public async Task Preview_targets_equal_distinct_report_yes_versions(string scenario, int expected)
+    // The report shows every Yes version; the fix only writes the one in effect today.
+    [InlineData("duplicate", 1, 1)]
+    [InlineData("future-selected", 1, 0)]
+    [InlineData("latest-clean", 0, 0)]
+    [InlineData("first-only", 0, 0)]
+    [InlineData("repeated-version", 1, 1)]
+    [InlineData("inactive", 1, 1)]
+    [InlineData("nonmatching-pattern", 1, 1)]
+    public async Task Preview_targets_only_the_current_report_yes_version(string scenario, int expected, int expectedPreviews)
     {
         var id = Guid.NewGuid();
         var client = new StubFixConsumer2DuplicateMeteringPointClient();
@@ -54,8 +55,9 @@ public class ConsumerCleanupSelectionTests
             .RunAsync(new() { MeteringPointIds = [id.ToString()], DryRun = true }));
         var previews = logs.Where(line => line.Contains("would blank")).ToArray();
         Assert.Equal(expected, reportDates.Length);
-        Assert.Equal(reportDates.Length, previews.Length);
-        foreach (var date in reportDates) Assert.Single(previews, line => line.Contains(date));
+        Assert.Equal(expectedPreviews, previews.Length);
+        Assert.Contains($"  Selected but not current (left alone): {expected - expectedPreviews}", logs);
+        foreach (var date in reportDates.Take(expectedPreviews)) Assert.Single(previews, line => line.Contains(date));
         Assert.Equal(0, client.BlankCalls);
     }
 

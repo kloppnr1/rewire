@@ -10,6 +10,8 @@ internal sealed record ConsumerVersion(MeteringPointV4Dto? Point, DateTime? Requ
 {
     public DateTime? Start => Point?.Consumer?.Start ?? RequestedDate;
     public DateTime? End => Point?.Consumer?.End;
+    /// <summary>The version in effect today: Settl's undated read. Only this version may be written.</summary>
+    public bool IsCurrent => RequestedDate is null && Point is not null;
     /// <summary>Whether consumer 2 has a national id on this version, from Settl's separate national-id read.
     /// Null when it was not read (only read when <see cref="FixConsumer2DuplicateRunner.NeedsNationalIdCheck"/>).
     /// The value itself is never kept.</summary>
