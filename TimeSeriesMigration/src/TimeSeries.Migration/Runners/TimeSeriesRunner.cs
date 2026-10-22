@@ -859,7 +859,7 @@ public class TimeSeriesRunner
                         mpGuid, eipRequest, cancellationToken);
                     if (!eipSuccess)
                         return ($"    externallyInvoicedPeriod POST failed: {eipError}", points, false);
-                    _log("    + externally invoiced period added (Contracts)");
+                    _log($"    + externally invoiced period added ({string.Join(", ", eipRequest.Periods[0].BillableTypes)})");
                 }
 
                 points += pointCount;
