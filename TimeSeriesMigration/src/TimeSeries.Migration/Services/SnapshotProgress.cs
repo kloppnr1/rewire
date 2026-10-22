@@ -233,7 +233,7 @@ public static class SnapshotProgressReader
             return new SnapshotProgressReport(directory, false, null, 0, null, null, null);
 
         var state = ReadState(Path.Combine(directory, SnapshotProgressWriter.FileName));
-        var doneMarks = CountKeys(Path.Combine(directory, DoneFile));
+        var doneMarks = CountDoneMarks(directory);
         var (total, totalAt) = ReadDoneSummary(Path.Combine(directory, DoneSummaryFile));
 
         DateTimeOffset? lastWrite = null;
@@ -262,7 +262,30 @@ public static class SnapshotProgressReader
     }
 
     /// <summary>Distinct keys in a snapshot JSON-lines file; a later line for the same key is the same key.</summary>
-    internal static int CountKeys(string path)
+    internal static int CountKeys(string path) => Keys(path).Count;
+
+    // The done metering points: the ledger's done marks, plus the ones still in the old done.jsonl that no run
+    // has moved into the ledger yet. Read only, so nothing is moved here.
+    private static int CountDoneMarks(string directory)
+    {
+        var done = Keys(Path.Combine(directory, DoneFile));
+        foreach (var line in ReadLines(Path.Combine(directory, PostLedger.FileName)))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("kind", out var kind) && kind.GetString() == PostLedger.MeteringPoint
+                    && root.TryGetProperty("status", out var status) && status.GetString() == PostLedger.Done
+                    && root.TryGetProperty("meteringPoint", out var mp) && mp.GetString() is { } id)
+                    done.Add(id);
+            }
+            catch (JsonException) { /* torn line */ }
+        }
+        return done.Count;
+    }
+
+    private static HashSet<string> Keys(string path)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var line in ReadLines(path))
@@ -271,7 +294,7 @@ public static class SnapshotProgressReader
             if (key != null)
                 keys.Add(key);
         }
-        return keys.Count;
+        return keys;
     }
 
     private static (int? Total, DateTimeOffset? At) ReadDoneSummary(string path)

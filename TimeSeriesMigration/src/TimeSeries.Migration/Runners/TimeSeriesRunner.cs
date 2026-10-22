@@ -1152,7 +1152,8 @@ public class TimeSeriesRunner
             _markDoneMode = true;
             _doneCandidates.Clear();
             _done = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
-            var doneBefore = meteringPoints.Count(m => _done.Contains(SnapshotDone, m.Identification));
+            var ledger = Ledger(environment);
+            var doneBefore = meteringPoints.Count(m => ledger.IsDone(m.Identification));
             _log = _ => { };
             try
             {
@@ -1165,11 +1166,11 @@ public class TimeSeriesRunner
                 _log = runLog;
                 _markDoneMode = false;
             }
-            var (doneMarked, doneFailures) = await CheckDoneCandidatesAsync(parallelism, cancellationToken);
+            var (doneMarked, doneFailures) = await CheckDoneCandidatesAsync(ledger, parallelism, cancellationToken);
             foreach (var failure in doneFailures)
                 failures.Add(failure);
             _log($"  {_doneCandidates.Count} metering point(s) would be posted; {doneMarked} of them already have points in Settl — marked done " +
-                 $"({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
+                 $"({ledger.FilePath})");
             var doneTotal = doneBefore + doneMarked;
             var stillToPost = _doneCandidates.Count - doneMarked;
             var migrationTotal = doneTotal + stillToPost;
@@ -1266,7 +1267,7 @@ public class TimeSeriesRunner
             var unclearDelivery = new List<ResolutionRow>();
             // Metering points already posted count towards the totals but are not listed: there is
             // nothing left to do about them.
-            var doneList = new RunSnapshot(SnapshotDirectory(environment), reuse: true);
+            var doneList = Ledger(environment);
             var doneNotListed = 0;
             var needed = 0;
             var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
@@ -1327,7 +1328,7 @@ public class TimeSeriesRunner
                 // posted with rests on the current delivery status. It belongs on the list, but not as
                 // something settled: it goes to its own file instead.
                 needed++;
-                if (doneList.Contains(SnapshotDone, candidate.Identification))
+                if (doneList.IsDone(candidate.Identification))
                 {
                     doneNotListed++;
                     continue;
@@ -1394,7 +1395,9 @@ public class TimeSeriesRunner
         _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
         _log($"=== Requarter — {environment} ===");
 
-        var done = new RunSnapshot(SnapshotDirectory(environment), reuse: true).All<DoneEntry>(SnapshotDone)
+        var done = Ledger(environment).DoneMarks()
+            .Select(d => (Key: d.MeteringPoint, Value: new DoneEntry(d.SettlId ?? Guid.Empty, d.Account ?? "", d.Revision ?? default,
+                d.From, d.To, d.Points ?? 0, d.At)))
             .OrderBy(d => d.Key, StringComparer.Ordinal).ToList();
         Dictionary<string, List<TimeSeriesExtractionService.ReadingPeriod>> readingPeriods;
         await using (var context = BuildXellentContext())
@@ -1697,13 +1700,14 @@ public class TimeSeriesRunner
         var totalAlreadyDone = new Tally();
         if (_done != null)
         {
-            foreach (var mp in settlMeteringPoints.Where(m => _done.Contains(SnapshotDone, m.Identification)))
+            var ledger = Ledger(environment);
+            foreach (var mp in settlMeteringPoints.Where(m => ledger.IsDone(m.Identification)))
                 totalAlreadyDone.Add(mp.ParentIdentification != null);
             if (totalAlreadyDone.Total > 0)
             {
-                settlMeteringPoints = settlMeteringPoints.Where(m => !_done.Contains(SnapshotDone, m.Identification)).ToList();
+                settlMeteringPoints = settlMeteringPoints.Where(m => !ledger.IsDone(m.Identification)).ToList();
                 CountState("Done", "already in Settl", totalAlreadyDone.Total);
-                _log($"Already done: {totalAlreadyDone.Total} metering point(s) already in Settl (snapshot check or an earlier post), left out ({Path.Combine(_done.DirectoryPath, SnapshotDone + ".jsonl")})");
+                _log($"Already done: {totalAlreadyDone.Total} metering point(s) already in Settl (snapshot check or an earlier post), left out ({ledger.FilePath})");
             }
         }
 
@@ -1727,7 +1731,7 @@ public class TimeSeriesRunner
         if (_done != null && !_markDoneMode
             && _done.TryGet<DoneSummary>(SnapshotDoneSummary, "last", out var lastSummary) && lastSummary is { Total: > 0 })
         {
-            var doneNow = _done.CountKeys(SnapshotDone);
+            var doneNow = Ledger(environment).DoneMarks().Count;
             _log($"Migration: {doneNow} of {lastSummary.Total} metering points done ({doneNow * 100 / lastSummary.Total}%) " +
                  $"— total from the snapshot of {lastSummary.CheckedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
         }
@@ -2061,9 +2065,9 @@ public class TimeSeriesRunner
             var rc = await RunPostCoreAsync(postOptions, cancellationToken);
 
             // A live post that put points in Settl marks the metering point done, like the seed's check would.
-            if (rc == 0 && !dryRun && postOptions.PointsPosted > 0)
-                _done?.Put(SnapshotDone, identification, new DoneEntry(mpGuid, accountNumber, revisionResolution.Revision,
-                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), postOptions.PointsPosted, DateTimeOffset.UtcNow));
+            if (rc == 0 && !dryRun && postOptions.PointsPosted > 0 && _done != null)
+                Ledger(environment).MarkDone(identification, mpGuid, accountNumber, revisionResolution.Revision,
+                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), postOptions.PointsPosted);
 
             if (rc != 0)
             {
@@ -2091,9 +2095,9 @@ public class TimeSeriesRunner
             // Everything for this metering point is in the ledger: sent before, so done.
             if (postOptions.AlreadyInLedger)
             {
-                if (!dryRun)
-                    _done?.Put(SnapshotDone, identification, new DoneEntry(mpGuid, accountNumber, revisionResolution.Revision,
-                        DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), 0, DateTimeOffset.UtcNow));
+                if (!dryRun && _done != null)
+                    Ledger(environment).MarkDone(identification, mpGuid, accountNumber, revisionResolution.Revision,
+                        DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), 0);
                 CountState("Done", "already in the ledger");
                 continue;
             }
@@ -2425,7 +2429,8 @@ public class TimeSeriesRunner
     /// with points settles it. Every answer is kept in the snapshot, so a later done check reads it
     /// instead of asking again (the user accepts it can go stale).
     /// </summary>
-    private async Task<(int Marked, List<string> Failures)> CheckDoneCandidatesAsync(int parallelism, CancellationToken cancellationToken)
+    private async Task<(int Marked, List<string> Failures)> CheckDoneCandidatesAsync(PostLedger ledger, int parallelism,
+        CancellationToken cancellationToken)
     {
         var marked = 0;
         var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -2440,8 +2445,8 @@ public class TimeSeriesRunner
                 else if (existing is { } count)
                 {
                     Interlocked.Increment(ref marked);
-                    _done!.Put(SnapshotDone, candidate.Identification, new DoneEntry(candidate.Id, candidate.Account, candidate.Revision,
-                        candidate.From, candidate.To, count, DateTimeOffset.UtcNow));
+                    ledger.MarkDone(candidate.Identification, candidate.Id, candidate.Account, candidate.Revision,
+                        candidate.From, candidate.To, count);
                 }
                 ReportProgress("Done check, asking Settl", Interlocked.Increment(ref checkedCount), _doneCandidates.Count);
             });

@@ -398,8 +398,7 @@ public class PostAllRunnerTests : IDisposable
         var logs = new List<string>();
 
         Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test"));
-        var doneFile = Path.Combine(OutputDir, "snapshot", "test", "done.jsonl");
-        var doneLines = File.ReadAllLines(doneFile);
+        var doneLines = DoneMarkLines();
         Assert.Single(doneLines);
         Assert.Contains(MpId1, doneLines[0]);
         // The done check writes no skip files, and stops at MP1's first year with points: one call for
@@ -417,7 +416,72 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(mp2Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
         Assert.Contains(logs, l => l.StartsWith("Already done: 1 metering point(s)", StringComparison.Ordinal));
         Assert.DoesNotContain(logs, l => l.Contains($"MP {MpId1} ---", StringComparison.Ordinal));
-        Assert.Equal(2, File.ReadAllLines(doneFile).Length);
+        Assert.Equal(2, DoneMarkLines().Length);
+        Assert.False(File.Exists(Path.Combine(OutputDir, "snapshot", "test", "done.jsonl")));
+    }
+
+    // The done marks are the ledger's "meteringPoint" lines.
+    private string[] DoneMarkLines()
+    {
+        var ledger = Path.Combine(OutputDir, "snapshot", "test", TimeSeries.Cli.Services.PostLedger.FileName);
+        return File.Exists(ledger)
+            ? File.ReadAllLines(ledger).Where(l => l.Contains("\"kind\":\"meteringPoint\"", StringComparison.Ordinal)).ToArray()
+            : [];
+    }
+
+    [Fact]
+    public async Task Done_MarksInTheOldDoneFileMoveIntoTheLedgerOnce()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        string[] done = [MpId1, MpId2, "571313100000000003"];
+        foreach (var mp in done)
+        {
+            _xellent.SeedHourlyTimeSeries(mp, supplyStart.AddYears(-1), hours: 24);
+            _xellent.SeedContract(Account, mp, migratedOn: supplyStart);
+        }
+        InSettl(done.Select(mp => (mp, Guid.NewGuid())).ToArray());
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        var folder = Path.Combine(OutputDir, "snapshot", "test");
+        var old = new TimeSeries.Cli.Services.RunSnapshot(folder, reuse: true);
+        foreach (var mp in done)
+            old.Put("done", mp, new TimeSeriesRunner.DoneEntry(Guid.NewGuid(), Account, DanishMidnight(supplyStart),
+                DateOnly.FromDateTime(supplyStart.AddYears(-3)), DateOnly.FromDateTime(supplyStart), 24, DateTimeOffset.UtcNow));
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Equal(3, DoneMarkLines().Length);
+        Assert.False(File.Exists(Path.Combine(folder, "done.jsonl")));
+        Assert.True(File.Exists(Path.Combine(folder, "done.jsonl.moved")));
+        Assert.Contains(logs, l => l.StartsWith("Already done: 3 metering point(s)", StringComparison.Ordinal));
+        Assert.Empty(_ts.GetPointsCalls);
+
+        // A second run copies nothing again.
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+        Assert.Equal(3, DoneMarkLines().Length);
+    }
+
+    [Fact]
+    public async Task Done_ALivePostWritesTheValuesThePeriodAndTheDoneMark_AndTheNextRunLeavesItOut()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+        var ledger = File.ReadAllLines(Path.Combine(OutputDir, "snapshot", "test", TimeSeries.Cli.Services.PostLedger.FileName));
+        Assert.Contains(ledger, l => l.Contains("\"kind\":\"points\"") && l.Contains("\"status\":\"done\""));
+        Assert.Contains(ledger, l => l.Contains("\"kind\":\"period\"") && l.Contains("\"status\":\"done\""));
+        Assert.Contains(MpId1, Assert.Single(DoneMarkLines()));
+
+        var logs = new List<string>();
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+        Assert.Single(_ts.PostCalls);
+        Assert.Contains(logs, l => l.StartsWith("Already done: 1 metering point(s)", StringComparison.Ordinal));
     }
     [Fact]
     public async Task Snapshot_Refresh_ReadsEverythingAgain_AndKeepsDoneMarks()
@@ -439,7 +503,7 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test", refresh: true));
         Assert.True(_mp.FindMeteringPointsCalls > lists);
         Assert.True(_mp.GetDeliveryStatusesCalls.Count > statuses);
-        Assert.Single(File.ReadAllLines(Path.Combine(OutputDir, "snapshot", "test", "done.jsonl")));
+        Assert.Single(DoneMarkLines());
     }
 
     [Theory]

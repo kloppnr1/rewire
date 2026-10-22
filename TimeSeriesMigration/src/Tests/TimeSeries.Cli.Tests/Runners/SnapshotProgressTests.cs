@@ -97,6 +97,18 @@ public class SnapshotProgressTests : IDisposable
     }
 
     [Fact]
+    public void Reader_counts_the_ledgers_done_marks_with_the_ones_not_moved_yet()
+    {
+        File.WriteAllText(Path.Combine(_dir, "ledger.jsonl"),
+            "{\"meteringPoint\":\"571\",\"kind\":\"meteringPoint\",\"status\":\"done\"}\n" +
+            "{\"meteringPoint\":\"572\",\"kind\":\"points\",\"status\":\"done\"}\n" +
+            "{\"meteringPoint\":\"573\",\"kind\":\"meteringPoint\",\"status\":\"done\"}\n");
+        File.WriteAllText(Path.Combine(_dir, "done.jsonl"), Line("571", new { count = 1 }) + Line("574", new { count = 1 }));
+
+        Assert.Equal(3, SnapshotProgressReader.Read(_dir).DoneMarks);
+    }
+
+    [Fact]
     public void Reader_takes_the_total_from_the_last_done_summary()
     {
         File.WriteAllText(Path.Combine(_dir, "done-summary.jsonl"),

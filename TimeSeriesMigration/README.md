@@ -58,13 +58,15 @@ States (dry run: ready = would be posted): done 440 · ready 166 · skipped 1,55
 
 ### Done marks
 
-The last step of `snapshot` is a done check. For every metering point a `post --all` would post, it works out the same window the post would use. It then asks Settl whether any of the metering point's series already has points in that window (the `--skip-if-existing-points` check). Those metering points are written to `output/snapshot/<env>/done.jsonl` (Settl ID, account, revision, window, existing point count, time).
+Done marks live in the ledger (below), as lines with kind `meteringPoint`. They used to be in `done.jsonl`. The first run that finds that file copies its marks into the ledger and renames it to `done.jsonl.moved`.
+
+The last step of `snapshot` is a done check. For every metering point a `post --all` would post, it works out the same window the post would use. It then asks Settl whether any of the metering point's series already has points in that window (the `--skip-if-existing-points` check). Those metering points get a done mark (Settl ID, account, revision, window, existing point count, time).
 
 The check runs `--parallel` at a time. Settl answers one year at a time, and the first year with points settles it. Every answer is kept in the snapshot (`settl-points-summary.jsonl`), so the next seed reads it instead of asking again. Those answers can go stale; that is accepted.
 
 A live `post --all` also marks each metering point it posts as done.
 
-Every `post --all` — live or dry run, online or offline — leaves done metering points out from the start, and they don't count toward `--skip` / `--limit`. The log says how many (`Already done: …`). To post a metering point again, remove its line from `done.jsonl`.
+Every `post --all` — live or dry run, online or offline — leaves done metering points out from the start, and they don't count toward `--skip` / `--limit`. The log says how many (`Already done: …`). To post a metering point again, remove its lines from `ledger.jsonl`.
 
 ### The ledger
 
@@ -200,7 +202,7 @@ dotnet run --project src/TimeSeries.Cli -- requarter --env production
 
 | Option | Meaning |
 |--------|---------|
-| `--env <name>` | Which environment; the done marks come from `output/snapshot/<env>/done.jsonl` |
+| `--env <name>` | Which environment; the done marks come from `output/snapshot/<env>/ledger.jsonl` |
 | `--parallel <N>` | How many metering points to ask Settl about at a time (default 6) |
 | `--out <file>` | Where to write. Default `output/requarter-<env>.csv` |
 
