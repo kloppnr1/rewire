@@ -37,7 +37,7 @@ var allOption = new Option<bool>("--all") { Description = "Post every El meterin
 var cosFromOption = new Option<DateOnly?>("--cos-from") { Description = "With --all: only metering points whose delivery in Settl starts on or after this date (yyyy-MM-dd)" };
 var cosToOption = new Option<DateOnly?>("--cos-to") { Description = "With --all: only metering points whose delivery in Settl starts on or before this date (yyyy-MM-dd)" };
 var skipOption = new Option<int?>("--skip") { Description = "With --all: pass over the first N metering points in range (by identification); combine with --limit to run in batches" };
-var limitOption = new Option<int?>("--limit") { Description = "With --all: stop after N metering points in range (by identification), counted after --skip" };
+var limitOption = new Option<int?>("--limit") { Description = "With --all: stop once N metering points are sent (ready, in a dry run); skipped, excluded, blocked and done ones do not count" };
 var offlineOption = new Option<bool>("--offline") { Description = "With --all: read Settl and Xellent from the environment's snapshot (made by the snapshot command) instead of asking them again. Missing entries are read live and added. Time series points are always read fresh; posts always go to Settl." };
 
 // Snapshot-specific

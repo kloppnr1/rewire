@@ -109,7 +109,8 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 | `--offline` | Read Settl and Xellent from the snapshot instead of asking them again. Anything missing is read live and added. Points are read fresh; posts always go to Settl |
 | `--force` | Keep going past a failed metering point (the run still exits non-zero). Without it the run stops at the first failure. Blocked ones never stop the run |
 | `--cos-from` / `--cos-to <yyyy-MM-dd>` | Only metering points whose delivery in Settl starts in this range (Danish dates, both included) |
-| `--skip <N>` / `--limit <N>` | Pass over the first N metering points in range, then stop after N more, in identification order. Metering points already done don't count. With done marks, `--limit` alone is usually enough |
+| `--skip <N>` | Pass over the first N metering points in range, in identification order. Metering points already done don't count |
+| `--limit <N>` | Stop once N metering points are sent (ready, in a dry run). Skipped, excluded, blocked and done ones don't count. With done marks, `--limit` alone is usually enough |
 | `--skip-if-existing-points` | Skip a metering point if Settl already has points in its window |
 | `--skip-resolution-change` | Skip a metering point that changes resolution in the window (typically Hour → Quarter): in its series, or in what Xellent says it was read at |
 

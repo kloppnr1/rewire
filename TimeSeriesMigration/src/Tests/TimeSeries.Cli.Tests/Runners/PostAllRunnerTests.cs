@@ -1051,7 +1051,8 @@ public class PostAllRunnerTests : IDisposable
     public async Task RunPostAllAsync_DeliveryStartRangeAndLimit_NarrowTheSelection()
     {
         // Delivery starts (Danish): MP1 2023-06-01, MP2 2023-06-15, MP3 2023-06-15, MP4 2023-07-01.
-        // The range 2023-06-10 → 2023-06-30 keeps MP2 and MP3; the limit keeps MP2.
+        // The range 2023-06-10 → 2023-06-30 keeps MP2 and MP3. Both are skipped (no Xellent contract),
+        // so neither uses up the limit.
         var starts = new[] { new DateTime(2023, 6, 1), new DateTime(2023, 6, 15), new DateTime(2023, 6, 15), new DateTime(2023, 7, 1) };
         var mps = starts.Select((s, i) => new MeteringPointInfoDto
         {
@@ -1071,9 +1072,8 @@ public class PostAllRunnerTests : IDisposable
         var rc = await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: true,
             cosFrom: new DateOnly(2023, 6, 10), cosTo: new DateOnly(2023, 6, 30), limit: 1);
 
-        // No Xellent contract is seeded, so the one selected MP is skipped as missing in Xellent.
         Assert.Equal(0, rc);
-        Assert.Equal([mps[1].Id], _mp.GetDeliveryStatusesCalls);
+        Assert.Equal([mps[1].Id, mps[2].Id], _mp.GetDeliveryStatusesCalls);
         Assert.Equal(TimeSeriesRunner.BatchDeliveryCategory, _mp.LastDeliveryCategory);
     }
 
@@ -1083,8 +1083,9 @@ public class PostAllRunnerTests : IDisposable
     [InlineData(3, 5, new[] { 4 })]
     public async Task RunPostAllAsync_SkipAndLimit_RunTheMeteringPointsInBatches(int skip, int limit, int[] expected)
     {
-        // Four in-delivery MPs; one outside the delivery-start range does not count toward skip or limit.
-        var inRange = DanishMidnight(new DateTime(2023, 6, 15));
+        // Four in-delivery MPs, all ready; one outside the delivery-start range does not count toward skip or limit.
+        var supplyStart = new DateTime(2023, 6, 15);
+        var inRange = DanishMidnight(supplyStart);
         var mps = Enumerable.Range(1, 4).Select(n => new MeteringPointInfoDto
         {
             Id = Guid.NewGuid(),
@@ -1092,6 +1093,12 @@ public class PostAllRunnerTests : IDisposable
             InDelivery = true,
             CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = inRange },
         }).ToList();
+        foreach (var mp in mps)
+        {
+            _xellent.SeedHourlyTimeSeries(mp.MeteringPointIdentification, supplyStart.AddYears(-1), hours: 24);
+            _xellent.SeedContract(Account, mp.MeteringPointIdentification, migratedOn: supplyStart);
+        }
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
         mps.Insert(1, new MeteringPointInfoDto
         {
             Id = Guid.NewGuid(),
@@ -1111,12 +1118,47 @@ public class PostAllRunnerTests : IDisposable
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false,
             cosFrom: new DateOnly(2023, 6, 1), cosTo: new DateOnly(2023, 6, 30), limit: limit, skip: skip);
 
-        // No Xellent contracts are seeded, so each processed MP is skipped as missing in Xellent.
         Assert.Equal(0, rc);
-        var processed = logs.Where(l => l.StartsWith("SKIP MP ", StringComparison.Ordinal))
-            .Select(l => int.Parse(l.Substring("SKIP MP 57131310000000000".Length, 1)))
-            .ToArray();
-        Assert.Equal(expected, processed);
+        Assert.Equal(expected, Checked(logs));
+    }
+
+    // The metering points a batch run got as far as checking (its "--- [i/N] MP … ---" headers), by last digit.
+    private static int[] Checked(List<string> logs) => logs
+        .Where(l => l.StartsWith("--- [", StringComparison.Ordinal))
+        .Select(l => l[(l.IndexOf(" MP ", StringComparison.Ordinal) + 4)..].Split(' ')[0])
+        .Select(id => int.Parse(id[^1..]))
+        .ToArray();
+
+    [Fact]
+    public async Task RunPostAllAsync_Limit_CountsOnlyTheMeteringPointsSent()
+    {
+        // MP1 has no Xellent contract (skipped), MP2 lacks its hourly series in Settl (blocked), MP3 and
+        // MP4 are ready. --limit 1 goes past the skip and the block, sends MP3 and stops before MP4.
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        const string mp3 = "571313100000000003", mp4 = "571313100000000004";
+        var mp2Guid = Guid.NewGuid();
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, mp2Guid), (mp3, Guid.NewGuid()), (mp4, Guid.NewGuid()));
+        foreach (var mp in new[] { MpId1, MpId2, mp3, mp4 })
+            _xellent.SeedHourlyTimeSeries(mp, supplyStart.AddYears(-1), hours: 24);
+        foreach (var mp in new[] { MpId2, mp3, mp4 })
+            _xellent.SeedContract(Account, mp, migratedOn: supplyStart);
+        _mp.GetTimeSeriesResponse = id => [new TimeSeriesInfoDto
+        {
+            Id = Guid.NewGuid(),
+            TimeResolution = id == mp2Guid
+                ? new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" }
+                : new TimeResolutionInfoDto { Length = 1, Unit = "Hour" },
+        }];
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false, limit: 1));
+
+        Assert.Equal([1, 2, 3], Checked(logs));
+        Assert.Contains("Limit of 1 reached.", logs);
+        Assert.Contains(logs, l => l.StartsWith("  Ready: 1", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Skipped: 1", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal));
     }
 
     [Fact]

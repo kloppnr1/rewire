@@ -935,8 +935,8 @@ public class TimeSeriesRunner
     /// they are skipped, where a metering point Settl does mark as in delivery fails.</para>
     /// <paramref name="cosFrom"/>/<paramref name="cosTo"/> (inclusive, Danish dates) narrow the run to
     /// a range of delivery starts; <paramref name="skip"/> passes over the first N metering points in
-    /// range and <paramref name="limit"/> stops after N more, in identification order — so skip/limit
-    /// pages through the run in stable batches.
+    /// range, in identification order; <paramref name="limit"/> stops once N metering points are sent
+    /// (ready, in a dry run) — skipped, blocked and failed ones do not count toward it.
     /// <para><paramref name="offline"/> reads Settl and Xellent from the environment's snapshot (see
     /// <see cref="RunSeedSnapshotAsync"/>) instead of asking them again; anything the snapshot lacks is
     /// read live and added. Time series points are always read fresh, and posts always go to Settl.</para>
@@ -1605,7 +1605,10 @@ public class TimeSeriesRunner
                 WriteStates("Running", force: i == 0);
             }
 
-            if (limit is { } take && take > 0 && totalInRange.Total >= take)
+            // --limit counts the metering points sent (ready in a dry run): skipped, blocked and failed ones
+            // do not use it up. The done check and the missing-readings scan send nothing, so they count
+            // every metering point in range.
+            if (limit is { } take && take > 0 && (_markDoneMode ? totalInRange : totalPosted).Total >= take)
             {
                 _log($"Limit of {take} reached.");
                 break;
