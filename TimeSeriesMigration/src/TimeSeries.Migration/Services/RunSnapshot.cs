@@ -57,6 +57,15 @@ public sealed class RunSnapshot
             return Store(kind).ContainsKey(key);
     }
 
+    /// <summary>Every key the snapshot holds for a kind, with its value (regardless of <c>reuse</c>).</summary>
+    public List<(string Key, T Value)> All<T>(string kind)
+    {
+        List<KeyValuePair<string, JsonElement>> pairs;
+        lock (_gate)
+            pairs = Store(kind).ToList();
+        return pairs.Select(p => (p.Key, p.Value.Deserialize<T>(Json)!)).ToList();
+    }
+
     public bool TryGet<T>(string kind, string key, out T? value)
     {
         value = default;

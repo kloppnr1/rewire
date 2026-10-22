@@ -189,6 +189,29 @@ resolutionChangesCommand.SetAction(async (parseResult, cancellationToken) =>
         cancellationToken);
 });
 
+// === requarter command ===
+var requarterOutOption = new Option<string?>("--out") { Description = "CSV file to write (default: <Output:BaseDirectory>/requarter-<env>.csv)" };
+var requarterParallelOption = new Option<int>("--parallel")
+{
+    Description = "How many metering points to ask Settl about at a time (default 6)",
+    DefaultValueFactory = _ => 6
+};
+var requarterCommand = new Command("requarter",
+    "List the done metering points posted as hourly values where Xellent's reading period is 15-minute and Settl's " +
+    "Quarter series has no values. Read-only: sends nothing and changes no done marks.")
+{
+    envOption, requarterOutOption, requarterParallelOption
+};
+
+requarterCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    var (connectionString, outputDir, years) = LoadXellentConfig(config);
+    await using var provider = BuildSettlServices(config);
+    var runner = BuildSettlRunner(provider, connectionString, outputDir, years);
+    return await runner.RunRequarterAsync(settlEnv, parseResult.GetValue(requarterParallelOption),
+        parseResult.GetValue(requarterOutOption), cancellationToken);
+});
+
 // === progress command ===
 var progressWatchOption = new Option<bool>("--watch") { Description = "Repaint the report in place every --refresh seconds until Ctrl+C" };
 var progressRefreshOption = new Option<int>("--refresh")
@@ -212,6 +235,7 @@ progressCommand.SetAction(async (parseResult, cancellationToken) =>
 
 var rootCommand = new RootCommand("Time Series Migration CLI — extract from Xellent, post to Settl");
 rootCommand.Subcommands.Add(resolutionChangesCommand);
+rootCommand.Subcommands.Add(requarterCommand);
 rootCommand.Subcommands.Add(extractCommand);
 rootCommand.Subcommands.Add(postCommand);
 rootCommand.Subcommands.Add(snapshotCommand);

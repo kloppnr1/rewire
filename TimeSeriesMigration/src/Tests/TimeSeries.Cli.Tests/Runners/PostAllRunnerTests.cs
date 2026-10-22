@@ -1000,6 +1000,51 @@ public class PostAllRunnerTests : IDisposable
         Assert.DoesNotContain(logs, l => l.StartsWith("  Blocked:", StringComparison.Ordinal));
     }
 
+    // Production 571313103103035224: read hourly until 2026-08-27, 15-minute from 2026-08-28; done with the window
+    // 2026-05-29 → 2026-09-01. Settl's Hour series holds values to the window end, the Quarter series from it.
+    [Theory]
+    [InlineData(true, 0, true)]     // the example: listed
+    [InlineData(false, 0, false)]   // read hourly all through: nothing to do
+    [InlineData(true, 384, false)]  // the Quarter series already has the values
+    public async Task Requarter_ListsDoneMeteringPointsPostedAsHourlyInAQuarterReadingPeriod(bool switchesToQuarter, int quarterValues, bool listed)
+    {
+        var mpGuid = Guid.NewGuid();
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2026, 5, 28, 22, 0, 0, DateTimeKind.Utc), hours: 24);
+        var company = "tst";
+        if (switchesToQuarter)
+        {
+            _xellent.SeedReadingPeriod(MpId1, company, new DateTime(2025, 8, 20), new DateTime(2026, 8, 27), 0);
+            _xellent.SeedReadingPeriod(MpId1, company, new DateTime(2026, 8, 28), new DateTime(1900, 1, 1), 1);
+        }
+        else
+            _xellent.SeedReadingPeriod(MpId1, company, new DateTime(2025, 8, 20), new DateTime(1900, 1, 1), 0);
+        new TimeSeries.Cli.Services.RunSnapshot(Path.Combine(OutputDir, "snapshot", "test"), reuse: true).Put("done", MpId1,
+            new TimeSeriesRunner.DoneEntry(mpGuid, Account, DanishMidnight(new DateTime(2026, 9, 1)),
+                new DateOnly(2026, 5, 29), new DateOnly(2026, 9, 1), 2280, DateTimeOffset.UtcNow));
+        var (hour, quarter) = (Guid.NewGuid(), Guid.NewGuid());
+        _mp.GetTimeSeriesResponse = _ =>
+        [
+            new TimeSeriesInfoDto { Id = hour, TimeResolution = new TimeResolutionInfoDto { Length = 1, Unit = "Hour" } },
+            new TimeSeriesInfoDto { Id = quarter, TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } },
+        ];
+        _ts.GetPointsResponse = (id, _, _) => (new SettlPointsSummaryDto { Count = id == hour ? 96 : quarterValues }, null);
+        var file = Path.Combine(OutputDir, "requarter.csv");
+
+        Assert.Equal(0, await BuildRunner().RunRequarterAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        Assert.StartsWith("\"MeteringPointId\";\"SettlId\"", lines[0].TrimStart('﻿'));
+        if (!listed)
+        {
+            Assert.Single(lines);
+            return;
+        }
+        Assert.Equal($"\"{MpId1}\";\"{mpGuid}\";\"{Account}\";\"2026-05-29\";\"2026-09-01\";\"2026-08-28\";\"2026-09-01\";\"96\";\"0\"", lines[1]);
+        Assert.All(_ts.GetPointsCalls, c => Assert.Equal((new DateOnly(2026, 8, 28), new DateOnly(2026, 9, 1)), (c.Start, c.End)));
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+    }
+
     [Fact]
     public async Task Snapshot_Refresh_KeepsTheLedger()
     {

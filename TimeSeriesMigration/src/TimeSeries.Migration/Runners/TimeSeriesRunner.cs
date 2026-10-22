@@ -1376,6 +1376,115 @@ public class TimeSeriesRunner
         }
     }
 
+    private static readonly string[] RequarterColumns =
+        ["MeteringPointId", "SettlId", "Account", "WindowStart", "WindowEnd", "QuarterFrom", "QuarterTo", "HourValuesInSettl", "QuarterValuesInSettl"];
+
+    /// <summary>
+    /// Lists the done metering points that were posted as hourly values where Xellent's reading periods
+    /// (EXU_TIMEREADINGSPERIOD) say 15-minute: posted before hourly values were split into quarters (story
+    /// 45902). For each done mark it takes the window stored with it and the parts of that window in a Quarter
+    /// reading period; a part is listed when Settl's Hour series has values there and the Quarter series none.
+    /// Read-only: sends nothing and changes no done marks. Default file: &lt;output&gt;/requarter-&lt;env&gt;.csv.
+    /// </summary>
+    public async Task<int> RunRequarterAsync(string environment, int parallelism = 6, string? outputPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_settlMeteringPointClient == null || _settlTimeSeriesClient == null)
+            return Error("Settl API clients not configured. DI registration missing.");
+        _settlMeteringPointClient.SetDeliveryCategory(BatchDeliveryCategory);
+        _log($"=== Requarter — {environment} ===");
+
+        var done = new RunSnapshot(SnapshotDirectory(environment), reuse: true).All<DoneEntry>(SnapshotDone)
+            .OrderBy(d => d.Key, StringComparer.Ordinal).ToList();
+        Dictionary<string, List<TimeSeriesExtractionService.ReadingPeriod>> readingPeriods;
+        await using (var context = BuildXellentContext())
+        {
+            try
+            {
+                readingPeriods = await new TimeSeriesExtractionService(context, BatchDeliveryCategory)
+                    .GetReadingPeriodsAsync(done.Select(d => d.Key));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Error(ex.Message);
+            }
+        }
+
+        // The parts of each window that lie in a Quarter reading period, joined where they touch.
+        var toCheck = new List<(string Mp, DoneEntry Mark, DateOnly From, DateOnly To)>();
+        foreach (var (mp, mark) in done)
+        {
+            var parts = (readingPeriods.TryGetValue(mp, out var periods) ? periods : [])
+                .Where(p => p.Resolution == "Quarter")
+                .Select(p => (From: p.Start > mark.WindowStart ? p.Start : mark.WindowStart,
+                              To: p.End is { } end && end < mark.WindowEnd ? end : mark.WindowEnd))
+                .Where(p => p.From < p.To)
+                .OrderBy(p => p.From);
+            (DateOnly From, DateOnly To)? open = null;
+            foreach (var part in parts)
+            {
+                if (open is { } o && part.From <= o.To)
+                    open = (o.From, part.To > o.To ? part.To : o.To);
+                else
+                {
+                    if (open is { } closed) toCheck.Add((mp, mark, closed.From, closed.To));
+                    open = part;
+                }
+            }
+            if (open is { } last) toCheck.Add((mp, mark, last.From, last.To));
+        }
+        _log($"{done.Count} done metering points, {toCheck.Select(c => c.Mp).Distinct().Count()} with a quarter-hour reading period in their window");
+
+        var rows = new System.Collections.Concurrent.ConcurrentBag<(string Mp, DoneEntry Mark, DateOnly From, DateOnly To, int Hour, int Quarter)>();
+        var errors = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var checkedCount = 0;
+        await Parallel.ForEachAsync(toCheck,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = cancellationToken },
+            async (item, ct) =>
+            {
+                ReportProgress("Requarter", Interlocked.Increment(ref checkedCount), toCheck.Count);
+                var (series, seriesError) = await _settlMeteringPointClient.GetTimeSeriesAsync(item.Mark.SettlId, ct);
+                if (seriesError != null)
+                {
+                    errors.Add($"MP {item.Mp}: GetTimeSeries failed: {seriesError}");
+                    return;
+                }
+                async Task<int?> CountAsync(string resolution)
+                {
+                    var (length, unit) = ToSettlResolution(resolution);
+                    if ((series ?? []).FirstOrDefault(t => t.TimeResolution?.Length == length &&
+                            string.Equals(t.TimeResolution?.Unit, unit, StringComparison.OrdinalIgnoreCase)) is not { } ts)
+                        return 0;
+                    var (summary, error) = await GetPointsSummaryInYearChunksAsync(ts.Id, item.From, item.To, ct);
+                    if (error != null)
+                    {
+                        errors.Add($"MP {item.Mp}: GetPointsSummary failed: {error}");
+                        return null;
+                    }
+                    return summary?.Count ?? 0;
+                }
+                if (await CountAsync("Hour") is not { } hour || await CountAsync("Quarter") is not { } quarter)
+                    return;
+                if (hour > 0 && quarter == 0)
+                    rows.Add((item.Mp, item.Mark, item.From, item.To, hour, quarter));
+            });
+
+        var listed = rows.OrderBy(r => r.Mp, StringComparer.Ordinal).ThenBy(r => r.From).ToList();
+        var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"requarter-{environment}.csv");
+        if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
+            Directory.CreateDirectory(folder);
+        // QuarterTo, like WindowEnd, is the first day not included.
+        await File.WriteAllTextAsync(path,
+            CsvLine(RequarterColumns) + string.Concat(listed.Select(r => CsvLine([r.Mp, r.Mark.SettlId.ToString(), r.Mark.Account,
+                $"{r.Mark.WindowStart:yyyy-MM-dd}", $"{r.Mark.WindowEnd:yyyy-MM-dd}", $"{r.From:yyyy-MM-dd}", $"{r.To:yyyy-MM-dd}",
+                r.Hour.ToString(), r.Quarter.ToString()]))),
+            CsvEncoding, cancellationToken);
+        foreach (var error in errors.OrderBy(e => e, StringComparer.Ordinal))
+            _log($"ERROR: {error}");
+        _log($"Requarter: {done.Count} done metering points checked, {listed.Select(r => r.Mp).Distinct().Count()} listed → {path}");
+        return errors.IsEmpty ? 0 : 1;
+    }
+
     // The resolutions Settl must have a series for: those of the reading periods in the window, or, when Xellent
     // records none there, those of the values.
     private static List<string> RequiredResolutions(MeteringPointTimeSeriesDto counted) =>

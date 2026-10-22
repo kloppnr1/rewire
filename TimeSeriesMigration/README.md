@@ -186,6 +186,26 @@ dotnet run --project src/TimeSeries.Cli -- resolution-changes --env production -
 
 Columns: `MeteringPointId;Type;ChangeDate;XellentResolutions;SettlSeries;MissingSeries;WindowStart;WindowEnd` (`Type` is Parent or Child; WindowEnd = delivery start, not included). The dashboard's "Opløsningsskift" card lists a switch at any time, so it can have more meters.
 
+## `requarter`
+
+Lists the done metering points that were posted as hourly values where Xellent's reading period says 15-minute. Those were posted before hourly values were split into quarters (story 45902), and their done mark keeps every later run away from them.
+
+For each done mark it takes the window stored with it, and the parts of that window that lie in a 15-minute reading period (`EXU_TIMEREADINGSPERIOD`). A part is listed when Settl's Hour series has values there and the Quarter series has none. Example, production 571313103103035224: reading periods go from hourly to 15-minute on 2026-08-28, the window is 2026-05-29 → 2026-09-01, and the Hour series holds the values for 2026-08-28 → 2026-09-01.
+
+Read-only: it sends nothing and changes no done marks. Re-sending those days as 15-minute values is a separate decision. The old hourly versions stay in Settl, and the invoiced period on the Hour series would overlap a new one on the Quarter series.
+
+```bash
+dotnet run --project src/TimeSeries.Cli -- requarter --env production
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--env <name>` | Which environment; the done marks come from `output/snapshot/<env>/done.jsonl` |
+| `--parallel <N>` | How many metering points to ask Settl about at a time (default 6) |
+| `--out <file>` | Where to write. Default `output/requarter-<env>.csv` |
+
+Columns: `MeteringPointId;SettlId;Account;WindowStart;WindowEnd;QuarterFrom;QuarterTo;HourValuesInSettl;QuarterValuesInSettl` (WindowEnd and QuarterTo are the first day not included). One row per 15-minute part, so a metering point can have more than one.
+
 ## Other commands
 
 For one metering point or account — troubleshooting and spot checks. These always read live (no snapshot).
