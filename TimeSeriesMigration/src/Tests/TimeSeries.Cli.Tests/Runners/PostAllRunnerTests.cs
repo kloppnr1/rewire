@@ -1001,6 +1001,24 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Snapshot_Refresh_KeepsTheLedger()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => HourTs(Guid.NewGuid());
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+        var ledger = Path.Combine(OutputDir, "snapshot", "test", TimeSeries.Cli.Services.PostLedger.FileName);
+        var written = File.ReadAllText(ledger);
+
+        Assert.Equal(0, await BuildRunner().RunSeedSnapshotAsync("test", refresh: true));
+
+        Assert.Equal(written, File.ReadAllText(ledger));
+    }
+
+    [Fact]
     public async Task RunPostAllAsync_WritesItsStatesForProgress()
     {
         var supplyStart = new DateTime(2023, 6, 15);

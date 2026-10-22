@@ -1,5 +1,6 @@
 using DataMigration.SettlApi.Models;
 using TimeSeries.Cli.Runners;
+using TimeSeries.Cli.Services;
 using TimeSeries.Cli.Tests.Fixtures;
 
 namespace TimeSeries.Cli.Tests.Runners;
@@ -7,7 +8,9 @@ namespace TimeSeries.Cli.Tests.Runners;
 public class PostRunnerTests : IDisposable
 {
     private const string MeteringPoint = "571313100000000001";
-    private const string OutputDir = "test-output";
+    // One folder per test: live posts write the environment's ledger in it, and a shared folder would
+    // carry one test's writes into the next.
+    private readonly string OutputDir = Path.Combine("test-output", Guid.NewGuid().ToString("N"));
     private static readonly DateTime Start = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime End = new(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
 
@@ -21,7 +24,12 @@ public class PostRunnerTests : IDisposable
         _xellent.SeedHourlyTimeSeries(MeteringPoint, Start, hours: 24);
     }
 
-    public void Dispose() => _xellent.Dispose();
+    public void Dispose()
+    {
+        _xellent.Dispose();
+        if (Directory.Exists(OutputDir))
+            Directory.Delete(OutputDir, recursive: true);
+    }
 
     private TimeSeriesRunner BuildRunner(Action<string>? log = null, string? outputDirectory = null) => new(
         connectionString: "ignored",
@@ -55,6 +63,70 @@ public class PostRunnerTests : IDisposable
 
         Assert.Equal(0, rc);
         PostSnapshot.AssertMatchesGolden(PostSnapshot.From(_ts, _mp), "expected-posts-happy-path.json");
+    }
+
+    private Guid HourSeriesInSettl()
+    {
+        var tsGuid = Guid.NewGuid();
+        _mp.SearchByIdentificationResponse = _ => new MeteringPointInfoDto { Id = Guid.NewGuid(), MeteringPointIdentification = MeteringPoint };
+        _mp.GetTimeSeriesResponse = _ => [new TimeSeriesInfoDto { Id = tsGuid, TimeResolution = new TimeResolutionInfoDto { Length = 1, Unit = "Hour" } }];
+        return tsGuid;
+    }
+
+    private string LedgerPath => Path.Combine(OutputDir, "snapshot", "test", PostLedger.FileName);
+
+    [Fact]
+    public async Task RunPostAsync_SecondLivePost_SendsNothingAgain()
+    {
+        HourSeriesInSettl();
+        Assert.Equal(0, await BuildRunner().RunPostAsync(OptionsFor(MeteringPoint, Start, End)));
+        Assert.Equal(4, File.ReadAllLines(LedgerPath).Length);
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(logs.Add).RunPostAsync(OptionsFor(MeteringPoint, Start, End)));
+
+        Assert.Single(_ts.PostCalls);
+        Assert.Single(_mp.AddEipCalls);
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MeteringPoint}: already in the ledger", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAsync_AWriteThatNeverFinished_BlocksTheMeteringPoint()
+    {
+        var tsGuid = HourSeriesInSettl();
+        new PostLedger(Path.GetDirectoryName(LedgerPath)!).Write(MeteringPoint, tsGuid, PostLedger.Points,
+            DateOnly.FromDateTime(Start), DateOnly.FromDateTime(End), PostLedger.Starting);
+        var options = OptionsFor(MeteringPoint, Start, End);
+
+        Assert.Equal(1, await BuildRunner().RunPostAsync(options));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.StartsWith("Earlier post not finished", options.Error);
+    }
+
+    [Fact]
+    public async Task RunPostAsync_ValuesInButPeriodFailed_SendsOnlyThePeriodNextTime()
+    {
+        HourSeriesInSettl();
+        _mp.AddEipResponse = (_, _) => (false, "HTTP 500");
+        Assert.Equal(1, await BuildRunner().RunPostAsync(OptionsFor(MeteringPoint, Start, End)));
+        _mp.AddEipResponse = (_, _) => (true, null);
+
+        Assert.Equal(0, await BuildRunner().RunPostAsync(OptionsFor(MeteringPoint, Start, End)));
+
+        Assert.Single(_ts.PostCalls);
+        Assert.Equal(2, _mp.AddEipCalls.Count);
+    }
+
+    [Fact]
+    public async Task RunPostAsync_DryRun_LeavesTheLedgerAlone()
+    {
+        HourSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAsync(OptionsFor(MeteringPoint, Start, End, dryRun: true)));
+
+        Assert.False(File.Exists(LedgerPath));
     }
 
     [Fact]

@@ -66,6 +66,17 @@ A live `post --all` also marks each metering point it posts as done.
 
 Every `post --all` — live or dry run, online or offline — leaves done metering points out from the start, and they don't count toward `--skip` / `--limit`. The log says how many (`Already done: …`). To post a metering point again, remove its line from `done.jsonl`.
 
+### The ledger
+
+Settl keeps every version of a value and has no delete, so nothing may be sent twice. Every write to Settl — the values for a series, and the externally invoiced period — is written to `output/snapshot/<env>/ledger.jsonl`. A "starting" line goes in just before the call, and a "done" or "failed" line just after it. Each line holds the metering point, the series, the period, the kind and the time. This holds for `post --all` and for a single `post`. `snapshot --refresh` keeps the file.
+
+Before sending, the post reads the ledger:
+- **Done** for that series and period: not sent again. A metering point with everything done counts as Done ("already in the ledger").
+- **Starting with no end line** (a run died mid-call), or an earlier write to the series that covers part of the period: the metering point is blocked as "earlier post did not finish – check in Settl" and nothing is sent. Check Settl, then remove those lines to let it go.
+- **Failed:** Settl turned it down, so it may be sent again.
+
+When the values went in but the invoiced period failed, the next run sends only the period. Dry runs read the ledger and say what they would skip; they never write to it. The ledger can't know about posts made before it existed (2026-10-22); done marks cover those.
+
 `snapshot` ends with how far the migration is, e.g. `Migration: 440 of 661 metering points done (66%), 221 still to post`. Every `post --all` starts with the same line, using the done list as it is now and the total from the last snapshot.
 
 The snapshot also keeps each metering point's current payer in Settl (`settl-payer.jsonl`, 100 metering points per call), so the 6##### payer check needs no Settl calls offline.

@@ -16,7 +16,8 @@ namespace TimeSeries.Cli.Tests.Runners;
 public class ResolutionSegmentTests : IDisposable
 {
     private const string MeteringPoint = "571313100000000099";
-    private const string OutputDir = "test-output-segments";
+    // One folder per test: live posts write the environment's ledger in it.
+    private readonly string OutputDir = Path.Combine("test-output-segments", Guid.NewGuid().ToString("N"));
 
     // Hour-segment: 2023-12-01 → 2024-01-01 (744 timer = 31 dage)
     // Quarter-segment: 2024-01-01 → 2024-01-02 (96 kvarter = 1 dag)
@@ -38,7 +39,12 @@ public class ResolutionSegmentTests : IDisposable
         _xellent.SeedQuarterTimeSeries(MeteringPoint, QuarterStart, quarters: QuarterCount);
     }
 
-    public void Dispose() => _xellent.Dispose();
+    public void Dispose()
+    {
+        _xellent.Dispose();
+        if (Directory.Exists(OutputDir))
+            Directory.Delete(OutputDir, recursive: true);
+    }
 
     private TimeSeriesRunner BuildRunner() => new(
         connectionString: "ignored",

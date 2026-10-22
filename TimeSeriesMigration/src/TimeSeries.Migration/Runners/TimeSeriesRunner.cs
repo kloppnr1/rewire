@@ -331,6 +331,8 @@ public class TimeSeriesRunner
             return ("Blocked", "meter installed, but no values in Xellent");
         if (error.Contains("Conversion failed", StringComparison.Ordinal))
             return ("Blocked", "hourly values cannot be split into quarters");
+        if (error.Contains("Earlier post not finished", StringComparison.Ordinal))
+            return ("Blocked", "earlier post did not finish - check in Settl");
         if (error.Contains("not found in Settl", StringComparison.Ordinal))
             return ("Blocked", "metering point not found in Settl");
         return ("Blocked", "other (see log)");
@@ -787,6 +789,40 @@ public class TimeSeriesRunner
 
             var eipPeriods = ComputeEipPeriods(filteredSegments, effectiveWindowStart, DateOnly.FromDateTime(endDate));
 
+            // The ledger decides before anything is sent: a write it has done is not sent again, and a write
+            // that never finished, or overlaps one sent before, stops the metering point until a person checks Settl.
+            var ledger = Ledger(options.Environment);
+            Guid? SeriesFor(TimeSeriesSegmentDto segment)
+            {
+                var (length, unit) = ToSettlResolution(segment.TimeResolution);
+                return tsList.FirstOrDefault(t => t.TimeResolution?.Length == length &&
+                    string.Equals(t.TimeResolution?.Unit, unit, StringComparison.OrdinalIgnoreCase))?.Id;
+            }
+            var writes = 0;
+            var writesInLedger = 0;
+            for (int segIdx = 0; segIdx < filteredSegments.Count; segIdx++)
+            {
+                if (PointCount(filteredSegments[segIdx]) == 0 || SeriesFor(filteredSegments[segIdx]) is not { } series)
+                    continue;
+                var (from, to) = eipPeriods[segIdx];
+                foreach (var kind in new[] { PostLedger.Points, PostLedger.Period })
+                {
+                    writes++;
+                    var (standing, why) = ledger.Check(mpTs.MeteringPointId, series, kind, from, to);
+                    if (standing == PostLedger.Standing.Blocked)
+                        return ($"  Earlier post not finished for MP {mpTs.MeteringPointId}: {why}. Check Settl, then remove " +
+                                $"those lines from {ledger.FilePath}.", points, false);
+                    if (standing == PostLedger.Standing.Done)
+                        writesInLedger++;
+                }
+            }
+            if (writes > 0 && writesInLedger == writes)
+            {
+                _log($"SKIP MP {mpTs.MeteringPointId}: already in the ledger, nothing sent again ({ledger.FilePath}){TypeSuffix()}");
+                options.AlreadyInLedger = true;
+                return (null, points, true);
+            }
+
             // Iterér segmenter — Settl har én TS per resolution. Begge TS forventes at finde
             // i Settl på forhånd; matcher et segment ikke en eksisterende TS, fejler vi.
             for (int segIdx = 0; segIdx < filteredSegments.Count; segIdx++)
@@ -814,10 +850,16 @@ public class TimeSeriesRunner
                             $"(company={segment.CompanyId}): {segStart:yyyy-MM-dd} → {segEnd:yyyy-MM-dd}.", points, false);
 
                 OnPhase?.Invoke("post-timeseries");
+                var pointsInLedger = pointCount > 0 && ledger.Check(mpTs.MeteringPointId, tsGuid, PostLedger.Points, segStart, segEnd).Standing == PostLedger.Standing.Done;
+                var periodInLedger = pointCount > 0 && ledger.Check(mpTs.MeteringPointId, tsGuid, PostLedger.Period, segStart, segEnd).Standing == PostLedger.Standing.Done;
                 if (dryRun)
                 {
-                    _log($"    [dry-run] would POST {pointCount} points to TS {tsGuid}");
-                    _log($"    [dry-run] would add EIP ({segStart:yyyy-MM-dd} → {segEnd:yyyy-MM-dd}, TS={tsGuid})");
+                    _log(pointsInLedger
+                        ? $"    [dry-run] points already in the ledger — would not POST them again (TS {tsGuid})"
+                        : $"    [dry-run] would POST {pointCount} points to TS {tsGuid}");
+                    _log(periodInLedger
+                        ? $"    [dry-run] EIP already in the ledger — would not add it again (TS {tsGuid})"
+                        : $"    [dry-run] would add EIP ({segStart:yyyy-MM-dd} → {segEnd:yyyy-MM-dd}, TS={tsGuid})");
                 }
                 else if (pointCount == 0)
                 {
@@ -828,12 +870,28 @@ public class TimeSeriesRunner
                 }
                 else
                 {
-                    var (postSuccess, postError) = await _settlTimeSeriesClient.PostPointsAsync(
-                        tsGuid, payload!, cancellationToken);
-                    if (!postSuccess)
-                        return ($"    Time-series POST failed: {postError}", points, false);
-                    _log($"    posted {pointCount} points to TS {tsGuid}");
+                    if (pointsInLedger)
+                    {
+                        _log($"    points already in the ledger — not posted again (TS {tsGuid})");
+                    }
+                    else
+                    {
+                        ledger.Write(mpTs.MeteringPointId, tsGuid, PostLedger.Points, segStart, segEnd, PostLedger.Starting);
+                        var (postSuccess, postError) = await _settlTimeSeriesClient.PostPointsAsync(
+                            tsGuid, payload!, cancellationToken);
+                        ledger.Write(mpTs.MeteringPointId, tsGuid, PostLedger.Points, segStart, segEnd,
+                            postSuccess ? PostLedger.Done : PostLedger.Failed);
+                        if (!postSuccess)
+                            return ($"    Time-series POST failed: {postError}", points, false);
+                        _log($"    posted {pointCount} points to TS {tsGuid}");
+                        points += pointCount;
+                    }
 
+                    if (periodInLedger)
+                    {
+                        _log($"    externally invoiced period already in the ledger — not added again (TS {tsGuid})");
+                        continue;
+                    }
                     OnPhase?.Invoke("post-eip");
                     var eipRequest = new AddExternallyInvoicedPeriodsRequest
                     {
@@ -855,14 +913,18 @@ public class TimeSeriesRunner
                         ]
                     };
 
+                    ledger.Write(mpTs.MeteringPointId, tsGuid, PostLedger.Period, segStart, segEnd, PostLedger.Starting);
                     var (eipSuccess, eipError) = await _settlMeteringPointClient.AddExternallyInvoicedPeriodsAsync(
                         mpGuid, eipRequest, cancellationToken);
+                    ledger.Write(mpTs.MeteringPointId, tsGuid, PostLedger.Period, segStart, segEnd,
+                        eipSuccess ? PostLedger.Done : PostLedger.Failed);
                     if (!eipSuccess)
                         return ($"    externallyInvoicedPeriod POST failed: {eipError}", points, false);
                     _log($"    + externally invoiced period added ({string.Join(", ", eipRequest.Periods[0].BillableTypes)})");
+                    continue;
                 }
 
-                points += pointCount;
+                points += pointsInLedger ? 0 : pointCount;
             }
 
             _log($"RESULT MP {mpTs.MeteringPointId}: points={points}, excluded={excludedPointCount}, boundary={boundaryText}");
@@ -1029,11 +1091,12 @@ public class TimeSeriesRunner
         if (refresh && Directory.Exists(directory))
         {
             var stale = Directory.GetFiles(directory, "*.jsonl")
-                .Where(p => !string.Equals(Path.GetFileNameWithoutExtension(p), SnapshotDone, StringComparison.Ordinal))
+                .Where(p => !string.Equals(Path.GetFileNameWithoutExtension(p), SnapshotDone, StringComparison.Ordinal)
+                    && !string.Equals(Path.GetFileName(p), PostLedger.FileName, StringComparison.Ordinal))
                 .ToList();
             foreach (var file in stale)
                 File.Delete(file);
-            _log($"Refresh: removed {stale.Count} stored read file(s) from {directory}; done marks kept.");
+            _log($"Refresh: removed {stale.Count} stored read file(s) from {directory}; done marks and the ledger kept.");
         }
         _snapshot = new RunSnapshot(directory, reuse: true);
         if (refreshBlocked && !refresh)
@@ -1916,6 +1979,15 @@ public class TimeSeriesRunner
                 continue;
             }
 
+            // Everything for this metering point is in the ledger: sent before, so done.
+            if (postOptions.AlreadyInLedger)
+            {
+                if (!dryRun)
+                    _done?.Put(SnapshotDone, identification, new DoneEntry(mpGuid, accountNumber, revisionResolution.Revision,
+                        DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), 0, DateTimeOffset.UtcNow));
+                CountState("Done", "already in the ledger");
+                continue;
+            }
             // A metering point the post skipped (no meter installed, safety checks) is in a skip file, not posted.
             if (postOptions.Skipped)
             {
@@ -2306,6 +2378,17 @@ public class TimeSeriesRunner
 
     /// <summary>Where the snapshot for an environment lives.</summary>
     public string SnapshotDirectory(string environment) => Path.Combine(_outputBaseDirectory, "snapshot", environment);
+
+    // The environment's ledger of writes to Settl, read once per runner.
+    private PostLedger? _ledger;
+    private string? _ledgerEnvironment;
+
+    private PostLedger Ledger(string environment)
+    {
+        if (_ledger == null || _ledgerEnvironment != environment)
+            (_ledger, _ledgerEnvironment) = (new PostLedger(SnapshotDirectory(environment)), environment);
+        return _ledger;
+    }
 
     // Every electricity metering point in Settl's paged list, children included.
     private async Task<List<SettlListItem>> GetSettlListAsync(CancellationToken cancellationToken)
@@ -3077,6 +3160,9 @@ public class PostOptions
 
     /// <summary>After a run that succeeded: nothing was posted because every metering point was skipped to a skip file.</summary>
     public bool Skipped { get; internal set; }
+
+    /// <summary>After a run that succeeded: nothing was sent because the ledger shows every write already done.</summary>
+    public bool AlreadyInLedger { get; internal set; }
 
     /// <summary>After a run that stopped on a metering point: why (the ERROR line's text).</summary>
     public string? Error { get; internal set; }
