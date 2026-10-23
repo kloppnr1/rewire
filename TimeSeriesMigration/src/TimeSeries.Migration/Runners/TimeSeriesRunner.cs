@@ -1223,11 +1223,10 @@ public class TimeSeriesRunner
     }
 
     /// <summary>
-    /// Writes the existing CSV supplied to Settl/Systemate for missing hourly series.
-    /// Both come from Xellent's reading periods (EXU_TIMEREADINGSPERIOD), since hourly values are converted to the
-    /// reading period's resolution: ChangeDate is the start of the first 15-minute reading period after an hourly
-    /// one inside the window, and MissingSeries the reading-period resolutions in the window Settl has no series for
-    /// (the values' resolutions when Xellent records no reading period there). Listed: a missing hourly series. Columns, done marks and unclear-delivery handling are unchanged.
+    /// Writes the CSV supplied to Settl/Systemate for the series they have to create. Listed: a metering point whose
+    /// reading periods (EXU_TIMEREADINGSPERIOD) switch resolution inside the window, either direction, while Settl
+    /// has no Hour or no Quarter series. One row per switch; ChangeDate is the start of the reading period after it.
+    /// More than one switch puts a warning on each row and in the log. Done marks and unclear-delivery handling are unchanged.
     /// Default file: &lt;output&gt;/resolution-changes-&lt;env&gt;.csv.
     /// </summary>
     public async Task<int> RunResolutionChangesAsync(string environment, bool offline = false, string? outputPath = null,
@@ -1270,6 +1269,7 @@ public class TimeSeriesRunner
             var doneList = Ledger(environment);
             var doneNotListed = 0;
             var needed = 0;
+            var multipleSwitches = new List<(string MeteringPoint, List<DateOnly> Dates)>();
             var candidates = _doneCandidates.OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
             // The switch comes from Xellent's reading periods (EXU_TIMEREADINGSPERIOD): hourly values are converted
             // to the reading period's resolution, so Settl receives what the table says.
@@ -1291,19 +1291,22 @@ public class TimeSeriesRunner
                 var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
                     candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
 
-                // ChangeDate: the start of the first 15-minute reading period after an hourly one, inside the window.
+                // The switches: a reading period that starts inside the window, right after one in the window with
+                // the other resolution. Either direction. Its start is the ChangeDate. No switch, no row.
                 var inWindow = (readingPeriods.TryGetValue(candidate.Identification, out var periods) ? periods : [])
                     .Where(p => p.Start < candidate.To && (p.End is not { } end || end > candidate.From))
+                    .OrderBy(p => p.Start)
                     .ToList();
-                var switchDate = inWindow
-                    .Where(q => q.Resolution == "Quarter" && q.Start >= candidate.From && q.Start < candidate.To
-                                && inWindow.Any(h => h.Resolution == "Hour" && h.Start < q.Start))
-                    .Select(q => (DateOnly?)q.Start)
-                    .Min();
+                var switchDates = inWindow.Zip(inWindow.Skip(1))
+                    .Where(pair => pair.First.Resolution != pair.Second.Resolution
+                                   && pair.Second.Start > candidate.From && pair.Second.Start < candidate.To)
+                    .Select(pair => pair.Second.Start)
+                    .ToList();
+                if (switchDates.Count == 0)
+                    continue;
 
-                // The other half of the list: the reading-period resolutions in the window that Settl has no
-                // series for (the post blocks on the same). Systemate has to create those.
-                var valueResolutions = RequiredResolutions(counted);
+                // A switch has an hourly and a 15-minute side; listed when Settl has no series for one of them.
+                // Systemate has to create those.
                 var (series, seriesError) = await GetTimeSeriesListAsync(candidate.Id, cancellationToken);
                 if (seriesError != null)
                     return Error($"Settl GetTimeSeries failed for MP {candidate.Identification}: {seriesError}");
@@ -1312,21 +1315,10 @@ public class TimeSeriesRunner
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(r => r, StringComparer.Ordinal)
                     .ToList();
-                var missing = valueResolutions.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
-
-                // Only the hourly direction: a metering point whose points are 15-minute while Settl has
-                // an hourly series is the mirror case and stays off the list, as with mirror switches.
-                if (!missing.Contains("Hour", StringComparer.OrdinalIgnoreCase))
+                var missing = new[] { "Hour", "Quarter" }.Except(settlResolutions, StringComparer.OrdinalIgnoreCase).ToList();
+                if (missing.Count == 0)
                     continue;
 
-                // No switch inside the window, but Xellent's resolution and Settl's series differ: the
-                // change is between the two, and it happens where the posted data stops and Settl's own
-                // begins — the delivery start, which is the window end.
-                switchDate ??= candidate.To;
-
-                // Settl states no delivery for this one (the InDelivery bug), so the window it would be
-                // posted with rests on the current delivery status. It belongs on the list, but not as
-                // something settled: it goes to its own file instead.
                 needed++;
                 if (doneList.IsDone(candidate.Identification))
                 {
@@ -1334,28 +1326,36 @@ public class TimeSeriesRunner
                     continue;
                 }
 
+                // Every switch gets a row. More than one in a window is unusual: each row says so, and so does the log.
+                var warning = switchDates.Count > 1 ? $"multiple switches ({switchDates.Count}) – check by hand" : "";
+                if (switchDates.Count > 1)
+                    multipleSwitches.Add((candidate.Identification, switchDates));
                 var sourceResolutions = counted.Segments.Where(s => PointCount(s) > 0)
                     .Select(s => s.TimeResolution).Distinct().OrderBy(r => r, StringComparer.Ordinal);
-                var change = new ResolutionRow(candidate.Identification, candidate.Type, switchDate, string.Join(" + ", sourceResolutions),
-                    string.Join(" + ", settlResolutions), string.Join(" + ", missing), candidate.From, candidate.To);
-                if (candidate.FromCurrentDeliveryStatus)
-                    unclearDelivery.Add(change);
-                else
-                    changes.Add(change);
+                foreach (var switchDate in switchDates)
+                {
+                    // Settl states no delivery for this one (the InDelivery bug), so the window it would be
+                    // posted with rests on the current delivery status. It belongs on the list, but not as
+                    // something settled: it goes to its own file instead.
+                    var change = new ResolutionRow(candidate.Identification, candidate.Type, switchDate, string.Join(" + ", sourceResolutions),
+                        string.Join(" + ", settlResolutions), string.Join(" + ", missing), candidate.From, candidate.To, warning);
+                    if (candidate.FromCurrentDeliveryStatus)
+                        unclearDelivery.Add(change);
+                    else
+                        changes.Add(change);
+                }
             }
             var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"resolution-changes-{environment}.csv");
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
                 Directory.CreateDirectory(folder);
             // WindowEnd is the delivery start (the window's first day not included).
             string Csv(List<ResolutionRow> rows) =>
-                CsvLine(["MeteringPointId", "Type", "ChangeDate", "XellentResolutions", "SettlSeries", "MissingSeries", "WindowStart", "WindowEnd"]) +
+                CsvLine(["MeteringPointId", "Type", "ChangeDate", "XellentResolutions", "SettlSeries", "MissingSeries", "WindowStart", "WindowEnd", "Warning"]) +
                 string.Concat(rows.Select(r => CsvLine([r.MeteringPoint, r.Type, r.ChangeDate is { } d ? $"{d:yyyy-MM-dd}" : "",
-                    r.XellentResolutions, r.SettlSeries, r.MissingSeries, $"{r.From:yyyy-MM-dd}", $"{r.To:yyyy-MM-dd}"])));
+                    r.XellentResolutions, r.SettlSeries, r.MissingSeries, $"{r.From:yyyy-MM-dd}", $"{r.To:yyyy-MM-dd}", r.Warning])));
             await File.WriteAllTextAsync(path, Csv(changes), CsvEncoding, cancellationToken);
-            _log($"{needed} of {_doneCandidates.Count} metering points need a resolution decision " +
-                 $"({changes.Count(r => r.ChangeDate is not null)} of the listed ones change resolution inside their window, " +
-                 $"{changes.Count(r => r.MissingSeries.Length > 0)} are missing a Settl series)");
-            _log($"{changes.Count} listed → {path}" +
+            _log($"{needed} of {_doneCandidates.Count} metering points switch resolution inside their window and miss a Settl series");
+            _log($"{changes.Select(r => r.MeteringPoint).Distinct().Count()} listed, one row per switch ({changes.Count} rows) → {path}" +
                  (doneNotListed > 0 ? $" ({doneNotListed} already posted, left out of the list)" : ""));
 
             var unclearPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!,
@@ -1367,6 +1367,13 @@ public class TimeSeriesRunner
                 await File.WriteAllTextAsync(unclearPath, Csv(unclearDelivery), CsvEncoding, cancellationToken);
                 _log($"{unclearDelivery.Count} more belong on the list but Settl does not state their delivery (no InDelivery=true) " +
                      $"— not on the list above → {unclearPath}");
+            }
+            if (multipleSwitches.Count > 0)
+            {
+                _log("");
+                _log($"WARNING: {multipleSwitches.Count} metering point(s) switch resolution more than once in their window – check by hand:");
+                foreach (var (mp, dates) in multipleSwitches)
+                    _log($"  {mp}: {string.Join(", ", dates.Select(d => d.ToString("yyyy-MM-dd")))}");
             }
             return 0;
         }
@@ -1512,7 +1519,7 @@ public class TimeSeriesRunner
     /// <summary>One row of the resolution list: a switch date (null when there is none), what the points are
     /// in, what Settl has, and what Settl is missing.</summary>
     private sealed record ResolutionRow(string MeteringPoint, string Type, DateOnly? ChangeDate, string XellentResolutions,
-        string SettlSeries, string MissingSeries, DateOnly From, DateOnly To);
+        string SettlSeries, string MissingSeries, DateOnly From, DateOnly To, string Warning);
 
     // EXU_METERPOINTSTATUSPERIOD.METERPOINTSTATUS: "Oprettet" — the metering point exists, but no meter
     // is installed at the address yet, so it never gets values. A delivering meter point sits at 6.

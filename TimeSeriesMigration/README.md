@@ -168,11 +168,11 @@ dotnet run --project src/TimeSeries.Cli -- progress --env production --watch
 
 ## `resolution-changes`
 
-Writes the report supplied to Settl/Systemate to create missing hourly time series. Both columns come from Xellent's reading periods (`EXU_TIMEREADINGSPERIOD`): hourly values are converted to the reading period's resolution, so Settl receives what the table says. A metering point is listed when Settl has no hourly series for an hourly reading period in the post window; a switch alone does not need a row when the series already exist.
+Writes the report supplied to Settl/Systemate to create missing time series. A metering point is listed when its reading periods (`EXU_TIMEREADINGSPERIOD`) switch resolution inside the post window, in either direction (hourly to 15-minute or 15-minute to hourly), and Settl has no series for one side of the switch. A switch is a reading period that starts after the window start and before the window end, right after one with the other resolution. No switch, or no missing series, means no row.
 
-`ChangeDate` is the start of the first 15-minute reading period after an hourly one, inside the post window, or the delivery start when there is no such switch. `MissingSeries` is the reading-period resolutions in the window that Settl has no series for (the values' resolutions when Xellent records no reading period there). `post` blocks on the same rule (`blocked-missing-hour-series-in-settl.csv`, `blocked-missing-quarter-series-in-settl.csv`). `XellentResolutions` describes the stored values.
+Every switch gets its own row. `ChangeDate` is the start of the reading period after the switch. `MissingSeries` is the series Settl lacks (`Hour`, `Quarter` or `Hour + Quarter`). `XellentResolutions` describes the stored values. A metering point with more than one switch in its window gets `multiple switches (N) – check by hand` in the `Warning` column on each of its rows, and the log ends with a `WARNING:` line listing those metering points and their switch dates.
 
-Read-only. Already-posted meters count towards totals but receive no row; existing done marks and 6##### payer exclusions remain unchanged. Unchanged hourly periods before a dated quarter-hour reading period still require an hourly target.
+Read-only. Already-posted meters count towards totals but receive no row; existing done marks and 6##### payer exclusions remain unchanged. `post` has its own missing-series check (`blocked-missing-hour-series-in-settl.csv`, `blocked-missing-quarter-series-in-settl.csv`), which this report does not change.
 
 A meter Settl states no delivery for (no delivery status has `InDelivery=true`, so the window rests on the current delivery status) is kept off the list too: its window isn't settled, so the switch date isn't either. Those meters go to `<out>-unclear-delivery.csv` next to the list, same columns, so they aren't lost — they are just not for Systemate yet.
 
@@ -186,7 +186,7 @@ dotnet run --project src/TimeSeries.Cli -- resolution-changes --env production -
 | `--offline` | Read Settl and Xellent from the snapshot instead of asking them |
 | `--out <file>` | Where to write. Default `output/resolution-changes-<env>.csv` |
 
-Columns: `MeteringPointId;Type;ChangeDate;XellentResolutions;SettlSeries;MissingSeries;WindowStart;WindowEnd` (`Type` is Parent or Child; WindowEnd = delivery start, not included). The dashboard's "Opløsningsskift" card lists a switch at any time, so it can have more meters.
+Columns: `MeteringPointId;Type;ChangeDate;XellentResolutions;SettlSeries;MissingSeries;WindowStart;WindowEnd;Warning` (`Type` is Parent or Child; WindowEnd = delivery start, not included). The dashboard's "Opløsningsskift" card lists a switch at any time, so it can have more meters.
 
 ## `requarter`
 

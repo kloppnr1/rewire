@@ -174,8 +174,8 @@ snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
 var outOption = new Option<string?>("--out") { Description = "CSV file to write (default: <Output:BaseDirectory>/resolution-changes-<env>.csv)" };
 var offlineListOption = new Option<bool>("--offline") { Description = "Read Settl and Xellent from the environment's snapshot instead of asking them" };
 var resolutionChangesCommand = new Command("resolution-changes",
-    "Write the CSV for Settl to create missing hourly time series: include metering points with outgoing hourly values " +
-    "and no hourly target after quarter-hour conversion. Preserve source switch dates. Read-only.")
+    "Write the CSV for Settl to create missing time series: one row per reading-period resolution switch inside the post " +
+    "window (either direction) when Settl lacks the Hour or Quarter series. Several switches are flagged with a warning. Read-only.")
 {
     envOption, outOption, offlineListOption
 };

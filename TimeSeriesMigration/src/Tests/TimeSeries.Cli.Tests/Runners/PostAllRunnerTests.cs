@@ -610,7 +610,7 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true)]   // Settl has the hourly series: only the 15-minute one is missing, which is not this list
+    [InlineData(true)]   // Settl has only the hourly series: the 15-minute series is missing
     [InlineData(false)]  // Settl has only a 15-minute series: the hourly series is missing
     public async Task ResolutionChanges_TakeTheSwitchFromTheReadingPeriods(bool settlHasHour)
     {
@@ -626,15 +626,81 @@ public class PostAllRunnerTests : IDisposable
 
         Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
 
+        // On the list because Settl lacks one side of the switch; ChangeDate is where the 15-minute reading period starts.
         var lines = File.ReadAllLines(file);
-        if (settlHasHour)
-        {
-            Assert.Single(lines);
-            return;
-        }
-        // On the list because Settl has no hourly series; ChangeDate is where the 15-minute reading period starts.
         Assert.Equal(2, lines.Length);
-        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
+        Assert.Equal(settlHasHour
+            ? $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Hour\";\"Quarter\";\"2023-01-01\";\"2026-01-01\";\"\""
+            : $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\"", lines[1]);
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_AQuarterToHourSwitch_IsListed()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2024, 5, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 0);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new() { Id = Guid.NewGuid(), TimeResolution = new() { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        Assert.Equal(2, lines.Length);
+        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2024-06-01\";\"Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\"", lines[1]);
+    }
+
+    [Fact]
+    public async Task ResolutionChanges_SeveralSwitches_GetARowEach_AndAWarning()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2024, 5, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 0);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new() { Id = Guid.NewGuid(), TimeResolution = new() { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunResolutionChangesAsync("test", outputPath: file));
+
+        var lines = File.ReadAllLines(file);
+        Assert.Equal(3, lines.Length);
+        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\";", lines[1]);
+        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2024-06-01\";", lines[2]);
+        Assert.All(lines.Skip(1), l => Assert.EndsWith(";\"multiple switches (2) – check by hand\"", l));
+        Assert.Contains(logs, l => l.StartsWith("WARNING: 1 metering point(s) switch resolution more than once", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l == $"  {MpId1}: 2023-04-26, 2024-06-01");
+    }
+
+    [Theory]
+    [InlineData(false)]  // no reading periods: values and Settl differ, but there is no switch
+    [InlineData(true)]   // the 15-minute reading period starts on the window start: no switch inside the window
+    public async Task ResolutionChanges_NoSwitchInsideTheWindow_IsNotListed(bool switchOnWindowStart)
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        if (switchOnWindowStart)
+        {
+            _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2020, 1, 1), new DateTime(2022, 12, 31), seriesResolution: 0);
+            _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2154, 12, 31), seriesResolution: 1);
+        }
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new() { Id = Guid.NewGuid(), TimeResolution = new() { Length = 15, Unit = "Minutes" } }];
+        var file = Path.Combine(OutputDir, "changes.csv");
+
+        Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
+
+        Assert.Single(File.ReadAllLines(file));
     }
 
     [Fact]
@@ -855,8 +921,8 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
 
         Assert.Equal([
-            "\"MeteringPointId\";\"Type\";\"ChangeDate\";\"XellentResolutions\";\"SettlSeries\";\"MissingSeries\";\"WindowStart\";\"WindowEnd\"",
-            $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour + Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\""], File.ReadAllLines(file));
+            "\"MeteringPointId\";\"Type\";\"ChangeDate\";\"XellentResolutions\";\"SettlSeries\";\"MissingSeries\";\"WindowStart\";\"WindowEnd\";\"Warning\"",
+            $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour + Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\""], File.ReadAllLines(file));
         Assert.DoesNotContain(Directory.GetFiles(OutputDir, "*.csv"), p => !p.EndsWith("changes.csv", StringComparison.Ordinal));
     }
     [Fact]
