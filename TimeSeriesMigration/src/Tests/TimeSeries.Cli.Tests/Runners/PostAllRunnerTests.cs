@@ -629,9 +629,7 @@ public class PostAllRunnerTests : IDisposable
         // On the list because Settl lacks one side of the switch; ChangeDate is where the 15-minute reading period starts.
         var lines = File.ReadAllLines(file);
         Assert.Equal(2, lines.Length);
-        Assert.Equal(settlHasHour
-            ? $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Hour\";\"Quarter\";\"2023-01-01\";\"2026-01-01\";\"\""
-            : $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\"", lines[1]);
+        Assert.Equal(settlHasHour ? $"{MpId1};2023-04-26;Quarter" : $"{MpId1};2023-04-26;Hour", lines[1]);
     }
 
     [Fact]
@@ -651,7 +649,7 @@ public class PostAllRunnerTests : IDisposable
 
         var lines = File.ReadAllLines(file);
         Assert.Equal(2, lines.Length);
-        Assert.Equal($"\"{MpId1}\";\"Parent\";\"2024-06-01\";\"Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\"", lines[1]);
+        Assert.Equal($"{MpId1};2024-06-01;Hour", lines[1]);
     }
 
     [Fact]
@@ -673,9 +671,9 @@ public class PostAllRunnerTests : IDisposable
 
         var lines = File.ReadAllLines(file);
         Assert.Equal(3, lines.Length);
-        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\";", lines[1]);
-        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2024-06-01\";", lines[2]);
-        Assert.All(lines.Skip(1), l => Assert.EndsWith(";\"multiple switches (2) – check by hand\"", l));
+        // The warning is in the log only; the file holds just the three columns.
+        Assert.Equal($"{MpId1};2023-04-26;Hour", lines[1]);
+        Assert.Equal($"{MpId1};2024-06-01;Hour", lines[2]);
         Assert.Contains(logs, l => l.StartsWith("WARNING: 1 metering point(s) switch resolution more than once", StringComparison.Ordinal));
         Assert.Contains(logs, l => l == $"  {MpId1}: 2023-04-26, 2024-06-01");
     }
@@ -774,7 +772,8 @@ public class PostAllRunnerTests : IDisposable
         Assert.Single(File.ReadAllLines(file));  // header only — not on the list for Systemate
         var unclear = File.ReadAllLines(Path.Combine(OutputDir, "changes-unclear-delivery.csv"));
         Assert.Equal(2, unclear.Length);
-        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\"", unclear[1]);
+        Assert.Equal("MeteringPointId;ChangeDate;MissingSeries", unclear[0]);
+        Assert.Equal($"{MpId1};2023-04-26;Hour", unclear[1]);
         Assert.Contains(logs, l => l.Contains("Settl does not state their delivery", StringComparison.Ordinal));
     }
 
@@ -843,8 +842,7 @@ public class PostAllRunnerTests : IDisposable
         // Settl has no hourly series: listed, and the post is blocked on the same rule.
         var lines = File.ReadAllLines(file);
         Assert.Equal(2, lines.Length);
-        Assert.StartsWith($"\"{MpId1}\";\"Parent\";\"2023-04-26\";", lines[1]);
-        Assert.Contains("\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
+        Assert.Equal($"{MpId1};2023-04-26;Hour", lines[1]);
         Assert.Single(File.ReadAllLines(unclearFile));
         Assert.DoesNotContain("stale row", File.ReadAllText(unclearFile));
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: true,
@@ -1044,9 +1042,12 @@ public class PostAllRunnerTests : IDisposable
 
         Assert.Equal(0, await BuildRunner().RunResolutionChangesAsync("test", outputPath: file));
 
-        Assert.Equal([
-            "\"MeteringPointId\";\"Type\";\"ChangeDate\";\"XellentResolutions\";\"SettlSeries\";\"MissingSeries\";\"WindowStart\";\"WindowEnd\";\"Warning\"",
-            $"\"{MpId1}\";\"Parent\";\"2023-04-26\";\"Hour + Quarter\";\"Quarter\";\"Hour\";\"2023-01-01\";\"2026-01-01\";\"\""], File.ReadAllLines(file));
+        Assert.Equal(["MeteringPointId;ChangeDate;MissingSeries", $"{MpId1};2023-04-26;Hour"], File.ReadAllLines(file));
+        // Opens straight in Danish Excel: BOM, semicolons, no quotes, CRLF.
+        var bytes = File.ReadAllBytes(file);
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
+        Assert.Equal("MeteringPointId;ChangeDate;MissingSeries\r\n" + $"{MpId1};2023-04-26;Hour\r\n",
+            System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3));
         Assert.DoesNotContain(Directory.GetFiles(OutputDir, "*.csv"), p => !p.EndsWith("changes.csv", StringComparison.Ordinal));
     }
     [Fact]

@@ -1342,11 +1342,12 @@ public class TimeSeriesRunner
             var path = outputPath ?? Path.Combine(_outputBaseDirectory, $"resolution-changes-{environment}.csv");
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder)
                 Directory.CreateDirectory(folder);
-            // WindowEnd is the delivery start (the window's first day not included).
+            // The three columns Systemate asked for, unquoted; semicolons and the BOM keep Danish Excel happy.
+            // No field can hold a semicolon or a quote (identifications, dates, Hour/Quarter).
+            static string PlainLine(params string[] fields) => string.Join(";", fields) + "\r\n";
             string Csv(List<ResolutionRow> rows) =>
-                CsvLine(["MeteringPointId", "Type", "ChangeDate", "XellentResolutions", "SettlSeries", "MissingSeries", "WindowStart", "WindowEnd", "Warning"]) +
-                string.Concat(rows.Select(r => CsvLine([r.MeteringPoint, r.Type, r.ChangeDate is { } d ? $"{d:yyyy-MM-dd}" : "",
-                    r.XellentResolutions, r.SettlSeries, r.MissingSeries, $"{r.From:yyyy-MM-dd}", $"{r.To:yyyy-MM-dd}", r.Warning])));
+                PlainLine("MeteringPointId", "ChangeDate", "MissingSeries") +
+                string.Concat(rows.Select(r => PlainLine(r.MeteringPoint, r.ChangeDate is { } d ? $"{d:yyyy-MM-dd}" : "", r.MissingSeries)));
             await File.WriteAllTextAsync(path, Csv(changes), CsvEncoding, cancellationToken);
             _log($"{needed} of {_doneCandidates.Count} metering points switch resolution inside their window and miss a Settl series");
             _log($"{changes.Select(r => r.MeteringPoint).Distinct().Count()} listed, one row per switch ({changes.Count} rows) → {path}" +
