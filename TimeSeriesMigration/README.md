@@ -126,6 +126,9 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 | `--limit <N>` | Stop once N metering points are sent (ready, in a dry run). Skipped, excluded, blocked and done ones don't count. With done marks, `--limit` alone is usually enough |
 | `--skip-if-existing-points` | Skip a metering point if Settl already has points in its window |
 | `--skip-resolution-change` | Skip a metering point that changes resolution in the window (typically Hour → Quarter): in its series, or in what Xellent says it was read at |
+| `--allow-switches` | Also send metering points whose reading periods switch resolution inside the window. Without it they are blocked (below) |
+
+A metering point whose reading periods (`EXU_TIMEREADINGSPERIOD`) switch resolution inside its window, in either direction, is blocked as `resolution switch – waiting for Settl to confirm series` and nothing is sent for it. The switch rule is the one `resolution-changes` uses, but the block does not look at which series Settl has. The detail column names the switch dates. They go to `blocked-resolution-switch-waiting-for-settl-to-confirm-series.csv`. When Settl has confirmed the series, send them with `--allow-switches`.
 
 What happens to each metering point:
 - **Done:** points to Settl, then an externally invoiced period with `BillableTypes=["Contracts", "ExtraInvoiceLines", "MarketPriceLists", "NationalContracts", "PaymentFee", "MovingFee"]`. A dry run counts these as **ready**.
@@ -172,7 +175,7 @@ Writes the report supplied to Settl/Systemate to create missing time series. A m
 
 Every switch gets its own row. `ChangeDate` is the start of the reading period after the switch. `MissingSeries` is the series Settl lacks (`Hour`, `Quarter` or `Hour + Quarter`). `XellentResolutions` describes the stored values. A metering point with more than one switch in its window gets `multiple switches (N) – check by hand` in the `Warning` column on each of its rows, and the log ends with a `WARNING:` line listing those metering points and their switch dates.
 
-Read-only. Already-posted meters count towards totals but receive no row; existing done marks and 6##### payer exclusions remain unchanged. `post` has its own missing-series check (`blocked-missing-hour-series-in-settl.csv`, `blocked-missing-quarter-series-in-settl.csv`), which this report does not change.
+Read-only. Already-posted meters count towards totals but receive no row; existing done marks and 6##### payer exclusions remain unchanged. `post` has its own missing-series check (`blocked-missing-hour-series-in-settl.csv`, `blocked-missing-quarter-series-in-settl.csv`), which this report does not change. `post --all` blocks every metering point this rule finds a switch for, whether or not Settl lacks a series, until it is run with `--allow-switches`.
 
 A meter Settl states no delivery for (no delivery status has `InDelivery=true`, so the window rests on the current delivery status) is kept off the list too: its window isn't settled, so the switch date isn't either. Those meters go to `<out>-unclear-delivery.csv` next to the list, same columns, so they aren't lost — they are just not for Systemate yet.
 

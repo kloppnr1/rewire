@@ -527,7 +527,7 @@ public class PostAllRunnerTests : IDisposable
         var logs = new List<string>();
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false,
-            skipResolutionChange: skipResolutionChange);
+            skipResolutionChange: skipResolutionChange, allowSwitches: true);
 
         // The outgoing window is mixed: 24 original hours and 48 converted hours.
         Assert.Equal(0, rc);
@@ -598,7 +598,7 @@ public class PostAllRunnerTests : IDisposable
         var logs = new List<string>();
 
         var rc = await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false,
-            skipResolutionChange: false);
+            skipResolutionChange: false, allowSwitches: true);
 
         Assert.True(rc == 0, string.Join(Environment.NewLine, logs.Where(l => l.Contains("ERROR") || l.StartsWith("SKIP"))));
         Assert.Equal(new[] { 24, 192 }, _ts.PostCalls.Select(c => c.Payload.Points.Count));
@@ -806,7 +806,8 @@ public class PostAllRunnerTests : IDisposable
         }];
         var logs = new List<string>();
 
-        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false,
+            allowSwitches: true));
 
         Assert.Contains(logs, l => l.StartsWith("  Ready: 1", StringComparison.Ordinal));
         Assert.Contains(logs, l => l.StartsWith("  Blocked: 2", StringComparison.Ordinal));
@@ -846,7 +847,8 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains("\"Hour\";\"2023-01-01\";\"2026-01-01\"", lines[1]);
         Assert.Single(File.ReadAllLines(unclearFile));
         Assert.DoesNotContain("stale row", File.ReadAllText(unclearFile));
-        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: true));
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false, skipResolutionChange: true,
+            allowSwitches: true));
         Assert.Empty(_ts.PostCalls);
         Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "blocked-missing-hour-series-in-settl.csv")));
     }
@@ -868,12 +870,100 @@ public class PostAllRunnerTests : IDisposable
         BothSeriesInSettl();
         var logs = new List<string>();
         // Blocked, not failed: the run does not stop and exits 0.
-        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false,
+            allowSwitches: true));
         Assert.Empty(_ts.PostCalls);
         Assert.Empty(_mp.AddEipCalls);
         Assert.Contains(logs, l => l.Contains($"Conversion failed for MP {MpId1}") && l.Contains("0.0001"));
         Assert.Contains(logs, l => l.StartsWith($"OUTGOING MP {MpId1}: resolutions=Hour+Quarter, convertedHours="));
         Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "blocked-hourly-values-cannot-be-split-into-quarters.csv")));
+    }
+
+    private const string SwitchBlockedFile = "blocked-resolution-switch-waiting-for-settl-to-confirm-series.csv";
+
+    [Theory]
+    [InlineData(true, false)]   // hourly → 15-minute on 2023-04-26
+    [InlineData(false, false)]  // 15-minute → hourly on 2024-06-01
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task RunPostAllAsync_AReadingPeriodSwitchInsideTheWindow_IsBlockedUnlessSwitchesAreAllowed(bool hourToQuarter, bool allowSwitches)
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        if (hourToQuarter)
+            SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        else
+        {
+            _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+                agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+            _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2024, 5, 31), seriesResolution: 1);
+            _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 0);
+            _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        }
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();  // blocked even when Settl has both series: Settl has to confirm them first
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false,
+            allowSwitches: allowSwitches));
+
+        var blocked = Path.Combine(OutputDir, SwitchBlockedFile);
+        if (allowSwitches)
+        {
+            Assert.NotEmpty(_ts.PostCalls);
+            Assert.False(File.Exists(blocked));
+            Assert.Contains("Resolution switches: sent (--allow-switches)", logs);
+            return;
+        }
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.Empty(DoneMarkLines());
+        var switchDate = hourToQuarter ? "2023-04-26" : "2024-06-01";
+        var rows = File.ReadAllLines(blocked);
+        Assert.Equal(2, rows.Length);
+        Assert.Contains(MpId1, rows[1]);
+        Assert.Contains("resolution switch – waiting for Settl to confirm series", rows[1]);
+        Assert.Contains($"reading periods switch resolution on {switchDate}", rows[1]);
+        Assert.Contains($"BLOCKED:   MP {MpId1}: reading periods switch resolution on {switchDate}", logs);
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal) && !l.Contains("→"));
+        Assert.Contains(logs, l => l.Contains($"→ {SwitchBlockedFile}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_SeveralSwitches_AreAllNamedInTheBlockedDetail()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2024, 5, 31), seriesResolution: 1);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2024, 6, 1), new DateTime(2154, 12, 31), seriesResolution: 0);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Contains("reading periods switch resolution on 2023-04-26, 2024-06-01",
+            File.ReadAllText(Path.Combine(OutputDir, SwitchBlockedFile)));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ASwitchOnTheWindowStart_IsNotBlocked()
+    {
+        // Hourly reading period until 2022-12-31, 15-minute from 2023-01-01 — the window's first day. Not inside the window.
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedQuarterTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), quarters: 96, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2020, 1, 1), new DateTime(2022, 12, 31), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.NotEmpty(_ts.PostCalls);
+        Assert.False(File.Exists(Path.Combine(OutputDir, SwitchBlockedFile)));
     }
 
     [Fact]

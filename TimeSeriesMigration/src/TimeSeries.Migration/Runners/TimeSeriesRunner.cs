@@ -164,6 +164,7 @@ public class TimeSeriesRunner
     private const string SeveralHoldersReason = "several Xellent account holders at COS − 1";
     private const string NotClosedReason = "contract not closed as a migration at COS − 1";
     private const string UnknownStartReason = "unclear delivery dates in Settl (first delivery has start reason Unknown)";
+    private const string ResolutionSwitchReason = "resolution switch – waiting for Settl to confirm series";
 
     // The state reason for a first delivery in Settl that is not a change of supplier.
     private static string FirstDeliveryNotMigratedReason(string? detail) =>
@@ -1015,7 +1016,8 @@ public class TimeSeriesRunner
         DateTime? windowEndDateOverride = null,
         int? skip = null,
         bool offline = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowSwitches = false)
     {
         // The run's states go to states.json in the snapshot folder while it runs and when it ends.
         _statesRun = (SnapshotDirectory(environment), environment, dryRun, DateTimeOffset.UtcNow);
@@ -1024,7 +1026,7 @@ public class TimeSeriesRunner
         try
         {
             return await RunPostAllWithDoneMarksAsync(environment, dryRun, continueOnError, skipResolutionChange,
-                skipIfExistingPoints, cosFrom, cosTo, limit, windowEndDateOverride, skip, offline, cancellationToken);
+                skipIfExistingPoints, cosFrom, cosTo, limit, windowEndDateOverride, skip, offline, allowSwitches, cancellationToken);
         }
         finally
         {
@@ -1035,7 +1037,7 @@ public class TimeSeriesRunner
 
     private async Task<int> RunPostAllWithDoneMarksAsync(string environment, bool dryRun, bool continueOnError,
         bool skipResolutionChange, bool skipIfExistingPoints, DateOnly? cosFrom, DateOnly? cosTo, int? limit,
-        DateTime? windowEndDateOverride, int? skip, bool offline, CancellationToken cancellationToken)
+        DateTime? windowEndDateOverride, int? skip, bool offline, bool allowSwitches, CancellationToken cancellationToken)
     {
         // Metering points a live run has posted are marked done in the environment's snapshot folder,
         // online or offline, and every batch run leaves them out from the start.
@@ -1045,7 +1047,7 @@ public class TimeSeriesRunner
             try
             {
                 return await RunPostAllCoreAsync(environment, dryRun, continueOnError, skipResolutionChange, skipIfExistingPoints,
-                    cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken);
+                    cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken, allowSwitches);
             }
             finally
             {
@@ -1058,7 +1060,7 @@ public class TimeSeriesRunner
         try
         {
             return await RunPostAllCoreAsync(environment, dryRun, continueOnError, skipResolutionChange, skipIfExistingPoints,
-                cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken);
+                cosFrom, cosTo, limit, windowEndDateOverride, skip, cancellationToken, allowSwitches);
         }
         finally
         {
@@ -1291,17 +1293,9 @@ public class TimeSeriesRunner
                 var counted = await CountTimeSeriesAsync(context, candidate.Identification, BatchDeliveryCategory,
                     candidate.From.ToDateTime(TimeOnly.MinValue), candidate.To.ToDateTime(TimeOnly.MinValue), null);
 
-                // The switches: a reading period that starts inside the window, right after one in the window with
-                // the other resolution. Either direction. Its start is the ChangeDate. No switch, no row.
-                var inWindow = (readingPeriods.TryGetValue(candidate.Identification, out var periods) ? periods : [])
-                    .Where(p => p.Start < candidate.To && (p.End is not { } end || end > candidate.From))
-                    .OrderBy(p => p.Start)
-                    .ToList();
-                var switchDates = inWindow.Zip(inWindow.Skip(1))
-                    .Where(pair => pair.First.Resolution != pair.Second.Resolution
-                                   && pair.Second.Start > candidate.From && pair.Second.Start < candidate.To)
-                    .Select(pair => pair.Second.Start)
-                    .ToList();
+                // The switches, either direction. Each one's start is a ChangeDate. No switch, no row.
+                var switchDates = ReadingPeriodSwitches(
+                    readingPeriods.TryGetValue(candidate.Identification, out var periods) ? periods : [], candidate.From, candidate.To);
                 if (switchDates.Count == 0)
                     continue;
 
@@ -1516,6 +1510,25 @@ public class TimeSeriesRunner
         return required.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r, StringComparer.Ordinal).ToList();
     }
 
+    /// <summary>
+    /// The reading-period switches inside a window: a reading period (EXU_TIMEREADINGSPERIOD) that starts after
+    /// <paramref name="from"/> and before <paramref name="to"/>, right after one in the window with the other
+    /// resolution. Either direction; the dates are those reading periods' starts. resolution-changes lists them,
+    /// post --all blocks on them.
+    /// </summary>
+    private static List<DateOnly> ReadingPeriodSwitches(IEnumerable<TimeSeriesExtractionService.ReadingPeriod> periods,
+        DateOnly from, DateOnly to)
+    {
+        var inWindow = periods
+            .Where(p => p.Start < to && (p.End is not { } end || end > from))
+            .OrderBy(p => p.Start)
+            .ToList();
+        return inWindow.Zip(inWindow.Skip(1))
+            .Where(pair => pair.First.Resolution != pair.Second.Resolution && pair.Second.Start > from && pair.Second.Start < to)
+            .Select(pair => pair.Second.Start)
+            .ToList();
+    }
+
     /// <summary>One row of the resolution list: a switch date (null when there is none), what the points are
     /// in, what Settl has, and what Settl is missing.</summary>
     private sealed record ResolutionRow(string MeteringPoint, string Type, DateOnly? ChangeDate, string XellentResolutions,
@@ -1643,7 +1656,8 @@ public class TimeSeriesRunner
         int? limit,
         DateTime? windowEndDateOverride,
         int? skip,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowSwitches = false)
     {
         ResetSkipArtifacts();
 
@@ -1667,6 +1681,7 @@ public class TimeSeriesRunner
         if (dryRun) _log("Dry run: Yes (no mutations will be made)");
         if (continueOnError) _log("Continue on error: Yes (--force — failed MPs are skipped, run still exits non-zero)");
         if (skipIfExistingPoints) _log("Skip if existing points: Yes (--skip-if-existing-points)");
+        if (allowSwitches) _log("Resolution switches: sent (--allow-switches)");
         _log("");
 
         _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
@@ -1755,6 +1770,7 @@ public class TimeSeriesRunner
 
         // Xellent tells who held each metering point.
         List<TimeSeriesExtractionService.AccountMeteringPoint> allContracts;
+        Dictionary<string, List<TimeSeriesExtractionService.ReadingPeriod>>? readingPeriods = null;
         await using (var context = BuildXellentContext())
         {
             var extraction = new TimeSeriesExtractionService(context, deliveryCategory);
@@ -1765,6 +1781,19 @@ public class TimeSeriesRunner
                 .Distinct(StringComparer.Ordinal).ToList();
             allContracts = (await GetContractsByMeteringPointAsync(extraction, contractLookups))
                 .SelectMany(p => p.Value).ToList();
+            // A metering point whose reading periods switch resolution inside its window is blocked until Settl
+            // confirms its series (--allow-switches sends it). The window checks only decide windows, so they skip it.
+            if (!allowSwitches && !_markDoneMode)
+            {
+                try
+                {
+                    readingPeriods = await extraction.GetReadingPeriodsAsync(settlMeteringPoints.Select(m => m.Identification));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Error(ex.Message);
+                }
+            }
         }
         _log($"  {settlMeteringPoints.Count} metering points to check " +
              $"({settlMeteringPoints.Count(m => m.InDelivery)} in delivery, {settlMeteringPoints.Count(m => !m.InDelivery)} not)");
@@ -2047,6 +2076,19 @@ public class TimeSeriesRunner
                     doneFrom = ToDanishDate(doneBoundary);
                 _doneCandidates.Add(new DoneCandidate(identification, mpGuid, accountNumber, revisionResolution.Revision,
                     doneFrom, DateOnly.FromDateTime(endDate), revisionResolution.FromCurrentDeliveryStatus, _meteringPointType));
+                continue;
+            }
+
+            // Reading periods that switch resolution inside the window, the rule resolution-changes lists: nothing is
+            // sent until Settl confirms the series. Blocked, so the run goes on. --allow-switches sends them.
+            if (readingPeriods != null
+                && ReadingPeriodSwitches(readingPeriods.TryGetValue(identification, out var periods) ? periods : [],
+                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate)) is { Count: > 0 } switchDates)
+            {
+                RecordCoverageExclusion("Resolution switch", isChild);
+                var detail = $"reading periods switch resolution on {string.Join(", ", switchDates.Select(d => d.ToString("yyyy-MM-dd")))}";
+                CountBlocked(ResolutionSwitchReason, identification, mpGuid, accountNumber, detail);
+                _log($"BLOCKED:   MP {identification}: {detail}");
                 continue;
             }
 

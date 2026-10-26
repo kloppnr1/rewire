@@ -39,6 +39,7 @@ var cosToOption = new Option<DateOnly?>("--cos-to") { Description = "With --all:
 var skipOption = new Option<int?>("--skip") { Description = "With --all: pass over the first N metering points in range (by identification); combine with --limit to run in batches" };
 var limitOption = new Option<int?>("--limit") { Description = "With --all: stop once N metering points are sent (ready, in a dry run); skipped, excluded, blocked and done ones do not count" };
 var offlineOption = new Option<bool>("--offline") { Description = "With --all: read Settl and Xellent from the environment's snapshot (made by the snapshot command) instead of asking them again. Missing entries are read live and added. Time series points are always read fresh; posts always go to Settl." };
+var allowSwitchesOption = new Option<bool>("--allow-switches") { Description = "With --all: also send metering points whose reading periods switch resolution inside the window. Without it they are blocked until Settl confirms their series." };
 
 // Snapshot-specific
 var parallelOption = new Option<int?>("--parallel") { Description = "Settl reads per metering point run this many at a time (default 6)" };
@@ -71,7 +72,7 @@ extractCommand.SetAction(async (parseResult, cancellationToken) =>
 var postCommand = new Command("post", "Extract time series from Xellent and POST to Settl API")
 {
     accountOption, meteringPointOption, startOption, endOption,
-    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption
+    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption, allowSwitchesOption
 };
 
 postCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -97,9 +98,9 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
         }
     }
     else if (parseResult.GetValue(cosFromOption) != null || parseResult.GetValue(cosToOption) != null || parseResult.GetValue(skipOption) != null
-             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption))
+             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption) || parseResult.GetValue(allowSwitchesOption))
     {
-        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit and --offline only apply with --all");
+        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit, --offline and --allow-switches only apply with --all");
         return 1;
     }
 
@@ -128,7 +129,8 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
             parseResult.GetValue(limitOption),
             skip: parseResult.GetValue(skipOption),
             offline: parseResult.GetValue(offlineOption),
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            allowSwitches: parseResult.GetValue(allowSwitchesOption));
     }
 
     return await runner.RunPostAsync(new PostOptions
