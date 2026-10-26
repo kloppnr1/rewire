@@ -2081,9 +2081,12 @@ public class TimeSeriesRunner
 
             // Reading periods that switch resolution inside the window, the rule resolution-changes lists: nothing is
             // sent until Settl confirms the series. Blocked, so the run goes on. --allow-switches sends them.
+            // No meter installed (no values, Xellent status Oprettet) comes first: that one goes on to the post,
+            // which skips it, so it stays skipped.
             if (readingPeriods != null
                 && ReadingPeriodSwitches(readingPeriods.TryGetValue(identification, out var periods) ? periods : [],
-                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate)) is { Count: > 0 } switchDates)
+                    DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate)) is { Count: > 0 } switchDates
+                && !await NotInstalledAsync(identification, startDate, endDate, revisionResolution.DeliveryBoundary))
             {
                 RecordCoverageExclusion("Resolution switch", isChild);
                 var detail = $"reading periods switch resolution on {string.Join(", ", switchDates.Select(d => d.ToString("yyyy-MM-dd")))}";
@@ -3044,6 +3047,18 @@ public class TimeSeriesRunner
         return error == null
             ? counted!
             : throw new InvalidOperationException(error);
+    }
+
+    /// <summary>The post's "no meter installed" rule, asked ahead of it: no values in the window (counted the way a
+    /// batch dry run counts them) and Xellent status Oprettet.</summary>
+    private async Task<bool> NotInstalledAsync(string meteringPoint, DateTime startDate, DateTime endDate,
+        DateTimeOffset? deliveryBoundary)
+    {
+        await using var context = BuildXellentContext();
+        if (await MeterPointStatusAsync(context, meteringPoint) != MeterPointStatusCreated)
+            return false;
+        var counted = await CountTimeSeriesAsync(context, meteringPoint, BatchDeliveryCategory, startDate, endDate, deliveryBoundary);
+        return counted.Segments.Sum(PointCount) + (counted.CountedPointsBeforeBoundary ?? 0) == 0;
     }
 
     /// <summary>Xellent's own status for the metering point right now, cached in the snapshot like the

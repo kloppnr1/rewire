@@ -947,6 +947,40 @@ public class PostAllRunnerTests : IDisposable
             File.ReadAllText(Path.Combine(OutputDir, SwitchBlockedFile)));
     }
 
+    [Theory]
+    [InlineData(false, true)]  // no values, status Oprettet: no meter installed, skipped as before (production 571313113163656932)
+    [InlineData(false, false)]
+    [InlineData(true, true)]   // Oprettet, but values to send: the switch still holds it
+    [InlineData(true, false)]
+    public async Task RunPostAllAsync_NoMeterInstalled_StaysSkippedWhenItsReadingPeriodsSwitch(bool hasValues, bool dryRun)
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        if (hasValues)
+            _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+                agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 1, 1), new DateTime(2023, 4, 25), seriesResolution: 0);
+        _xellent.SeedReadingPeriod(MpId1, "for", new DateTime(2023, 4, 26), new DateTime(2154, 12, 31), seriesResolution: 1);
+        _xellent.SeedMeterPointStatus(MpId1, "for", status: 5, start: new DateTime(2020, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        var blocked = Path.Combine(OutputDir, SwitchBlockedFile);
+        var skipped = Path.Combine(OutputDir, "skip-not-installed.csv");
+        Assert.Equal(hasValues, File.Exists(blocked));
+        Assert.Equal(!hasValues, File.Exists(skipped));
+        if (!hasValues)
+        {
+            Assert.Contains(MpId1, File.ReadAllText(skipped));
+            Assert.Contains(logs, l => l.Contains("1  no meter installed (Xellent status Oprettet)", StringComparison.Ordinal));
+        }
+    }
+
     [Fact]
     public async Task RunPostAllAsync_ASwitchOnTheWindowStart_IsNotBlocked()
     {
