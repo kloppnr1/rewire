@@ -305,8 +305,42 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
             Powerexchangearea = string.Empty,
             Recid = _nextRecid++,
         });
+        // A physical meter, so post --all's subtype check lets the metering point through unless a test says otherwise.
+        AddMeterRow(ctx, agreementNum, "1", deliveryCategory, companyId, start, subType: 1);
         ctx.SaveChanges();
     }
+
+    /// <summary>
+    /// Sets the subtype (EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE: 1 = physical, 2 = virtual, 3 = calculated) of the
+    /// (metering point, company) delivery point: its meter rows are replaced by one with <paramref name="subType"/>,
+    /// or removed when it is null.
+    /// </summary>
+    public void SeedMeterSubType(string meteringPoint, int? subType, string companyId = DefaultCompanyId)
+    {
+        using var ctx = CreateContext();
+        var dp = ctx.ExuDelpoints.Single(d => d.Meteringpoint == meteringPoint && d.Companyid == companyId);
+        ctx.ExuMeterTableTrades.RemoveRange(ctx.ExuMeterTableTrades.Where(m =>
+            m.Agreementnum == dp.Attachmentnum && m.Delpointnum == dp.Num && m.Companyid == companyId));
+        if (subType is { } value)
+            AddMeterRow(ctx, dp.Attachmentnum, dp.Num, dp.Deliverycategory, companyId, DefaultAgreementStart, value);
+        ctx.SaveChanges();
+    }
+
+    private void AddMeterRow(XellentDbContext ctx, string agreementNum, string delpointNum, string deliveryCategory,
+        string companyId, DateTime start, int subType)
+        => ctx.ExuMeterTableTrades.Add(new ExuMeterTableTrade
+        {
+            Dataareaid = DataAreaId,
+            Deliverycategory = deliveryCategory,
+            Companyid = companyId,
+            Agreementnum = agreementNum,
+            Delpointnum = delpointNum,
+            Startdate = start,
+            Enddate = new DateTime(1900, 1, 1),
+            Meternum = "M1",
+            MeteringPointDhSubType = subType,
+            Recid = _nextRecid++,
+        });
 
     public void Dispose()
     {

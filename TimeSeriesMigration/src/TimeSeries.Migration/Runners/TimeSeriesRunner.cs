@@ -58,7 +58,10 @@ public enum TimeSeriesSkipCategory
     ExcludedPayer,
 
     /// <summary>No values in the window and Xellent status 5 "Oprettet": no meter is installed or connected, so there is nothing to post.</summary>
-    NotInstalled
+    NotInstalled,
+
+    /// <summary>post --all: the metering point's subtype in Xellent (EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE on its latest agreement) is 2, virtual.</summary>
+    VirtualInXellent
 }
 
 public sealed record MissingReadingsEntry(string MeteringPointId, Guid SettlId, string? Account,
@@ -89,7 +92,8 @@ public class TimeSeriesRunner
             [TimeSeriesSkipCategory.NotMigrated] = "skip-not-migrated.csv",
             [TimeSeriesSkipCategory.KnownIssueXellentResolution] = "known-issue-xellent-resolution.csv",
             [TimeSeriesSkipCategory.ExcludedPayer] = "skip-payer-6-series.csv",
-            [TimeSeriesSkipCategory.NotInstalled] = "skip-not-installed.csv"
+            [TimeSeriesSkipCategory.NotInstalled] = "skip-not-installed.csv",
+            [TimeSeriesSkipCategory.VirtualInXellent] = "skip-virtual-in-xellent.csv"
         };
 
     /// <summary>Every skip artifact a run can produce, ambiguity CSV included. Used by the dashboard to bundle them.</summary>
@@ -165,6 +169,11 @@ public class TimeSeriesRunner
     private const string NotClosedReason = "contract not closed as a migration at COS − 1";
     private const string UnknownStartReason = "unclear delivery dates in Settl (first delivery has start reason Unknown)";
     private const string ResolutionSwitchReason = "resolution switch – waiting for Settl to confirm series";
+    private const string BlankSubTypeReason = "subtype blank in Xellent";
+
+    // EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE: 1 = physical, 2 = virtual, 3 = calculated. Anything else is blank.
+    private const int SubTypeVirtual = 2;
+    private static readonly int[] KnownSubTypes = [1, SubTypeVirtual, 3];
 
     // The state reason for a first delivery in Settl that is not a change of supplier.
     private static string FirstDeliveryNotMigratedReason(string? detail) =>
@@ -183,6 +192,7 @@ public class TimeSeriesRunner
         TimeSeriesSkipCategory.MissingInXellent => NoContractReason,
         TimeSeriesSkipCategory.NotMigrated => NotClosedReason,
         TimeSeriesSkipCategory.ExcludedPayer => "payer in the 6##### series",
+        TimeSeriesSkipCategory.VirtualInXellent => "virtual metering point in Xellent",
         _ => category.ToString(),
     };
 
@@ -1772,6 +1782,7 @@ public class TimeSeriesRunner
         // Xellent tells who held each metering point.
         List<TimeSeriesExtractionService.AccountMeteringPoint> allContracts;
         Dictionary<string, List<TimeSeriesExtractionService.ReadingPeriod>>? readingPeriods = null;
+        Dictionary<string, TimeSeriesExtractionService.MeteringPointSubType>? subTypes = null;
         await using (var context = BuildXellentContext())
         {
             var extraction = new TimeSeriesExtractionService(context, deliveryCategory);
@@ -1789,6 +1800,19 @@ public class TimeSeriesRunner
                 try
                 {
                     readingPeriods = await extraction.GetReadingPeriodsAsync(settlMeteringPoints.Select(m => m.Identification));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Error(ex.Message);
+                }
+            }
+            // A virtual metering point in Xellent is skipped, one whose subtype is blank is blocked. The window
+            // checks only decide windows, so they skip this.
+            if (!_markDoneMode)
+            {
+                try
+                {
+                    subTypes = await extraction.GetMeteringPointSubTypesAsync(settlMeteringPoints.Select(m => m.Identification));
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -2078,6 +2102,35 @@ public class TimeSeriesRunner
                 _doneCandidates.Add(new DoneCandidate(identification, mpGuid, accountNumber, revisionResolution.Revision,
                     doneFrom, DateOnly.FromDateTime(endDate), revisionResolution.FromCurrentDeliveryStatus, _meteringPointType));
                 continue;
+            }
+
+            // The subtype on the metering point's latest agreement in Xellent: virtual is skipped, blank (no meter
+            // row, or a value that is not 1–3) is blocked. Physical and calculated go on. No meter installed (no values,
+            // Xellent status Oprettet) comes before blank, as it does before the switch block: it stays skipped.
+            if (subTypes != null)
+            {
+                var subType = subTypes.GetValueOrDefault(identification);
+                if (subType?.SubType == SubTypeVirtual)
+                {
+                    var skipReason = SkipReason(TimeSeriesSkipCategory.VirtualInXellent);
+                    RecordCoverageExclusion("Virtual in Xellent", isChild);
+                    CountState("Skipped", skipReason);
+                    _log($"SKIP MP {identification}: {skipReason} (agreement {subType.Agreement}){TypeSuffix()}");
+                    RecordSkip(TimeSeriesSkipCategory.VirtualInXellent, accountNumber, identification, mpGuid,
+                        revisionResolution.Revision, revisionResolution.DeliveryBoundary, $"agreement {subType.Agreement}");
+                    continue;
+                }
+                if ((subType?.SubType is not { } known || !KnownSubTypes.Contains(known))
+                    && !await NotInstalledAsync(identification, startDate, endDate, revisionResolution.DeliveryBoundary))
+                {
+                    var detail = subType == null ? "no delivery point in Xellent"
+                        : subType.SubType == null ? $"agreement {subType.Agreement}: no meter row"
+                        : $"agreement {subType.Agreement}: METERINGPOINTDHSUBTYPE {subType.SubType}";
+                    RecordCoverageExclusion("Subtype blank in Xellent", isChild);
+                    CountBlocked(BlankSubTypeReason, identification, mpGuid, accountNumber, detail);
+                    _log($"BLOCKED:   MP {identification}: {BlankSubTypeReason} ({detail})");
+                    continue;
+                }
             }
 
             // Reading periods that switch resolution inside the window, the rule resolution-changes lists: nothing is

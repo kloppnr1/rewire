@@ -130,6 +130,8 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 
 A metering point whose reading periods (`EXU_TIMEREADINGSPERIOD`) switch resolution inside its window, in either direction, is blocked as `resolution switch – waiting for Settl to confirm series` and nothing is sent for it. The switch rule is the one `resolution-changes` uses, but the block does not look at which series Settl has. A metering point with no meter installed (no values, Xellent status Oprettet) is checked first and stays skipped. The detail column names the switch dates. They go to `blocked-resolution-switch-waiting-for-settl-to-confirm-series.csv`. When Settl has confirmed the series, send them with `--allow-switches`.
 
+The metering point's subtype in Xellent is `EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE` (1 = physical, 2 = virtual, 3 = calculated), read from the delivery point whose agreement starts last, on its meter row that starts last. Virtual is skipped as `virtual metering point in Xellent` (`skip-virtual-in-xellent.csv`). Blank — no meter row on that agreement, or a value other than 1–3 — is blocked as `subtype blank in Xellent` in `blocked-subtype-blank-in-xellent.csv`; the detail column names the agreement. A metering point with no meter installed is checked first and stays skipped. Physical and calculated are sent. Both checks come before the switch block.
+
 What happens to each metering point:
 - **Done:** points to Settl, then an externally invoiced period with `BillableTypes=["Contracts", "ExtraInvoiceLines", "MarketPriceLists", "NationalContracts", "PaymentFee", "MovingFee"]`. A dry run counts these as **ready**.
 - **Skipped** to a CSV file (below): a rule says it is not migrated, for example never delivered, no migration in Xellent at COS − 1, or no meter installed.
@@ -147,6 +149,7 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 | File | Reason |
 |------|--------|
 | `skip-not-installed.csv` | No values in the window and Xellent status 5 "Oprettet": no meter installed or connected. Nothing to post; not counted as posted. A metering point with a meter but no values is blocked instead |
+| `skip-virtual-in-xellent.csv` | `post --all`: subtype 2, virtual, on the latest agreement in Xellent (`EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE`) |
 | `skip-payer-6-series.csv` | The metering point's current payer in Settl is in the 6##### series (six digits starting with 6); those are not migrated. Left out before `--skip` / `--limit` count |
 | `skip-missing-in-xellent.csv` | Nobody held the metering point in Xellent the day before delivery |
 | `skip-not-migrated.csv` | No migration in Xellent at COS − 1: not in delivery in Settl and no migration, or a contract not closed as a migration |

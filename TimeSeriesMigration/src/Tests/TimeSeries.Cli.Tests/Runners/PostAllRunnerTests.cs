@@ -979,6 +979,110 @@ public class PostAllRunnerTests : IDisposable
         }
     }
 
+    private const string VirtualSkipFile = "skip-virtual-in-xellent.csv";
+    private const string BlankSubTypeBlockedFile = "blocked-subtype-blank-in-xellent.csv";
+
+    // A migrated metering point with values to send, its delivery point on company "for".
+    private void SeedMigratedWithValues()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunPostAllAsync_AVirtualMeteringPointInXellent_IsSkipped(bool dryRun)
+    {
+        // Production 571313113163201620, 571313114400604334, 571313134200006381: subtype 2 on the latest agreement.
+        SeedMigratedWithValues();
+        _xellent.SeedMeterSubType(MpId1, 2, companyId: "for");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: dryRun, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.Empty(DoneMarkLines());
+        var rows = File.ReadAllLines(Path.Combine(OutputDir, VirtualSkipFile));
+        Assert.Equal(2, rows.Length);
+        Assert.Contains(MpId1, rows[1]);
+        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: virtual metering point in Xellent", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains("1  virtual metering point in Xellent", StringComparison.Ordinal));
+        Assert.False(File.Exists(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
+    }
+
+    [Theory]
+    [InlineData(null, "no meter row")]
+    [InlineData(0, "METERINGPOINTDHSUBTYPE 0")]
+    public async Task RunPostAllAsync_ABlankSubtypeInXellent_IsBlockedInItsOwnFile(int? subType, string detail)
+    {
+        SeedMigratedWithValues();
+        _xellent.SeedMeterSubType(MpId1, subType, companyId: "for");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Empty(_mp.AddEipCalls);
+        var rows = File.ReadAllLines(Path.Combine(OutputDir, BlankSubTypeBlockedFile));
+        Assert.Equal(2, rows.Length);
+        Assert.Contains(MpId1, rows[1]);
+        Assert.Contains("subtype blank in Xellent", rows[1]);
+        Assert.Contains(detail, rows[1]);
+        Assert.Contains(logs, l => l.StartsWith($"BLOCKED:   MP {MpId1}: subtype blank in Xellent", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal));
+        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualSkipFile)));
+    }
+
+    [Theory]
+    [InlineData(1)]  // physical
+    [InlineData(3)]  // calculated
+    public async Task RunPostAllAsync_APhysicalOrCalculatedMeteringPoint_IsSent(int subType)
+    {
+        SeedMigratedWithValues();
+        _xellent.SeedMeterSubType(MpId1, subType, companyId: "for");
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.NotEmpty(_ts.PostCalls);
+        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualSkipFile)));
+        Assert.False(File.Exists(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_TheSubtypeComesFromTheLatestAgreement()
+    {
+        // Production 571313134499058412: physical on its agreement from 2020, no meter row on the one from 2024.
+        SeedMigratedWithValues();
+        _xellent.SeedContract("100001", MpId1, companyId: "old", partStart: new DateTime(2020, 1, 1), partEnd: new DateTime(2022, 12, 31));
+        _xellent.SeedMeterSubType(MpId1, null, companyId: "for");
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NoMeterInstalled_StaysSkippedWhenItsSubtypeIsBlank()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        _xellent.SeedMeterSubType(MpId1, null, companyId: "for");
+        _xellent.SeedMeterPointStatus(MpId1, "for", status: 5, start: new DateTime(2020, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.False(File.Exists(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "skip-not-installed.csv")));
+    }
+
     [Fact]
     public async Task RunPostAllAsync_ASwitchOnTheWindowStart_IsNotBlocked()
     {

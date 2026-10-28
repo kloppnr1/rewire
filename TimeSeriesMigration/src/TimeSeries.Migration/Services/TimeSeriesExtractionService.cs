@@ -153,6 +153,53 @@ public class TimeSeriesExtractionService
         }
         return result;
     }
+
+    /// <summary>A metering point's subtype in Xellent: EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE (1 = physical,
+    /// 2 = virtual, 3 = calculated) on its latest agreement. <paramref name="SubType"/> is null when that agreement
+    /// has no meter row.</summary>
+    public sealed record MeteringPointSubType(string Agreement, int? SubType);
+
+    /// <summary>
+    /// The subtype of each of these metering points in this delivery category: the delivery point whose agreement
+    /// starts last, and on it the meter row (EXU_METERTABLETRADE) that starts last. A metering point with no delivery
+    /// point is left out. Queried in chunks to stay under SQL Server's parameter limit.
+    /// </summary>
+    public async Task<Dictionary<string, MeteringPointSubType>> GetMeteringPointSubTypesAsync(IEnumerable<string> meteringPoints)
+    {
+        var result = new Dictionary<string, MeteringPointSubType>(StringComparer.Ordinal);
+        foreach (var chunk in meteringPoints.Distinct().Chunk(1000))
+        {
+            var delpoints = await (
+                from dp in _context.ExuDelpoints
+                join agreement in _context.ExuAgreementTables
+                    on new { Agreementnum = dp.Attachmentnum, dp.Dataareaid, dp.Companyid }
+                    equals new { agreement.Agreementnum, agreement.Dataareaid, agreement.Companyid }
+                where dp.Dataareaid == DataAreaId && dp.Deliverycategory == _deliveryCategory && chunk.Contains(dp.Meteringpoint)
+                select new { dp.Meteringpoint, dp.Num, dp.Attachmentnum, dp.Companyid, AgreementStart = agreement.Startdate }
+            ).Distinct().ToListAsync();
+            if (delpoints.Count == 0)
+                continue;
+            var latest = delpoints
+                .GroupBy(d => d.Meteringpoint)
+                .Select(g => g.OrderByDescending(d => d.AgreementStart).ThenByDescending(d => d.Attachmentnum, StringComparer.Ordinal).First())
+                .ToList();
+            var attachments = latest.Select(d => d.Attachmentnum).Distinct().ToList();
+            var meters = await _context.ExuMeterTableTrades
+                .Where(m => m.Dataareaid == DataAreaId && m.Deliverycategory == _deliveryCategory && attachments.Contains(m.Agreementnum))
+                .Select(m => new { m.Agreementnum, m.Delpointnum, m.Companyid, m.Startdate, m.MeteringPointDhSubType })
+                .ToListAsync();
+            foreach (var dp in latest)
+            {
+                var meter = meters
+                    .Where(m => m.Agreementnum == dp.Attachmentnum && m.Delpointnum == dp.Num && m.Companyid == dp.Companyid)
+                    .OrderByDescending(m => m.Startdate)
+                    .FirstOrDefault();
+                result[dp.Meteringpoint] = new MeteringPointSubType(dp.Attachmentnum, meter?.MeteringPointDhSubType);
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// The metering point's status in Xellent right now (EXU_METERPOINTSTATUSPERIOD on its delivery
     /// point): the status of the period with the latest start. Null when Xellent records none.
