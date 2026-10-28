@@ -979,7 +979,7 @@ public class PostAllRunnerTests : IDisposable
         }
     }
 
-    private const string VirtualSkipFile = "skip-virtual-in-xellent.csv";
+    private const string VirtualBlockedFile = "blocked-virtual-metering-point-in-xellent-needs-a-decision.csv";
     private const string BlankSubTypeBlockedFile = "blocked-subtype-blank-in-xellent.csv";
 
     // A migrated metering point with values to send, its delivery point on company "for".
@@ -996,7 +996,7 @@ public class PostAllRunnerTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task RunPostAllAsync_AVirtualMeteringPointInXellent_IsSkipped(bool dryRun)
+    public async Task RunPostAllAsync_AVirtualMeteringPointInXellent_IsBlockedInItsOwnFile(bool dryRun)
     {
         // Production 571313113163201620, 571313114400604334, 571313134200006381: subtype 2 on the latest agreement.
         SeedMigratedWithValues();
@@ -1008,12 +1008,66 @@ public class PostAllRunnerTests : IDisposable
         Assert.Empty(_ts.PostCalls);
         Assert.Empty(_mp.AddEipCalls);
         Assert.Empty(DoneMarkLines());
-        var rows = File.ReadAllLines(Path.Combine(OutputDir, VirtualSkipFile));
+        var rows = File.ReadAllLines(Path.Combine(OutputDir, VirtualBlockedFile));
         Assert.Equal(2, rows.Length);
         Assert.Contains(MpId1, rows[1]);
-        Assert.Contains(logs, l => l.StartsWith($"SKIP MP {MpId1}: virtual metering point in Xellent", StringComparison.Ordinal));
-        Assert.Contains(logs, l => l.Contains("1  virtual metering point in Xellent", StringComparison.Ordinal));
+        Assert.Contains("virtual metering point in Xellent – needs a decision", rows[1]);
+        Assert.Contains(logs, l => l.StartsWith($"BLOCKED:   MP {MpId1}: virtual metering point in Xellent – needs a decision", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.Contains($"→ {VirtualBlockedFile}", StringComparison.Ordinal));
         Assert.False(File.Exists(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_VirtualComesBeforeNeverDelivered()
+    {
+        NotInDeliveryInSettl(Guid.NewGuid(), currentDeliveryStart: null);
+        _xellent.SeedContract(Account, MpId1, companyId: "for");
+        _xellent.SeedMeterSubType(MpId1, 2, companyId: "for");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, VirtualBlockedFile)));
+        Assert.Contains(logs, l => l.Contains("0 never delivered", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_VirtualComesBeforeTheOtherRules_AndIsNotPassedOverBySkip()
+    {
+        // MP1 has no Xellent contract at COS − 1, which would be a skip; virtual wins. --skip 1 then passes over
+        // MP2, not MP1.
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2020, 1, 1), partEnd: new DateTime(2021, 12, 31));
+        _xellent.SeedMeterSubType(MpId1, 2, companyId: "for");
+        _xellent.SeedHourlyTimeSeries(MpId2, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract("acct2", MpId2, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false, skip: 1));
+
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, VirtualBlockedFile)));
+        Assert.False(File.Exists(Path.Combine(OutputDir, "skip-missing-in-xellent.csv")));
+        Assert.Contains(logs, l => l.Contains("1 passed over (--skip)", StringComparison.Ordinal));
+        Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_The6SeriesPayerWinsOverVirtual()
+    {
+        SeedMigratedWithValues();
+        _xellent.SeedMeterSubType(MpId1, 2, companyId: "for");
+        var mpGuid = Guid.NewGuid();
+        InSettl((MpId1, mpGuid));
+        _payers.PayerOf[mpGuid] = "612345";
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "skip-payer-6-series.csv")));
+        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualBlockedFile)));
     }
 
     [Theory]
@@ -1036,7 +1090,7 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(detail, rows[1]);
         Assert.Contains(logs, l => l.StartsWith($"BLOCKED:   MP {MpId1}: subtype blank in Xellent", StringComparison.Ordinal));
         Assert.Contains(logs, l => l.StartsWith("  Blocked: 1", StringComparison.Ordinal));
-        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualSkipFile)));
+        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualBlockedFile)));
     }
 
     [Theory]
@@ -1050,7 +1104,7 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
 
         Assert.NotEmpty(_ts.PostCalls);
-        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualSkipFile)));
+        Assert.False(File.Exists(Path.Combine(OutputDir, VirtualBlockedFile)));
         Assert.False(File.Exists(Path.Combine(OutputDir, BlankSubTypeBlockedFile)));
     }
 

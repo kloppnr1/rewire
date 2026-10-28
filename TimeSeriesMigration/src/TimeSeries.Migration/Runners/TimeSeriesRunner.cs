@@ -58,10 +58,7 @@ public enum TimeSeriesSkipCategory
     ExcludedPayer,
 
     /// <summary>No values in the window and Xellent status 5 "Oprettet": no meter is installed or connected, so there is nothing to post.</summary>
-    NotInstalled,
-
-    /// <summary>post --all: the metering point's subtype in Xellent (EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE on its latest agreement) is 2, virtual.</summary>
-    VirtualInXellent
+    NotInstalled
 }
 
 public sealed record MissingReadingsEntry(string MeteringPointId, Guid SettlId, string? Account,
@@ -92,8 +89,7 @@ public class TimeSeriesRunner
             [TimeSeriesSkipCategory.NotMigrated] = "skip-not-migrated.csv",
             [TimeSeriesSkipCategory.KnownIssueXellentResolution] = "known-issue-xellent-resolution.csv",
             [TimeSeriesSkipCategory.ExcludedPayer] = "skip-payer-6-series.csv",
-            [TimeSeriesSkipCategory.NotInstalled] = "skip-not-installed.csv",
-            [TimeSeriesSkipCategory.VirtualInXellent] = "skip-virtual-in-xellent.csv"
+            [TimeSeriesSkipCategory.NotInstalled] = "skip-not-installed.csv"
         };
 
     /// <summary>Every skip artifact a run can produce, ambiguity CSV included. Used by the dashboard to bundle them.</summary>
@@ -169,6 +165,7 @@ public class TimeSeriesRunner
     private const string NotClosedReason = "contract not closed as a migration at COS − 1";
     private const string UnknownStartReason = "unclear delivery dates in Settl (first delivery has start reason Unknown)";
     private const string ResolutionSwitchReason = "resolution switch – waiting for Settl to confirm series";
+    private const string VirtualReason = "virtual metering point in Xellent – needs a decision";
     private const string BlankSubTypeReason = "subtype blank in Xellent";
 
     // EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE: 1 = physical, 2 = virtual, 3 = calculated. Anything else is blank.
@@ -192,7 +189,6 @@ public class TimeSeriesRunner
         TimeSeriesSkipCategory.MissingInXellent => NoContractReason,
         TimeSeriesSkipCategory.NotMigrated => NotClosedReason,
         TimeSeriesSkipCategory.ExcludedPayer => "payer in the 6##### series",
-        TimeSeriesSkipCategory.VirtualInXellent => "virtual metering point in Xellent",
         _ => category.ToString(),
     };
 
@@ -1806,8 +1802,8 @@ public class TimeSeriesRunner
                     return Error(ex.Message);
                 }
             }
-            // A virtual metering point in Xellent is skipped, one whose subtype is blank is blocked. The window
-            // checks only decide windows, so they skip this.
+            // A metering point whose subtype in Xellent is virtual or blank is blocked. The window checks only
+            // decide windows, so they skip this.
             if (!_markDoneMode)
             {
                 try
@@ -1855,6 +1851,16 @@ public class TimeSeriesRunner
             var parentIdentification = settlMeteringPoints[i].ParentIdentification;
             var isChild = parentIdentification != null;
             _meteringPointType = isChild ? "Child" : "Parent";
+            // Virtual in Xellent (subtype 2 on the latest agreement): blocked until someone decides, nothing is sent.
+            // Only children, done, the by-hand exclusions and the 6##### payers come before it; every other skip and
+            // block rule, the delivery-start range and --skip come after.
+            if (subTypes?.GetValueOrDefault(identification) is { SubType: SubTypeVirtual } virtualSubType)
+            {
+                RecordCoverageExclusion("Virtual in Xellent", isChild);
+                CountBlocked(VirtualReason, identification, mpGuid, null, $"agreement {virtualSubType.Agreement}");
+                _log($"BLOCKED:   MP {identification}: {VirtualReason} (agreement {virtualSubType.Agreement})");
+                continue;
+            }
             // The block header says when the fallback is used; its own log line would print for every metering point checked.
             var revisionResolution = await ResolveRevisionAsync(mpGuid, cancellationToken, quiet: true);
             if (_missingReadingsScan != null && revisionResolution.Error is { } connectionError)
@@ -2104,22 +2110,12 @@ public class TimeSeriesRunner
                 continue;
             }
 
-            // The subtype on the metering point's latest agreement in Xellent: virtual is skipped, blank (no meter
-            // row, or a value that is not 1–3) is blocked. Physical and calculated go on. No meter installed (no values,
-            // Xellent status Oprettet) comes before blank, as it does before the switch block: it stays skipped.
+            // The subtype on the metering point's latest agreement in Xellent: blank (no meter row, or a value that is
+            // not 1–3) is blocked. Physical and calculated go on; virtual was blocked at the start. No meter installed
+            // (no values, Xellent status Oprettet) comes before blank, as it does before the switch block: it stays skipped.
             if (subTypes != null)
             {
                 var subType = subTypes.GetValueOrDefault(identification);
-                if (subType?.SubType == SubTypeVirtual)
-                {
-                    var skipReason = SkipReason(TimeSeriesSkipCategory.VirtualInXellent);
-                    RecordCoverageExclusion("Virtual in Xellent", isChild);
-                    CountState("Skipped", skipReason);
-                    _log($"SKIP MP {identification}: {skipReason} (agreement {subType.Agreement}){TypeSuffix()}");
-                    RecordSkip(TimeSeriesSkipCategory.VirtualInXellent, accountNumber, identification, mpGuid,
-                        revisionResolution.Revision, revisionResolution.DeliveryBoundary, $"agreement {subType.Agreement}");
-                    continue;
-                }
                 if ((subType?.SubType is not { } known || !KnownSubTypes.Contains(known))
                     && !await NotInstalledAsync(identification, startDate, endDate, revisionResolution.DeliveryBoundary))
                 {
