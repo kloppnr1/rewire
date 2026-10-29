@@ -1062,6 +1062,94 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "skip-not-installed.csv")));
     }
 
+    // The first delivery starts on 2026-01-01 as a change of supplier; `notInDelivery` are Settl's InDelivery=false periods.
+    private void FirstDeliveryFrom2026With(params (DateTime Start, DateTime End)[] notInDelivery)
+    {
+        var start = DanishMidnight(new DateTime(2026, 1, 1));
+        _mp.GetDeliveryStatusesResponse = _ => (
+            new GetDeliveryStatusesResponse
+            {
+                DeliveryStatuses =
+                [
+                    new DeliveryStatusDto { InDelivery = true, StartReason = DeliveryStartReason.ChangeOfSupplier, Period = new TimePeriodDto { Start = start } },
+                    .. notInDelivery.Select(p => new DeliveryStatusDto
+                    {
+                        InDelivery = false,
+                        Period = new TimePeriodDto { Start = DanishMidnight(p.Start), End = DanishMidnight(p.End) }
+                    })
+                ]
+            },
+            null);
+    }
+
+    [Theory]
+    [InlineData(2026, 1, 1)]  // the customer moved out the day delivery started
+    [InlineData(2026, 3, 5)]  // production 571313113163113848: no "Not in delivery" before 2026-03-05, only after
+    public async Task RunPostAllAsync_NoNotInDeliveryBeforeTheFirstDelivery_UsesTheNormalWindow(int year, int month, int day)
+    {
+        SeedMigratedWithValues();
+        var movedOut = new DateTime(year, month, day);
+        FirstDeliveryFrom2026With((movedOut, movedOut.AddMonths(2)));
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        // No boundary: three years back to 2023-01-01, which is also where the customer's own contract starts.
+        Assert.Contains(logs, l => l.Contains($"MP {MpId1}: end=2026-01-01  start=2023-01-01", StringComparison.Ordinal));
+        Assert.NotEmpty(_ts.PostCalls);
+        Assert.Single(_mp.AddEipCalls);
+        Assert.False(File.Exists(Path.Combine(OutputDir, "skip-delivery-boundary-unresolved.csv")));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NoNotInDeliveryBeforeTheFirstDelivery_StillCutsAtTheCustomersOwnContract()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2024, 7, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2024, 6, 1), migratedOn: new DateTime(2026, 1, 1));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        FirstDeliveryFrom2026With((new DateTime(2026, 4, 1), new DateTime(2026, 6, 1)));
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Contains(logs, l => l.Contains($"MP {MpId1}: end=2026-01-01  start=2024-06-01", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_NoNotInDeliveryBeforeTheFirstDelivery_StillNeedsTheCloseAtCosMinusOne()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        _xellent.SeedHourlyTimeSeries(MpId1, new DateTime(2023, 5, 1, 0, 0, 0, DateTimeKind.Utc), hours: 24, companyId: "for",
+            agreementStart: new DateTime(2023, 1, 1), agreementEnd: new DateTime(2025, 12, 31));
+        // The contract ends on 2025-12-31, but its agreement is not "Leverance ophørt".
+        _xellent.SeedContract(Account, MpId1, companyId: "for", partStart: new DateTime(2023, 1, 1), migratedOn: new DateTime(2026, 1, 1),
+            agreementStatus: 1);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        FirstDeliveryFrom2026With((new DateTime(2026, 3, 5), new DateTime(2026, 5, 1)));
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "skip-not-migrated.csv")));
+        Assert.False(File.Exists(Path.Combine(OutputDir, "skip-delivery-boundary-unresolved.csv")));
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ANotInDeliveryBeforeTheFirstDeliveryThatEndsElsewhere_StaysUnresolved()
+    {
+        SeedMigratedWithValues();
+        FirstDeliveryFrom2026With((new DateTime(2025, 1, 1), new DateTime(2025, 12, 1)), (new DateTime(2026, 3, 5), new DateTime(2026, 5, 1)));
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, "skip-delivery-boundary-unresolved.csv")));
+    }
+
     [Fact]
     public async Task RunPostAllAsync_ASwitchOnTheWindowStart_IsNotBlocked()
     {

@@ -2878,6 +2878,11 @@ public class TimeSeriesRunner
 
         if (matchingInactive.Count == 0)
         {
+            // No InDelivery=false period before the first delivery (only later ones, e.g. after a move-out):
+            // Settl's history starts with the change of supplier, so there is no boundary, the same as
+            // with no InDelivery=false period at all (production 2026-10-29: 12, e.g. 571313113163113848).
+            if (inactive.All(s => s.Period is { } p && p.Start != default && p.Start >= revision))
+                return RevisionResolutionResult.Resolved(revision, null, active);
             return RevisionResolutionResult.SafetySkipped(
                 TimeSeriesSkipCategory.DeliveryBoundaryUnresolved,
                 $"delivery boundary unresolved (no InDelivery=false period ends at revision {revision:O})",

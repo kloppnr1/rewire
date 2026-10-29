@@ -113,7 +113,7 @@ Settl decides which metering points are posted; Xellent decides whose they are.
 1. Every electricity metering point in Settl's list, parents only. Children (a Settl relation or the Xellent relation table) are never in scope.
 2. Per metering point, the delivery start comes from its delivery statuses, the way DataMigration picks it: the first in-delivery period, which must have started as a change of supplier. A later move-in, gap or return never replaces it, and the metering point's current delivery status does not matter. A first delivery that is a move-in, or has no start reason, is skipped as not migrated; start reason Unknown, or two start reasons on the first day, is blocked. Settl can fail to mark delivery (2026-09), so metering points shown as not in delivery anywhere are checked too, using the start of their current delivery status.
 3. The account is whoever held the metering point in Xellent (`El-ekstern` contracts) on the day before delivery starts. That relationship must be closed as a migration.
-4. Window: `end` = delivery start, `start = max(end − 3 years, delivery boundary, the account's own contract start)`.
+4. Window: `end` = delivery start, `start = max(end − 3 years, delivery boundary, the account's own contract start)`. The delivery boundary is the start of the not-in-delivery period that ends where delivery starts. With no not-in-delivery period before the first delivery (none at all, or only later ones) there is no boundary.
 
 | Option | Meaning |
 |--------|---------|
@@ -153,7 +153,7 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 | `skip-missing-in-xellent.csv` | Nobody held the metering point in Xellent the day before delivery |
 | `skip-not-migrated.csv` | No migration in Xellent at COS − 1: not in delivery in Settl and no migration, or a contract not closed as a migration |
 | `ambiguous-revisions.csv` | More than one `InDelivery=true` delivery status |
-| `skip-delivery-boundary-unresolved.csv` / `-ambiguous.csv` / `-invalid.csv` | The not-in-delivery period before delivery can't be pinned down |
+| `skip-delivery-boundary-unresolved.csv` / `-ambiguous.csv` / `-invalid.csv` | A not-in-delivery period starts before delivery, but none (or several) end where it starts, or that period is invalid |
 | `skip-no-points-after-boundary.csv` | Every point falls before the delivery boundary |
 | `skip-existing-settl-data.csv` | Settl already has points (`--skip-if-existing-points`) |
 | `skip-resolution-change.csv` | Resolution change (`--skip-resolution-change`): included outgoing values use more than one resolution after dated conversion and delivery filtering |
