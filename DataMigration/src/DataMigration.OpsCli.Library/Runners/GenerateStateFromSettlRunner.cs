@@ -118,6 +118,7 @@ public class GenerateStateFromSettlRunner
     private readonly ISettlCustomerLinkLookup? _customerLinkLookup;
     private StateSourceSnapshot? _sourceSnapshot;
     private IReadOnlyList<SourceAccountOwnershipIssue>? _ownershipIssues;
+    private IReadOnlyList<SameCvrAcceptance>? _sameCvrAccepted;
     private IReadOnlyList<HistoricalSourceDecision>? _historicalSourceDecisions;
     private IReadOnlyList<ExcludedCompanyInvoice>? _excludedCompanyInvoices;
     private IReadOnlyList<DeliveryStartAudit>? _deliveryStartAudit;
@@ -568,6 +569,7 @@ public class GenerateStateFromSettlRunner
             ?? throw new InvalidOperationException("Offline capture has no state seed.");
         var ownership = ApplyOwnershipEvidence(state, inputs.Ownership, options.Env,
             inputs.ExcludedSourceAccounts, options.SkipUnresolvedSourceAccounts);
+        LogSameCvrRuleSkipped(ownership.Issues);
         if (ownership.Issues.Count > 0 && !options.SkipUnresolvedSourceAccounts)
         {
             var reportPath = SourceAccountOwnership.IssueReportPath(options.OutputPath);
@@ -618,6 +620,7 @@ public class GenerateStateFromSettlRunner
         }
         var stopwatch = Stopwatch.StartNew();
         _ownershipIssues = null;
+        _sameCvrAccepted = null;
         _historicalSourceDecisions = null;
         _excludedCompanyInvoices = null;
         _deliveryStartAudit = null;
@@ -687,6 +690,14 @@ public class GenerateStateFromSettlRunner
                 new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
                 cancellationToken);
             Log($"  Ownership issue report: {issueReportPath} ({issues.Count} row(s))");
+        }
+        if (_sameCvrAccepted is { } sameCvrAccepted)
+        {
+            var sameCvrReportPath = SourceAccountOwnership.SameCvrReportPath(options.OutputPath);
+            await File.WriteAllTextAsync(sameCvrReportPath,
+                SourceAccountOwnership.BuildSameCvrCsv(sameCvrAccepted),
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
+            Log($"  Same-CVR acceptance report: {sameCvrReportPath} ({sameCvrAccepted.Count} row(s))");
         }
         if (_historicalSourceDecisions is { } historicalDecisions)
         {
@@ -1015,6 +1026,12 @@ public class GenerateStateFromSettlRunner
             : await ResolveInvoiceSourcesAsync(
                 context!, state, settlCustomerByMp, cosByMp, mpResolution.Pairs, options, ct);
         _ownershipIssues = [.. (_ownershipIssues ?? []), .. companyScope.Issues, .. ownership.Issues];
+        if (ownership.SameCvrAccepted is { } acceptedBySameCvr)
+        {
+            _sameCvrAccepted = acceptedBySameCvr;
+            Log($"  Same-CVR rule accepted {acceptedBySameCvr.Count} metering point(s) whose Settl customer " +
+                "does not match the Xellent account or its representative");
+        }
         if (ownership.Issues.Count > 0 && !options.SkipUnresolvedSourceAccounts)
         {
             Log($"ERROR: {ownership.Issues.Count} Xellent account(s) do not have a unique COS-1 owner " +
@@ -1229,8 +1246,20 @@ public class GenerateStateFromSettlRunner
             }
         }
         _ownershipEvidence = evidence;
+
+        // The same-CVR rule also needs the CVR of the account behind each Settl customer number.
+        foreach (var chunk in evidence
+            .SelectMany(e => CustomerNumberPolicy.AccountCandidates(e.SettlCustomerNumber, options.Env))
+            .Where(a => !cvrByAccount.ContainsKey(a))
+            .Distinct(StringComparer.Ordinal).Chunk(1500))
+        {
+            var rows = await context.CustTables.Where(c => c.Dataareaid == MigrationConstants.DataAreaId
+                    && chunk.Contains(c.Accountnum))
+                .Select(c => new { c.Accountnum, c.ExuCvrDisponent1 }).ToListAsync(ct);
+            foreach (var row in rows) cvrByAccount[row.Accountnum.Trim()] = row.ExuCvrDisponent1?.Trim() ?? "";
+        }
         var applied = ApplyOwnershipEvidence(state, evidence, options.Env,
-            _excludedSourceAccounts, options.SkipUnresolvedSourceAccounts);
+            _excludedSourceAccounts, options.SkipUnresolvedSourceAccounts, cvrByAccount);
         return applied with { Issues = [.. issues, .. applied.Issues] };
     }
 
@@ -1272,15 +1301,27 @@ public class GenerateStateFromSettlRunner
         _ownershipEvidence = evidence;
         var applied = ApplyOwnershipEvidence(state, evidence, options.Env,
             _excludedSourceAccounts, options.SkipUnresolvedSourceAccounts);
+        LogSameCvrRuleSkipped(applied.Issues);
         return applied with { Issues = [.. issues, .. applied.Issues] };
     }
 
+    private static void LogSameCvrRuleSkipped(IReadOnlyList<SourceAccountOwnershipIssue> issues)
+    {
+        var mismatches = issues.Count(i => i.Reason == "XellentAccountDoesNotMatchSettlCustomer");
+        if (mismatches > 0)
+            Log($"  Offline: skipped the same-CVR rule for {mismatches} rejected metering point(s); " +
+                "saved source data does not hold CVRs");
+    }
+
+    /// <param name="cvrByAccount">Xellent account → CVR. Null means the CVRs are not available and
+    /// the same-CVR rule does not run.</param>
     internal static SourceAccountOwnershipResult ApplyOwnershipEvidence(
         MigrationStateDocument state,
         IReadOnlyList<GenerateStateOfflineCache.OwnershipEvidence> evidence,
         string? env,
         IReadOnlyCollection<string>? excludedSources = null,
-        bool skipUnresolvedSources = false)
+        bool skipUnresolvedSources = false,
+        IReadOnlyDictionary<string, string>? cvrByAccount = null)
     {
         var issues = new List<SourceAccountOwnershipIssue>();
         var ownerBySource = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1288,6 +1329,7 @@ public class GenerateStateFromSettlRunner
         var knownCustomers = state.Accounts.Select(a => a.SettlAccountNumber)
             .ToHashSet(StringComparer.Ordinal);
         var representativeMatches = 0;
+        var sameCvrRows = new List<GenerateStateOfflineCache.OwnershipEvidence>();
         void RejectSources(GenerateStateOfflineCache.OwnershipEvidence row)
         {
             foreach (var source in row.RepresentativeMembers.Append(row.SourceAccount))
@@ -1307,6 +1349,9 @@ public class GenerateStateFromSettlRunner
                 RejectSources(row);
                 continue;
             }
+            if (match == InvoiceSourceMatch.Kind.None && cvrByAccount is not null
+                && InvoiceSourceMatch.SameCvr(row.SettlCustomerNumber, row.SourceAccount, cvrByAccount, env))
+                match = InvoiceSourceMatch.Kind.SameCvr;
             if (match == InvoiceSourceMatch.Kind.None || !knownCustomers.Contains(row.SettlCustomerNumber))
             {
                 issues.Add(new SourceAccountOwnershipIssue(
@@ -1316,7 +1361,10 @@ public class GenerateStateFromSettlRunner
                 continue;
             }
             if (match == InvoiceSourceMatch.Kind.Representative) representativeMatches++;
-            var approved = match == InvoiceSourceMatch.Kind.Direct
+            if (match == InvoiceSourceMatch.Kind.SameCvr) sameCvrRows.Add(row);
+            // Today's representative group is what disagrees with Settl here, so a same-CVR
+            // acceptance vouches for the source account alone, not for its group.
+            var approved = match is InvoiceSourceMatch.Kind.Direct or InvoiceSourceMatch.Kind.SameCvr
                 ? [row.SourceAccount]
                 : row.RepresentativeMembers;
             foreach (var source in approved)
@@ -1341,7 +1389,13 @@ public class GenerateStateFromSettlRunner
             foreach (var account in state.Accounts)
                 account.SourceAccounts = byCustomer.GetValueOrDefault(account.SettlAccountNumber) ?? [];
         }
-        return new(evidence.Count, ownerBySource.Count, representativeMatches, issues);
+        // A later conflict can still take the source away; only a surviving owner counts as accepted.
+        IReadOnlyList<SameCvrAcceptance>? sameCvrAccepted = cvrByAccount is null ? null :
+            [.. sameCvrRows
+                .Where(r => ownerBySource.GetValueOrDefault(r.SourceAccount) == r.SettlCustomerNumber)
+                .Select(r => new SameCvrAcceptance(r.SourceAccount, r.Representative, r.MeteringPoint,
+                    r.SettlCustomerNumber, r.Cos))];
+        return new(evidence.Count, ownerBySource.Count, representativeMatches, issues, sameCvrAccepted);
     }
 
     private static async Task<IReadOnlySet<string>> LoadMehMeteringPointIdsAsync(

@@ -14,7 +14,16 @@ internal sealed record SourceAccountOwnershipResult(
     int MappedMeteringPoints,
     int MappedSourceAccounts,
     int CosResolvedSourceAccounts,
-    IReadOnlyList<SourceAccountOwnershipIssue> Issues);
+    IReadOnlyList<SourceAccountOwnershipIssue> Issues,
+    IReadOnlyList<SameCvrAcceptance>? SameCvrAccepted = null);
+
+/// <summary>A metering point whose Settl customer was accepted only because its CVR matches the source account.</summary>
+internal sealed record SameCvrAcceptance(
+    string SourceAccount,
+    string Representative,
+    string MeteringPoint,
+    string SettlCustomer,
+    DateOnly CosDate);
 
 /// <summary>
 /// Assigns invoice source accounts through Settl's metering-point/customer links and Xellent's
@@ -153,6 +162,30 @@ internal static class SourceAccountOwnership
     {
         var directory = Path.GetDirectoryName(stateOutputPath);
         var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-ownership-issues.csv";
+        return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
+    }
+
+    internal static string BuildSameCvrCsv(IReadOnlyList<SameCvrAcceptance> accepted)
+    {
+        var csv = new StringBuilder();
+        csv.AppendLine("SourceAccount;Representative;MeteringPoint;SettlCustomer;CosDate");
+        foreach (var row in accepted
+            .OrderBy(r => r.SourceAccount, StringComparer.Ordinal)
+            .ThenBy(r => r.MeteringPoint, StringComparer.Ordinal))
+        {
+            csv.Append(Csv(row.SourceAccount)).Append(';')
+                .Append(Csv(row.Representative)).Append(';')
+                .Append(Csv(row.MeteringPoint)).Append(';')
+                .Append(Csv(row.SettlCustomer)).Append(';')
+                .AppendLine(row.CosDate.ToString("yyyy-MM-dd"));
+        }
+        return csv.ToString();
+    }
+
+    internal static string SameCvrReportPath(string stateOutputPath)
+    {
+        var directory = Path.GetDirectoryName(stateOutputPath);
+        var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-same-cvr-accepted.csv";
         return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
     }
 
