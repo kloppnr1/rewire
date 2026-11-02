@@ -1336,14 +1336,8 @@ public class GenerateStateFromSettlRunner
             .ToHashSet(StringComparer.Ordinal);
         var representativeMatches = 0;
         var sameCvrRows = new List<GenerateStateOfflineCache.OwnershipEvidence>();
-        void RejectSources(GenerateStateOfflineCache.OwnershipEvidence row)
-        {
-            foreach (var source in row.RepresentativeMembers.Append(row.SourceAccount))
-            {
-                ownerBySource.Remove(source);
-                conflictingSources.Add(source);
-            }
-        }
+        // A rejected row drops only its own claim. Its source account leaves the state when no
+        // other row holds a valid claim on it, because only valid claims ever reach ownerBySource.
         foreach (var row in evidence)
         {
             InvoiceSourceMatch.Kind match;
@@ -1352,7 +1346,6 @@ public class GenerateStateFromSettlRunner
             {
                 issues.Add(new SourceAccountOwnershipIssue("InvalidXellentAccountNumber",
                     $"{row.SourceAccount}|representative={row.Representative}", row.MeteringPoint, row.SettlCustomerNumber));
-                RejectSources(row);
                 continue;
             }
             if (match == InvoiceSourceMatch.Kind.None && cvrByAccount is not null
@@ -1364,7 +1357,6 @@ public class GenerateStateFromSettlRunner
                 issues.Add(new SourceAccountOwnershipIssue(
                     match == InvoiceSourceMatch.Kind.None ? "XellentAccountDoesNotMatchSettlCustomer" : "SettlCustomerMissingFromState",
                     $"{row.SourceAccount}|representative={row.Representative}", row.MeteringPoint, row.SettlCustomerNumber));
-                RejectSources(row);
                 continue;
             }
             if (match == InvoiceSourceMatch.Kind.Representative) representativeMatches++;

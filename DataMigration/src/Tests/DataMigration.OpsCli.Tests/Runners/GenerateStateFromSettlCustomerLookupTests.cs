@@ -71,26 +71,73 @@ public class GenerateStateFromSettlCustomerLookupTests
         Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
     }
 
-    [Fact]
-    public void Skipping_a_mismatched_claim_also_removes_an_earlier_claim_to_the_same_source()
-    {
-        var state = new MigrationStateDocument { Accounts =
-        [
-            new MigratedAccount { SettlAccountNumber = "503281" },
-            new MigratedAccount { SettlAccountNumber = "417016" }
-        ] };
-        var evidence = new[]
-        {
-            new GenerateStateOfflineCache.OwnershipEvidence("MP1", "503281", "503281", "503281",
-                new DateOnly(2026, 6, 11), ["503281"]),
-            new GenerateStateOfflineCache.OwnershipEvidence("MP2", "417016", "503281", "503281",
-                new DateOnly(2026, 6, 11), ["503281"])
-        };
+    private static readonly GenerateStateOfflineCache.OwnershipEvidence OwnClaim = new(
+        "MP1", "503281", "503281", "503281", new DateOnly(2026, 6, 11), ["503281"]);
 
-        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(
-            state, evidence, "production", skipUnresolvedSources: true);
+    private static MigrationStateDocument StateWithOwnerAndNeighbour() => new() { Accounts =
+    [
+        new MigratedAccount { SettlAccountNumber = "503281" },
+        new MigratedAccount { SettlAccountNumber = "417016" }
+    ] };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Mismatched_claim_leaves_the_accounts_valid_claim_in_place(bool validRowFirst)
+    {
+        var state = StateWithOwnerAndNeighbour();
+        var mismatch = OwnClaim with { MeteringPoint = "MP2", SettlCustomerNumber = "417016" };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            validRowFirst ? [OwnClaim, mismatch] : [mismatch, OwnClaim], "production",
+            skipUnresolvedSources: true);
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", issue.Reason);
+        Assert.Equal("MP2", issue.MeteringPoint);
+        Assert.Equal(["503281"], state.Accounts.Single(a => a.SettlAccountNumber == "503281").SourceAccounts);
+        Assert.Empty(state.Accounts.Single(a => a.SettlAccountNumber == "417016").SourceAccounts);
+    }
+
+    [Fact]
+    public void Mismatched_claim_removes_an_account_no_valid_claim_remains_on()
+    {
+        var state = StateWithOwnerAndNeighbour();
+        var mismatch = OwnClaim with { MeteringPoint = "MP2", SettlCustomerNumber = "417016" };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [mismatch], "production",
+            skipUnresolvedSources: true);
 
         Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", Assert.Single(result.Issues).Reason);
+        Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
+    }
+
+    [Fact]
+    public void Claim_for_a_customer_missing_from_the_state_leaves_the_valid_claim_in_place()
+    {
+        var state = StateWith("503281");
+        var missing = OwnClaim with { MeteringPoint = "MP2", SourceAccount = "417016", Representative = "503281",
+            SettlCustomerNumber = "417016", RepresentativeMembers = ["417016", "503281"] };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [OwnClaim, missing], "production",
+            skipUnresolvedSources: true);
+
+        Assert.Equal("SettlCustomerMissingFromState", Assert.Single(result.Issues).Reason);
+        Assert.Equal(["503281"], Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public void Rejected_row_does_not_settle_two_valid_claims_that_conflict()
+    {
+        var state = StateWithOwnerAndNeighbour();
+        var rival = OwnClaim with { MeteringPoint = "MP2", SettlCustomerNumber = "417016", Representative = "417016" };
+        var mismatch = OwnClaim with { MeteringPoint = "MP3", SettlCustomerNumber = "403522" };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [mismatch, OwnClaim, rival],
+            "production", skipUnresolvedSources: true);
+
+        Assert.Equal(["XellentAccountDoesNotMatchSettlCustomer", "XellentSourceClaimedByMultipleCustomers"],
+            result.Issues.Select(i => i.Reason));
         Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
     }
 
@@ -207,8 +254,8 @@ public class GenerateStateFromSettlCustomerLookupTests
         Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", issue.Reason);
         Assert.Equal("952461", issue.SettlCustomers);
         Assert.Empty(result.SameCvrAccepted!);
-        // As before the same-CVR rule: a rejected row takes its source account out of the state.
-        Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
+        Assert.Equal(["101254"], state.Accounts.Single(a => a.SettlAccountNumber == "101254").SourceAccounts);
+        Assert.Empty(state.Accounts.Single(a => a.SettlAccountNumber == "952461").SourceAccounts);
     }
 
     [Fact]
