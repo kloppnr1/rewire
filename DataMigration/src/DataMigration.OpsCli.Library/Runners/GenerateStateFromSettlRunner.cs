@@ -124,6 +124,7 @@ public class GenerateStateFromSettlRunner
     private IReadOnlyList<DeliveryStartAudit>? _deliveryStartAudit;
     private IReadOnlyList<GenerateStateOfflineCache.OwnershipEvidence>? _ownershipEvidence;
     private IReadOnlyList<string> _excludedSourceAccounts = [];
+    private IReadOnlySet<string> _settlCustomerNumbers = new HashSet<string>();
     // Bygger sit eget Xellent-lag udenom XellentDomainLoader, så listen skal med her.
     private readonly IReadOnlyList<string> _ignoredGroups;
 
@@ -663,6 +664,8 @@ public class GenerateStateFromSettlRunner
             Console.Error.WriteLine($"  Skipped {skipped} customers without CustomerNumber");
 
         var state = new MigrationStateDocument { Accounts = accounts };
+        // Taken now: enrichment drops customers from the state that still exist in Settl.
+        _settlCustomerNumbers = accounts.Select(a => a.SettlAccountNumber).ToHashSet(StringComparer.Ordinal);
         var customerNumbersById = customers
             .Where(c => c.Id != Guid.Empty && !string.IsNullOrWhiteSpace(c.CustomerNumber))
             .GroupBy(c => c.Id)
@@ -1259,7 +1262,7 @@ public class GenerateStateFromSettlRunner
             foreach (var row in rows) cvrByAccount[row.Accountnum.Trim()] = row.ExuCvrDisponent1?.Trim() ?? "";
         }
         var applied = ApplyOwnershipEvidence(state, evidence, options.Env,
-            _excludedSourceAccounts, options.SkipUnresolvedSourceAccounts, cvrByAccount);
+            _excludedSourceAccounts, options.SkipUnresolvedSourceAccounts, cvrByAccount, _settlCustomerNumbers);
         return applied with { Issues = [.. issues, .. applied.Issues] };
     }
 
@@ -1315,13 +1318,16 @@ public class GenerateStateFromSettlRunner
 
     /// <param name="cvrByAccount">Xellent account → CVR. Null means the CVRs are not available and
     /// the same-CVR rule does not run.</param>
+    /// <param name="settlCustomers">Every customer number in Settl, including those the state
+    /// file leaves out. Defaults to the customers in <paramref name="state"/>.</param>
     internal static SourceAccountOwnershipResult ApplyOwnershipEvidence(
         MigrationStateDocument state,
         IReadOnlyList<GenerateStateOfflineCache.OwnershipEvidence> evidence,
         string? env,
         IReadOnlyCollection<string>? excludedSources = null,
         bool skipUnresolvedSources = false,
-        IReadOnlyDictionary<string, string>? cvrByAccount = null)
+        IReadOnlyDictionary<string, string>? cvrByAccount = null,
+        IReadOnlySet<string>? settlCustomers = null)
     {
         var issues = new List<SourceAccountOwnershipIssue>();
         var ownerBySource = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1350,7 +1356,8 @@ public class GenerateStateFromSettlRunner
                 continue;
             }
             if (match == InvoiceSourceMatch.Kind.None && cvrByAccount is not null
-                && InvoiceSourceMatch.SameCvr(row.SettlCustomerNumber, row.SourceAccount, cvrByAccount, env))
+                && InvoiceSourceMatch.SameCvr(row.SettlCustomerNumber, row.SourceAccount, cvrByAccount,
+                    settlCustomers ?? knownCustomers, env))
                 match = InvoiceSourceMatch.Kind.SameCvr;
             if (match == InvoiceSourceMatch.Kind.None || !knownCustomers.Contains(row.SettlCustomerNumber))
             {

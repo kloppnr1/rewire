@@ -172,17 +172,57 @@ public class GenerateStateFromSettlCustomerLookupTests
         var state = new MigrationStateDocument { Accounts =
         [
             new MigratedAccount { SettlAccountNumber = "403522" },
-            new MigratedAccount { SettlAccountNumber = "447135" }
+            new MigratedAccount { SettlAccountNumber = "446977" }
         ] };
-        var direct = SameCvrRow with { MeteringPoint = "MP2", SettlCustomerNumber = "447135" };
+        var representative = SameCvrRow with { MeteringPoint = "MP2", SettlCustomerNumber = "446977" };
 
-        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [SameCvrRow, direct], "production",
-            skipUnresolvedSources: true,
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [SameCvrRow, representative],
+            "production", skipUnresolvedSources: true,
             cvrByAccount: new Dictionary<string, string> { ["447135"] = "36665030", ["403522"] = "36665030" });
 
         Assert.Equal("XellentSourceClaimedByMultipleCustomers", Assert.Single(result.Issues).Reason);
         Assert.Empty(result.SameCvrAccepted!);
+        Assert.All(state.Accounts, a => Assert.DoesNotContain("447135", a.SourceAccounts));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Source_that_is_its_own_settl_customer_gets_no_same_cvr_claim(bool ownRowFirst)
+    {
+        var state = new MigrationStateDocument { Accounts =
+        [
+            new MigratedAccount { SettlAccountNumber = "101254" },
+            new MigratedAccount { SettlAccountNumber = "952461" }
+        ] };
+        var own = new GenerateStateOfflineCache.OwnershipEvidence(
+            "MP1", "101254", "101254", "101254", new DateOnly(2026, 6, 11), ["101254"]);
+        var neighbour = own with { MeteringPoint = "MP2", SettlCustomerNumber = "952461" };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            ownRowFirst ? [own, neighbour] : [neighbour, own], "production", skipUnresolvedSources: true,
+            cvrByAccount: new Dictionary<string, string> { ["101254"] = "36665030", ["52461"] = "36665030" });
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", issue.Reason);
+        Assert.Equal("952461", issue.SettlCustomers);
+        Assert.Empty(result.SameCvrAccepted!);
+        // As before the same-CVR rule: a rejected row takes its source account out of the state.
         Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
+    }
+
+    [Fact]
+    public void Padded_source_that_is_its_own_settl_customer_gets_no_same_cvr_claim()
+    {
+        var row = SameCvrRow with { SourceAccount = "52461", Representative = "52461" };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(StateWith("403522"), [row], "production",
+            skipUnresolvedSources: true,
+            cvrByAccount: new Dictionary<string, string> { ["52461"] = "36665030", ["403522"] = "36665030" },
+            settlCustomers: new HashSet<string> { "403522", "952461" });
+
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", Assert.Single(result.Issues).Reason);
+        Assert.Empty(result.SameCvrAccepted!);
     }
 
     [Fact]
