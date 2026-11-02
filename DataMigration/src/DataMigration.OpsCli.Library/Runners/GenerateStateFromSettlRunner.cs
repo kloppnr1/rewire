@@ -115,6 +115,7 @@ public class GenerateStateFromSettlRunner
     private readonly ISettlCustomerClient _customerClient;
     private readonly ISettlMeteringPointClient? _meteringPointClient;
     private readonly ISettlPayerClient? _payerClient;
+    private readonly ISettlCustomerLinkLookup? _customerLinkLookup;
     private StateSourceSnapshot? _sourceSnapshot;
     private IReadOnlyList<SourceAccountOwnershipIssue>? _ownershipIssues;
     private IReadOnlyList<HistoricalSourceDecision>? _historicalSourceDecisions;
@@ -129,12 +130,14 @@ public class GenerateStateFromSettlRunner
         ISettlCustomerClient customerClient,
         IReadOnlyList<string>? ignoredGroups = null,
         ISettlMeteringPointClient? meteringPointClient = null,
-        ISettlPayerClient? payerClient = null)
+        ISettlPayerClient? payerClient = null,
+        ISettlCustomerLinkLookup? customerLinkLookup = null)
     {
         _customerClient = customerClient;
         _ignoredGroups = ignoredGroups ?? [];
         _meteringPointClient = meteringPointClient;
         _payerClient = payerClient;
+        _customerLinkLookup = customerLinkLookup;
     }
 
     private static void Log(string message) => Console.Error.WriteLine(message);
@@ -752,10 +755,10 @@ public class GenerateStateFromSettlRunner
         GenerateStateFromSettlRunOptions options,
         CancellationToken ct)
     {
-        if (_sourceSnapshot is null && (_meteringPointClient is null || _payerClient is null))
+        if (_sourceSnapshot is null && (_meteringPointClient is null || _payerClient is null || _customerLinkLookup is null))
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("ERROR: COS-driven enrichment needs a metering point client and a payer client.");
+            Console.WriteLine("ERROR: COS-driven enrichment needs a metering point client, a payer client and a customer link lookup.");
             Console.ResetColor();
             return 1;
         }
@@ -856,6 +859,8 @@ public class GenerateStateFromSettlRunner
         var settlLinkIssues = new List<SourceAccountOwnershipIssue>();
         var customerByMpGuid = await ResolveCustomerByMeteringPointAsync(
             inScope, customerNumbersById, ct, settlLinkIssues);
+        var resolvedByLink = await ResolveMissingCustomersByLinkAsync(inScope, customerNumbersById,
+            customerByMpGuid, settlLinkIssues, _sourceSnapshot is not null, ct);
         var resolvedToday = await ResolveMissingCustomersTodayAsync(inScope, customerNumbersById,
             customerByMpGuid, settlLinkIssues, _sourceSnapshot is not null, ct);
         var unlinkedMps = inScope.Where(m => !customerByMpGuid.ContainsKey(m.Id)).ToList();
@@ -1020,15 +1025,16 @@ public class GenerateStateFromSettlRunner
             Log($"  --skip-unresolved-source-accounts: omitted {ownership.Issues.Count} " +
                 "unresolved ownership claim(s); see ownership-issues CSV");
 
-        // A today-lookup customer that failed the COS-1 check must not stay in the state or
-        // pull another of its metering points' invoice floor back to this COS.
-        var rejectedToday = ownership.Issues.Select(i => i.MeteringPoint)
-            .Where(resolvedToday.Contains).ToHashSet(StringComparer.Ordinal);
-        if (rejectedToday.Count > 0)
+        // A customer found without a payer at COS that failed the COS-1 check must not stay in the
+        // state or pull another of its metering points' invoice floor back to this COS.
+        var rejectedFallback = ownership.Issues.Select(i => i.MeteringPoint)
+            .Where(m => resolvedByLink.Contains(m) || resolvedToday.Contains(m))
+            .ToHashSet(StringComparer.Ordinal);
+        if (rejectedFallback.Count > 0)
         {
-            cosByCustomer = MinCosWithoutRejectedTodayPoints(inScope, customerByMpGuid, rejectedToday);
+            cosByCustomer = MinCosWithoutRejectedTodayPoints(inScope, customerByMpGuid, rejectedFallback);
             state.Accounts = [.. state.Accounts.Where(a => cosByCustomer.ContainsKey(a.SettlAccountNumber))];
-            Log($"  Rejected {rejectedToday.Count} metering point(s) resolved by the today-lookup; " +
+            Log($"  Rejected {rejectedFallback.Count} metering point(s) resolved without a payer at COS; " +
                 "see ownership-issues CSV");
         }
 
@@ -1780,6 +1786,88 @@ public class GenerateStateFromSettlRunner
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// A payer link can start after COS while the customer link already ran. Metering points with
+    /// no payer at COS are looked up through the Customer↔MP link at their own COS date; the
+    /// caller's COS-1 Xellent check still decides whether that customer is accepted. A point with
+    /// an unusable payer link at COS keeps that issue, and saved snapshots hold no customer link
+    /// lookup. Returns the identifications resolved here.
+    /// </summary>
+    internal async Task<IReadOnlySet<string>> ResolveMissingCustomersByLinkAsync(
+        IReadOnlyList<SettlMpWithCos> mps,
+        IReadOnlyDictionary<Guid, string> customerNumbersById,
+        Dictionary<Guid, string> customerByMpGuid,
+        List<SourceAccountOwnershipIssue> linkIssues,
+        bool offline,
+        CancellationToken ct)
+    {
+        var resolved = new HashSet<string>(StringComparer.Ordinal);
+        var hasLinkIssue = linkIssues.Select(i => i.MeteringPoint).ToHashSet(StringComparer.Ordinal);
+        var missing = mps.Where(m => !customerByMpGuid.ContainsKey(m.Id)
+            && !hasLinkIssue.Contains(m.Identification)).ToList();
+        if (missing.Count == 0) return resolved;
+        if (offline)
+        {
+            Log($"  Offline: skipped the customer link lookup for {missing.Count} metering point(s) " +
+                "without a payer at COS; saved snapshots do not hold it");
+            return resolved;
+        }
+
+        var customersByMp = new Dictionary<Guid, HashSet<string>>();
+        var unusable = new HashSet<Guid>();
+        var failedBatches = 0;
+        foreach (var dateGroup in missing.GroupBy(m => m.Cos))
+        {
+            foreach (var batch in dateGroup.Chunk(PayerLookupBatchSize))
+            {
+                ct.ThrowIfCancellationRequested();
+                var byId = batch.ToDictionary(m => m.Id);
+                var (entries, error) = await _customerLinkLookup!.FindCustomersForMeteringPointsAsync(
+                    [.. byId.Keys], dateGroup.Key.ToDateTime(TimeOnly.MinValue), ct);
+                if (error != null || entries is null) { failedBatches++; continue; }
+
+                foreach (var entry in entries)
+                {
+                    if (entry.Customer is not { } customer) continue;
+                    var number = customerNumbersById.GetValueOrDefault(customer.Id)?.Trim();
+                    var valid = number is { Length: 6 } && number.All(char.IsAsciiDigit);
+                    foreach (var link in entry.MeteringPoints ?? [])
+                    {
+                        if (!byId.TryGetValue(link.MeteringPointId, out var mp)) continue;
+                        if (!valid)
+                        {
+                            unusable.Add(mp.Id);
+                            linkIssues.Add(new SourceAccountOwnershipIssue(
+                                "MissingOrInvalidSettlCustomerNumber", "", mp.Identification, customer.Id.ToString()));
+                            continue;
+                        }
+                        if (!customersByMp.TryGetValue(mp.Id, out var customers))
+                            customersByMp[mp.Id] = customers = new HashSet<string>(StringComparer.Ordinal);
+                        customers.Add(number!);
+                    }
+                }
+            }
+        }
+
+        foreach (var mp in missing)
+        {
+            if (unusable.Contains(mp.Id) || !customersByMp.TryGetValue(mp.Id, out var customers)) continue;
+            if (customers.Count > 1)
+            {
+                linkIssues.Add(new SourceAccountOwnershipIssue(
+                    "MultipleSettlCustomersForMeteringPoint", "", mp.Identification,
+                    string.Join('|', customers.Order(StringComparer.Ordinal))));
+                continue;
+            }
+            customerByMpGuid[mp.Id] = customers.Single();
+            resolved.Add(mp.Identification);
+        }
+        if (failedBatches > 0)
+            Log($"  WARNING: {failedBatches} customer link batch(es) failed — affected metering points stay unresolved here");
+        Log($"  Customer link at COS resolved {resolved.Count} of {missing.Count} metering point(s) without a payer at COS");
+        return resolved;
     }
 
     /// <summary>

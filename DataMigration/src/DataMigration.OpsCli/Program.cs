@@ -137,6 +137,7 @@ services.AddHttpClient<ISettlCustomerClient, SettlCustomerClient>();
 services.AddHttpClient<ISettlPayerClient, SettlPayerClient>();
 services.AddHttpClient<ISettlMeteringPointClient, SettlMeteringPointClient>();
 services.AddHttpClient<IConsumerVersionCleanup, ConsumerVersionCleanup>();
+services.AddHttpClient<ISettlCustomerLinkLookup, SettlCustomerLinkLookup>();
 services.AddHttpClient<ISettlContractClient, SettlContractClient>();
 services.AddHttpClient<ISettlSettlementGroupClient, SettlSettlementGroupClient>();
 services.AddHttpClient<ISettlPriceListClient, SettlPriceListClient>();
@@ -1730,7 +1731,8 @@ generateStateFromSettlCommand.SetAction(async (parseResult, cancellationToken) =
             customerClient,
             baseIgnoredGroups,
             serviceProvider.GetRequiredService<ISettlMeteringPointClient>(),
-            serviceProvider.GetRequiredService<ISettlPayerClient>());
+            serviceProvider.GetRequiredService<ISettlPayerClient>(),
+            serviceProvider.GetRequiredService<ISettlCustomerLinkLookup>());
         return await runner.RunAsync(new GenerateStateFromSettlRunOptions
         {
             OutputPath = output,

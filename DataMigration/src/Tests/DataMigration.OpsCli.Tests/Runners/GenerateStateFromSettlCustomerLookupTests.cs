@@ -2,8 +2,12 @@ using DataMigration.OpsCli.Runners;
 using DataMigration.OpsCli.Services;
 using DataMigration.OpsCli.Services.Reconcile;
 using DataMigration.SettlApi.Clients;
+using DataMigration.SettlApi.Configuration;
 using DataMigration.SettlApi.Models;
+using DataMigration.SettlApi.Services;
 using DataMigration.OpsCli.Data;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace DataMigration.OpsCli.Tests.Runners;
 
@@ -297,6 +301,220 @@ public class GenerateStateFromSettlCustomerLookupTests
         Assert.Empty(resolved);
         Assert.Empty(customerByMp);
         Assert.Equal("MissingOrInvalidSettlCustomerNumber", Assert.Single(issues).Reason);
+    }
+
+    [Fact]
+    public async Task No_payer_at_cos_resolves_through_the_customer_link_at_cos()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var linked = Guid.NewGuid();
+        var links = new StubCustomerLinks((mp.Id, linked));
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer, customerLinkLookup: links);
+        var customerByMp = await runner.ResolveCustomerByMeteringPointAsync(
+            [mp], CurrentCustomer, CancellationToken.None);
+        var customers = new Dictionary<Guid, string> { [linked] = "278435" };
+
+        var resolved = await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], customers, customerByMp, [], offline: false, CancellationToken.None);
+        var today = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], customers, customerByMp, [], offline: false, CancellationToken.None);
+
+        Assert.Equal("MP", Assert.Single(resolved));
+        Assert.Equal("278435", customerByMp[mp.Id]);
+        Assert.Equal(mp.Cos.ToDateTime(TimeOnly.MinValue), Assert.Single(links.Dates));
+        Assert.Empty(today);
+        Assert.Equal([mp.Cos.ToDateTime(TimeOnly.MinValue)], payer.SearchDates);
+
+        var state = new MigrationStateDocument { Accounts =
+            [new MigratedAccount { SettlAccountNumber = "278435" }] };
+        var ownership = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            [new GenerateStateOfflineCache.OwnershipEvidence("MP", "278435", "278435", "278435",
+                mp.Cos, ["278435"])], "production");
+        Assert.Empty(ownership.Issues);
+        Assert.Equal(["278435"], Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public async Task Customer_link_with_a_mismatching_customer_is_still_rejected()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var linked = Guid.NewGuid();
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer,
+            customerLinkLookup: new StubCustomerLinks((mp.Id, linked)));
+        var customerByMp = new Dictionary<Guid, string>();
+        var resolved = await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], new Dictionary<Guid, string> { [linked] = "278435" }, customerByMp, [],
+            offline: false, CancellationToken.None);
+        Assert.Equal("278435", customerByMp[mp.Id]);
+
+        var state = new MigrationStateDocument { Accounts =
+            [new MigratedAccount { SettlAccountNumber = "278435" }] };
+        var ownership = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            [new GenerateStateOfflineCache.OwnershipEvidence("MP", "278435", "503281", "503281",
+                mp.Cos, ["503281"])], "production", skipUnresolvedSources: true);
+
+        var issue = Assert.Single(ownership.Issues);
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", issue.Reason);
+        Assert.Contains(issue.MeteringPoint, resolved);
+        Assert.Empty(Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public async Task No_customer_link_at_cos_leaves_the_point_for_the_today_lookup()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer,
+            customerLinkLookup: new StubCustomerLinks());
+        var customerByMp = new Dictionary<Guid, string>();
+
+        Assert.Empty(await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None));
+
+        Assert.Empty(customerByMp);
+        Assert.Equal("MP", Assert.Single(await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None)));
+    }
+
+    [Fact]
+    public async Task Metering_point_resolved_through_the_payer_is_not_looked_up_by_link()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var links = new StubCustomerLinks((mp.Id, TodayCustomer));
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer, customerLinkLookup: links);
+        var customerByMp = new Dictionary<Guid, string> { [mp.Id] = "503281" };
+
+        Assert.Empty(await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None));
+
+        Assert.Empty(links.Dates);
+        Assert.Equal("503281", customerByMp[mp.Id]);
+    }
+
+    [Fact]
+    public async Task Two_linked_customers_at_cos_are_reported_and_not_assigned()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer,
+            customerLinkLookup: new StubCustomerLinks((mp.Id, first), (mp.Id, second)));
+        var customerByMp = new Dictionary<Guid, string>();
+        var issues = new List<SourceAccountOwnershipIssue>();
+
+        Assert.Empty(await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], new Dictionary<Guid, string> { [first] = "100001", [second] = "100002" },
+            customerByMp, issues, offline: false, CancellationToken.None));
+
+        Assert.Empty(customerByMp);
+        Assert.Equal("MultipleSettlCustomersForMeteringPoint", Assert.Single(issues).Reason);
+    }
+
+    [Fact]
+    public async Task Linked_customer_without_a_six_digit_number_is_reported_and_not_assigned()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer,
+            customerLinkLookup: new StubCustomerLinks((mp.Id, Guid.NewGuid())));
+        var customerByMp = new Dictionary<Guid, string>();
+        var issues = new List<SourceAccountOwnershipIssue>();
+
+        Assert.Empty(await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], new Dictionary<Guid, string>(), customerByMp, issues, offline: false,
+            CancellationToken.None));
+
+        Assert.Empty(customerByMp);
+        Assert.Equal("MissingOrInvalidSettlCustomerNumber", Assert.Single(issues).Reason);
+    }
+
+    [Fact]
+    public async Task Failed_customer_link_lookup_assigns_nothing()
+    {
+        var (mp, payer, _) = NoPayerAtCos();
+        var links = new StubCustomerLinks((mp.Id, TodayCustomer)) { Error = "HTTP 500" };
+        var runner = new GenerateStateFromSettlRunner(null!, payerClient: payer, customerLinkLookup: links);
+        var customerByMp = new Dictionary<Guid, string>();
+
+        Assert.Empty(await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None));
+
+        Assert.Empty(customerByMp);
+    }
+
+    [Fact]
+    public async Task Offline_run_skips_the_customer_link_lookup_without_throwing()
+    {
+        var (mp, _, runner) = NoPayerAtCos();
+        var customerByMp = new Dictionary<Guid, string>();
+
+        var resolved = await runner.ResolveMissingCustomersByLinkAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: true, CancellationToken.None);
+
+        Assert.Empty(resolved);
+        Assert.Empty(customerByMp);
+    }
+
+    [Fact]
+    public async Task Customer_link_lookup_posts_the_relation_date_and_reads_settls_answer()
+    {
+        var (mp, customer) = (Guid.NewGuid(), Guid.NewGuid());
+        var handler = new RecordingHandler($$"""
+            [{"Customer":{"Id":"{{customer}}","CustomerNumber":"278435"},
+              "MeteringPoints":[{"Id":"{{Guid.NewGuid()}}","MeteringPointId":"{{mp}}",
+                "Start":"2021-12-31T23:00:00Z","End":"9999-12-31T23:59:58.999Z"}]}]
+            """);
+        var lookup = new SettlCustomerLinkLookup(new HttpClient(handler), new StubAuth(),
+            Options.Create(new SettlApiOptions { BaseUrl = "https://offline.invalid" }),
+            NullLogger<SettlCustomerLinkLookup>.Instance);
+
+        var (items, error) = await lookup.FindCustomersForMeteringPointsAsync(
+            [mp], new DateTime(2026, 3, 1), CancellationToken.None);
+
+        Assert.Null(error);
+        var entry = Assert.Single(items!);
+        Assert.Equal(customer, entry.Customer!.Id);
+        Assert.Equal(mp, Assert.Single(entry.MeteringPoints!).MeteringPointId);
+        Assert.Equal("https://offline.invalid/internal-billing/api/v2/customers/CustomerInfosForMeteringPoints",
+            handler.Url);
+        Assert.Equal($$"""{"RelationDate":"2026-03-01T00:00:00","MeteringPointIds":["{{mp}}"]}""", handler.Body);
+    }
+
+    private sealed class StubCustomerLinks(params (Guid Mp, Guid Customer)[] links) : ISettlCustomerLinkLookup
+    {
+        public string? Error { get; init; }
+        public List<DateTime> Dates { get; } = [];
+
+        public Task<(List<CustomerLinkEntry>? Items, string? Error)> FindCustomersForMeteringPointsAsync(
+            IReadOnlyList<Guid> meteringPointIds, DateTime relationDate, CancellationToken cancellationToken)
+        {
+            Dates.Add(relationDate);
+            if (Error is not null)
+                return Task.FromResult<(List<CustomerLinkEntry>?, string?)>((null, Error));
+            List<CustomerLinkEntry> items = [.. links.Where(l => meteringPointIds.Contains(l.Mp))
+                .Select(l => new CustomerLinkEntry
+                {
+                    Customer = new CustomerLinkCustomer { Id = l.Customer },
+                    MeteringPoints = [new CustomerLinkMeteringPoint { MeteringPointId = l.Mp }]
+                })];
+            return Task.FromResult<(List<CustomerLinkEntry>?, string?)>((items, null));
+        }
+    }
+
+    private sealed class RecordingHandler(string response) : HttpMessageHandler
+    {
+        public string? Url { get; private set; }
+        public string? Body { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Url = request.RequestUri!.ToString();
+            Body = await request.Content!.ReadAsStringAsync(ct);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(response) };
+        }
+    }
+
+    private sealed class StubAuth : ISettlAuthService
+    {
+        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult("token");
+        public void InvalidateToken() { }
     }
 
     private static readonly Guid TodayCustomer = Guid.NewGuid();
