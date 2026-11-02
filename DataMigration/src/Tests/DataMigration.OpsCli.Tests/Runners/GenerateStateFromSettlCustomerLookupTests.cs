@@ -174,9 +174,146 @@ public class GenerateStateFromSettlCustomerLookupTests
         Assert.Equal("MP", issues[0].MeteringPoint);
     }
 
+    [Fact]
+    public async Task No_payer_at_cos_uses_todays_customer_when_it_matches_the_xellent_account()
+    {
+        var (mp, payer, runner) = NoPayerAtCos();
+        var customerByMp = await runner.ResolveCustomerByMeteringPointAsync(
+            [mp], CurrentCustomer, CancellationToken.None);
+        Assert.Empty(customerByMp);
+
+        var resolved = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None);
+
+        Assert.Equal("MP", Assert.Single(resolved));
+        Assert.Equal("278435", customerByMp[mp.Id]);
+        Assert.Equal([mp.Cos.ToDateTime(TimeOnly.MinValue), null], payer.SearchDates);
+
+        var state = new MigrationStateDocument { Accounts =
+            [new MigratedAccount { SettlAccountNumber = "278435" }] };
+        var ownership = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            [new GenerateStateOfflineCache.OwnershipEvidence("MP", "278435", "278435", "278435",
+                mp.Cos, ["278435"])], "production");
+        Assert.Empty(ownership.Issues);
+        Assert.Equal(["278435"], Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public async Task No_payer_at_cos_rejects_todays_customer_when_it_does_not_match_the_xellent_account()
+    {
+        var (mp, _, runner) = NoPayerAtCos();
+        var customerByMp = new Dictionary<Guid, string>();
+        await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None);
+        Assert.Equal("278435", customerByMp[mp.Id]);
+
+        var state = new MigrationStateDocument { Accounts =
+            [new MigratedAccount { SettlAccountNumber = "278435" }] };
+        var ownership = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            [new GenerateStateOfflineCache.OwnershipEvidence("MP", "278435", "503281", "503281",
+                mp.Cos, ["503281"])], "production", skipUnresolvedSources: true);
+
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", Assert.Single(ownership.Issues).Reason);
+        Assert.Empty(Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public void Rejected_today_point_does_not_keep_a_customer_or_move_its_cos_window()
+    {
+        var onlyToday = Guid.NewGuid();
+        var also = Guid.NewGuid();
+        var own = Guid.NewGuid();
+        var mps = new[]
+        {
+            new SettlMpWithCos("ONLY-TODAY", onlyToday, new DateOnly(2026, 3, 1), new MeteringPointInfoDto()),
+            new SettlMpWithCos("ALSO-TODAY", also, new DateOnly(2026, 3, 1), new MeteringPointInfoDto()),
+            new SettlMpWithCos("OWN", own, new DateOnly(2026, 8, 1), new MeteringPointInfoDto())
+        };
+        var customers = new Dictionary<Guid, string>
+        {
+            [onlyToday] = "100001", [also] = "100002", [own] = "100002"
+        };
+
+        var cos = GenerateStateFromSettlRunner.MinCosWithoutRejectedTodayPoints(mps, customers,
+            new HashSet<string> { "ONLY-TODAY", "ALSO-TODAY" });
+
+        Assert.False(cos.ContainsKey("100001"));
+        Assert.Equal(new DateOnly(2026, 8, 1), cos["100002"]);
+    }
+
+    [Fact]
+    public async Task Metering_point_resolved_at_cos_is_not_looked_up_again()
+    {
+        var (mp, payer, runner) = NoPayerAtCos();
+        var customerByMp = new Dictionary<Guid, string> { [mp.Id] = "503281" };
+
+        var resolved = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: false, CancellationToken.None);
+
+        Assert.Empty(resolved);
+        Assert.Empty(payer.SearchDates);
+        Assert.Equal("503281", customerByMp[mp.Id]);
+    }
+
+    [Fact]
+    public async Task Unusable_link_at_cos_is_not_replaced_by_a_today_lookup()
+    {
+        var (mp, payer, runner) = NoPayerAtCos();
+        var issue = new SourceAccountOwnershipIssue(
+            "MissingOrInvalidSettlCustomerNumber", "", "MP", Guid.NewGuid().ToString());
+
+        var resolved = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, [], [issue], offline: false, CancellationToken.None);
+
+        Assert.Empty(resolved);
+        Assert.Empty(payer.SearchDates);
+    }
+
+    [Fact]
+    public async Task Offline_run_skips_the_today_lookup_without_throwing()
+    {
+        var (mp, payer, runner) = NoPayerAtCos();
+        var customerByMp = new Dictionary<Guid, string>();
+
+        var resolved = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], CurrentCustomer, customerByMp, [], offline: true, CancellationToken.None);
+
+        Assert.Empty(resolved);
+        Assert.Empty(customerByMp);
+        Assert.Empty(payer.SearchDates);
+    }
+
+    [Fact]
+    public async Task Unknown_customer_today_stays_unresolved_and_is_reported()
+    {
+        var (mp, _, runner) = NoPayerAtCos();
+        var customerByMp = new Dictionary<Guid, string>();
+        var issues = new List<SourceAccountOwnershipIssue>();
+
+        var resolved = await runner.ResolveMissingCustomersTodayAsync(
+            [mp], new Dictionary<Guid, string>(), customerByMp, issues, offline: false,
+            CancellationToken.None);
+
+        Assert.Empty(resolved);
+        Assert.Empty(customerByMp);
+        Assert.Equal("MissingOrInvalidSettlCustomerNumber", Assert.Single(issues).Reason);
+    }
+
+    private static readonly Guid TodayCustomer = Guid.NewGuid();
+    private static readonly Dictionary<Guid, string> CurrentCustomer = new() { [TodayCustomer] = "278435" };
+
+    private static (SettlMpWithCos Mp, DatedPayerClient Payer, GenerateStateFromSettlRunner Runner) NoPayerAtCos()
+    {
+        var id = Guid.NewGuid();
+        var cos = new DateOnly(2026, 3, 1);
+        var payer = new DatedPayerClient(id, cos, Guid.NewGuid(), TodayCustomer, noLinkAtCos: true);
+        return (new SettlMpWithCos("MP", id, cos, new MeteringPointInfoDto()), payer,
+            new GenerateStateFromSettlRunner(null!, payerClient: payer));
+    }
+
     private sealed class DatedPayerClient(
         Guid mp, DateOnly cos, Guid historicalCustomer, Guid currentCustomer,
-        string historicalIdentifier = "278435") : ISettlPayerClient
+        string historicalIdentifier = "278435", bool noLinkAtCos = false) : ISettlPayerClient
     {
         public List<DateTime?> SearchDates { get; } = [];
 
@@ -184,6 +321,8 @@ public class GenerateStateFromSettlCustomerLookupTests
             IReadOnlyList<Guid> meteringPointIds, DateTime? searchDate = null, CancellationToken ct = default)
         {
             SearchDates.Add(searchDate);
+            if (noLinkAtCos && searchDate is not null)
+                return Task.FromResult<(List<PayerForMeteringPointsDto>?, string?)>(([], null));
             var customer = searchDate == cos.ToDateTime(TimeOnly.MinValue)
                 ? historicalCustomer : currentCustomer;
             return Task.FromResult<(List<PayerForMeteringPointsDto>?, string?)>((

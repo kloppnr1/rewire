@@ -6,6 +6,7 @@ som adfærdsændringen (se `CLAUDE.md`). `git show <sha>` for fuld kontekst.
 
 | Dato | Kommando(er) | Overskrift | Commit(s) |
 |------|--------------|------------|-----------|
+| 2026-11-02 | `generate-state-from-settl` | Metering points with no payer link at COS get one current payer lookup; the customer must still match the Xellent account at COS-1 or its representative, and a rejected customer stays out of the state and its COS window. Points still unresolved stay `NoSettlCustomerForMeteringPoint`; `--offline` skips the lookup and logs it. | *(this commit)* |
 | 2026-10-21 | `fix-consumer2-duplicate` | Judge today's Consumer version itself instead of the newest version of its delivery period, so a future version in the same period no longer hides it (production 571313115190608328: fictitious CPR 2 on the 01.09.2026 version, company version from 01.12.2026). | *(this commit)* |
 | 2026-10-21 | `fix-consumer2-duplicate` + `report-consumer2-duplicate` | Ignore Settl's `0001-01-01` "from the beginning" placeholder in the consumer history instead of skipping the whole point as incomplete. | *(this commit)* |
 | 2026-10-21 | `fix-consumer2-duplicate` + `report-consumer2-duplicate` | Skipped and incomplete points are logged with their metering point id in front of the Settl GUID. | *(this commit)* |

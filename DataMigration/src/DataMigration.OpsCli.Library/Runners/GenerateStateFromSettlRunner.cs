@@ -856,6 +856,8 @@ public class GenerateStateFromSettlRunner
         var settlLinkIssues = new List<SourceAccountOwnershipIssue>();
         var customerByMpGuid = await ResolveCustomerByMeteringPointAsync(
             inScope, customerNumbersById, ct, settlLinkIssues);
+        var resolvedToday = await ResolveMissingCustomersTodayAsync(inScope, customerNumbersById,
+            customerByMpGuid, settlLinkIssues, _sourceSnapshot is not null, ct);
         var unlinkedMps = inScope.Where(m => !customerByMpGuid.ContainsKey(m.Id)).ToList();
         var sourceAccountsByMp = mpResolution.Pairs
             .GroupBy(p => p.MpId, StringComparer.Ordinal)
@@ -1017,6 +1019,18 @@ public class GenerateStateFromSettlRunner
         if (ownership.Issues.Count > 0)
             Log($"  --skip-unresolved-source-accounts: omitted {ownership.Issues.Count} " +
                 "unresolved ownership claim(s); see ownership-issues CSV");
+
+        // A today-lookup customer that failed the COS-1 check must not stay in the state or
+        // pull another of its metering points' invoice floor back to this COS.
+        var rejectedToday = ownership.Issues.Select(i => i.MeteringPoint)
+            .Where(resolvedToday.Contains).ToHashSet(StringComparer.Ordinal);
+        if (rejectedToday.Count > 0)
+        {
+            cosByCustomer = MinCosWithoutRejectedTodayPoints(inScope, customerByMpGuid, rejectedToday);
+            state.Accounts = [.. state.Accounts.Where(a => cosByCustomer.ContainsKey(a.SettlAccountNumber))];
+            Log($"  Rejected {rejectedToday.Count} metering point(s) resolved by the today-lookup; " +
+                "see ownership-issues CSV");
+        }
 
         var missingXellentIssues = ownership.Issues
             .Where(i => i.Reason == "NoXellentAccountAtCos").ToList();
@@ -1767,6 +1781,57 @@ public class GenerateStateFromSettlRunner
         }
         return result;
     }
+
+    /// <summary>
+    /// A payer link can start after COS. Metering points with no link at COS get one current
+    /// lookup; the caller's COS-1 Xellent check still decides whether that customer is accepted.
+    /// A point with an unusable link at COS keeps that issue, and saved snapshots hold no current
+    /// lookup. Returns the identifications resolved here.
+    /// </summary>
+    internal async Task<IReadOnlySet<string>> ResolveMissingCustomersTodayAsync(
+        IReadOnlyList<SettlMpWithCos> mps,
+        IReadOnlyDictionary<Guid, string> customerNumbersById,
+        Dictionary<Guid, string> customerByMpGuid,
+        List<SourceAccountOwnershipIssue> linkIssues,
+        bool offline,
+        CancellationToken ct)
+    {
+        var resolved = new HashSet<string>(StringComparer.Ordinal);
+        var hasLinkIssue = linkIssues.Select(i => i.MeteringPoint).ToHashSet(StringComparer.Ordinal);
+        var missing = mps.Where(m => !customerByMpGuid.ContainsKey(m.Id)
+            && !hasLinkIssue.Contains(m.Identification)).ToList();
+        if (missing.Count == 0) return resolved;
+        if (offline)
+        {
+            Log($"  Offline: skipped the today-lookup for {missing.Count} metering point(s) " +
+                "without a payer at COS; saved snapshots do not hold it");
+            return resolved;
+        }
+
+        var todayIssues = new List<SourceAccountOwnershipIssue>();
+        var today = await ResolveCustomerByMeteringPointAsync(missing, customerNumbersById, ct,
+            todayIssues, useCosDate: false);
+        linkIssues.AddRange(todayIssues);
+        var unclear = todayIssues.Select(i => i.MeteringPoint).ToHashSet(StringComparer.Ordinal);
+        foreach (var mp in missing)
+        {
+            if (unclear.Contains(mp.Identification) || !today.TryGetValue(mp.Id, out var customer))
+                continue;
+            customerByMpGuid[mp.Id] = customer;
+            resolved.Add(mp.Identification);
+        }
+        Log($"  Today-lookup resolved {resolved.Count} of {missing.Count} metering point(s) " +
+            $"without a payer at COS; {missing.Count - resolved.Count} remain NoSettlCustomerForMeteringPoint");
+        return resolved;
+    }
+
+    internal static Dictionary<string, DateOnly> MinCosWithoutRejectedTodayPoints(
+        IReadOnlyList<SettlMpWithCos> mps,
+        IReadOnlyDictionary<Guid, string> customerByMpGuid,
+        IReadOnlySet<string> rejected) =>
+        CosStatePlanner.MinCosByCustomer(mps
+            .Where(m => customerByMpGuid.ContainsKey(m.Id) && !rejected.Contains(m.Identification))
+            .Select(m => (customerByMpGuid[m.Id], m.Cos)));
 
     /// <summary>
     /// Names the excluded customers that hold water/heat metering points. Water is out of scope for
