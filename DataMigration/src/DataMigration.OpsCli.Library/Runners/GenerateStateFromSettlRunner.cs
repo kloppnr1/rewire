@@ -1334,6 +1334,7 @@ public class GenerateStateFromSettlRunner
         var conflictingSources = new HashSet<string>(StringComparer.Ordinal);
         var knownCustomers = state.Accounts.Select(a => a.SettlAccountNumber)
             .ToHashSet(StringComparer.Ordinal);
+        var customers = settlCustomers ?? knownCustomers;
         var representativeMatches = 0;
         var sameCvrRows = new List<GenerateStateOfflineCache.OwnershipEvidence>();
         // A rejected row drops only its own claim. Its source account leaves the state when no
@@ -1350,8 +1351,14 @@ public class GenerateStateFromSettlRunner
             }
             if (match == InvoiceSourceMatch.Kind.None && cvrByAccount is not null
                 && InvoiceSourceMatch.SameCvr(row.SettlCustomerNumber, row.SourceAccount, cvrByAccount,
-                    settlCustomers ?? knownCustomers, env))
+                    customers, env))
                 match = InvoiceSourceMatch.Kind.SameCvr;
+            // Today's resolver can group a source account with another customer's representative
+            // even though the account became its own Settl customer at migration. That group is
+            // no match for the account, the same as under the same-CVR rule.
+            if (match == InvoiceSourceMatch.Kind.Representative && InvoiceSourceMatch.IsOtherSettlCustomer(
+                    row.SourceAccount, row.SettlCustomerNumber, customers, env))
+                match = InvoiceSourceMatch.Kind.None;
             if (match == InvoiceSourceMatch.Kind.None || !knownCustomers.Contains(row.SettlCustomerNumber))
             {
                 issues.Add(new SourceAccountOwnershipIssue(
@@ -1363,9 +1370,15 @@ public class GenerateStateFromSettlRunner
             if (match == InvoiceSourceMatch.Kind.SameCvr) sameCvrRows.Add(row);
             // Today's representative group is what disagrees with Settl here, so a same-CVR
             // acceptance vouches for the source account alone, not for its group.
+            // A group holding another Settl customer disagrees with Settl, like a same-CVR match:
+            // it vouches for the source account and the representative only. Its other members
+            // may have been merged into that other customer, so they stay with whoever else claims them.
             var approved = match is InvoiceSourceMatch.Kind.Direct or InvoiceSourceMatch.Kind.SameCvr
                 ? [row.SourceAccount]
-                : row.RepresentativeMembers;
+                : row.RepresentativeMembers.Any(m => InvoiceSourceMatch.IsOtherSettlCustomer(
+                    m, row.SettlCustomerNumber, customers, env))
+                    ? [.. new[] { row.SourceAccount, row.Representative }.Distinct(StringComparer.Ordinal)]
+                    : row.RepresentativeMembers;
             foreach (var source in approved)
             {
                 if (excludedSources?.Contains(source) == true) continue;

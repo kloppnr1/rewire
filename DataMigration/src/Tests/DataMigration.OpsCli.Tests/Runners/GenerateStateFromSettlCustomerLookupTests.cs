@@ -58,17 +58,84 @@ public class GenerateStateFromSettlCustomerLookupTests
         ] };
         var evidence = new[]
         {
-            new GenerateStateOfflineCache.OwnershipEvidence("MP1", "503281", "503281", "503281",
-                new DateOnly(2026, 6, 11), ["503281"]),
-            new GenerateStateOfflineCache.OwnershipEvidence("MP2", "417016", "503281", "417016",
-                new DateOnly(2026, 6, 11), ["503281"])
+            new GenerateStateOfflineCache.OwnershipEvidence("MP1", "503281", "503280", "503281",
+                new DateOnly(2026, 6, 11), ["503281", "503280"]),
+            new GenerateStateOfflineCache.OwnershipEvidence("MP2", "417016", "503280", "417016",
+                new DateOnly(2026, 6, 11), ["417016", "503280"])
         };
 
         var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(
             state, evidence, "production", skipUnresolvedSources: true);
 
         Assert.Equal("XellentSourceClaimedByMultipleCustomers", Assert.Single(result.Issues).Reason);
-        Assert.All(state.Accounts, a => Assert.Empty(a.SourceAccounts));
+        Assert.Equal(["503281"], state.Accounts.Single(a => a.SettlAccountNumber == "503281").SourceAccounts);
+        Assert.Equal(["417016"], state.Accounts.Single(a => a.SettlAccountNumber == "417016").SourceAccounts);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Group_member_with_its_own_settl_customer_is_not_claimed_through_another_group(bool ownRowFirst)
+    {
+        // 213438 and 213439 are their own customer 213438; today's resolver puts both under 53420.
+        var state = new MigrationStateDocument { Accounts =
+        [
+            new MigratedAccount { SettlAccountNumber = "213438" },
+            new MigratedAccount { SettlAccountNumber = "953420" }
+        ] };
+        var cos = new DateOnly(2026, 6, 11);
+        var own = new GenerateStateOfflineCache.OwnershipEvidence(
+            "MP1", "213438", "213439", "213438", cos, ["213438", "213439"]);
+        var group = new GenerateStateOfflineCache.OwnershipEvidence(
+            "MP2", "953420", "53421", "53420", cos, ["53420", "53421", "213438", "213439"]);
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            ownRowFirst ? [own, group] : [group, own], "production");
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(["213438", "213439"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "213438").SourceAccounts);
+        Assert.Equal(["53420", "53421"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "953420").SourceAccounts);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Source_that_is_its_own_settl_customer_gets_no_representative_claim(bool ownRowFirst)
+    {
+        var state = new MigrationStateDocument { Accounts =
+        [
+            new MigratedAccount { SettlAccountNumber = "101254" },
+            new MigratedAccount { SettlAccountNumber = "952461" }
+        ] };
+        var own = new GenerateStateOfflineCache.OwnershipEvidence(
+            "MP1", "101254", "101254", "101254", new DateOnly(2026, 6, 11), ["101254"]);
+        var neighbour = own with { MeteringPoint = "MP2", SettlCustomerNumber = "952461",
+            Representative = "52461", RepresentativeMembers = ["52461", "101254"] };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            ownRowFirst ? [own, neighbour] : [neighbour, own], "production", skipUnresolvedSources: true);
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", issue.Reason);
+        Assert.Equal("MP2", issue.MeteringPoint);
+        Assert.Equal(["101254"], state.Accounts.Single(a => a.SettlAccountNumber == "101254").SourceAccounts);
+        Assert.Empty(state.Accounts.Single(a => a.SettlAccountNumber == "952461").SourceAccounts);
+    }
+
+    [Fact]
+    public void Group_member_known_only_from_the_full_settl_list_is_not_claimed()
+    {
+        var group = new GenerateStateOfflineCache.OwnershipEvidence(
+            "MP1", "953420", "53421", "53420", new DateOnly(2026, 6, 11), ["53420", "53421", "213438"]);
+        var state = StateWith("953420");
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [group],
+            "production", settlCustomers: new HashSet<string> { "953420", "213438" });
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(["53420", "53421"], Assert.Single(state.Accounts).SourceAccounts);
     }
 
     private static readonly GenerateStateOfflineCache.OwnershipEvidence OwnClaim = new(
@@ -130,10 +197,11 @@ public class GenerateStateFromSettlCustomerLookupTests
     public void Rejected_row_does_not_settle_two_valid_claims_that_conflict()
     {
         var state = StateWithOwnerAndNeighbour();
-        var rival = OwnClaim with { MeteringPoint = "MP2", SettlCustomerNumber = "417016", Representative = "417016" };
-        var mismatch = OwnClaim with { MeteringPoint = "MP3", SettlCustomerNumber = "403522" };
+        var own = OwnClaim with { SourceAccount = "503280", RepresentativeMembers = ["503280"] };
+        var rival = own with { MeteringPoint = "MP2", SettlCustomerNumber = "417016", Representative = "417016" };
+        var mismatch = own with { MeteringPoint = "MP3", SettlCustomerNumber = "403522" };
 
-        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [mismatch, OwnClaim, rival],
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [mismatch, own, rival],
             "production", skipUnresolvedSources: true);
 
         Assert.Equal(["XellentAccountDoesNotMatchSettlCustomer", "XellentSourceClaimedByMultipleCustomers"],

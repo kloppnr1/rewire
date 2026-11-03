@@ -35,6 +35,21 @@ internal static class InvoiceSourceMatch
         return account is not null && cvrByAccount[account].Trim() == cvr;
     }
 
+    /// <summary>
+    /// True when <paramref name="account"/> is a Settl customer under its own number, and that
+    /// number is not <paramref name="claimingCustomer"/>. Such an account was not merged into the
+    /// claiming customer at migration, so today's representative group gives that customer no
+    /// claim on it. An account number that cannot be padded is never a Settl customer.
+    /// </summary>
+    internal static bool IsOtherSettlCustomer(string account, string claimingCustomer,
+        IReadOnlySet<string> settlCustomers, string? env)
+    {
+        string own;
+        try { own = CustomerNumberPolicy.PadForEnv(account, env, out _); }
+        catch (InvalidOperationException) { return false; }
+        return own != claimingCustomer && settlCustomers.Contains(own);
+    }
+
     internal static string[] ApprovedSources(Kind kind, string source,
         string representative, IReadOnlyDictionary<string, string[]> membersByRepresentative) => kind switch
     {
