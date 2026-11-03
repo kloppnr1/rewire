@@ -75,28 +75,141 @@ public class GenerateStateFromSettlCustomerLookupTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Group_member_with_its_own_settl_customer_is_not_claimed_through_another_group(bool ownRowFirst)
+    public void Group_vouches_for_every_member_except_one_that_is_its_own_settl_customer(bool ownRowFirst)
     {
-        // 213438 and 213439 are their own customer 213438; today's resolver puts both under 53420.
+        // 52461, 101253 and 101254 are one company that became Settl customers 952461 and 101254.
+        // 952461's point sits on a third group account, so 101253 is neither source nor representative.
         var state = new MigrationStateDocument { Accounts =
         [
-            new MigratedAccount { SettlAccountNumber = "213438" },
-            new MigratedAccount { SettlAccountNumber = "953420" }
+            new MigratedAccount { SettlAccountNumber = "101254" },
+            new MigratedAccount { SettlAccountNumber = "952461" }
         ] };
         var cos = new DateOnly(2026, 6, 11);
         var own = new GenerateStateOfflineCache.OwnershipEvidence(
-            "MP1", "213438", "213439", "213438", cos, ["213438", "213439"]);
+            "MP1", "101254", "101254", "101254", cos, ["101254"]);
         var group = new GenerateStateOfflineCache.OwnershipEvidence(
-            "MP2", "953420", "53421", "53420", cos, ["53420", "53421", "213438", "213439"]);
+            "MP2", "952461", "52462", "52461", cos, ["52461", "52462", "101253", "101254"]);
 
         var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
             ownRowFirst ? [own, group] : [group, own], "production");
 
         Assert.Empty(result.Issues);
+        Assert.Equal(["101254"], state.Accounts.Single(a => a.SettlAccountNumber == "101254").SourceAccounts);
+        Assert.Equal(["101253", "52461", "52462"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "952461").SourceAccounts);
+    }
+
+    private static MigrationStateDocument StateWith213438And953420() => new() { Accounts =
+    [
+        new MigratedAccount { SettlAccountNumber = "213438" },
+        new MigratedAccount { SettlAccountNumber = "953420" }
+    ] };
+
+    // 213438 and 213439 are their own customer 213438; today's resolver puts both under 53420.
+    private static readonly GenerateStateOfflineCache.OwnershipEvidence OwnGroup = new(
+        "MP1", "213438", "213439", "213438", new DateOnly(2026, 6, 11), ["213438", "213439"]);
+    private static readonly GenerateStateOfflineCache.OwnershipEvidence OtherGroup = new(
+        "MP2", "953420", "53421", "53420", new DateOnly(2026, 5, 1), ["53420", "53421", "213438", "213439"]);
+
+    private static Dictionary<string, string> Cvrs(string forOther = "36665030") => new()
+    {
+        ["213438"] = "36665030", ["213439"] = "36665030", ["53420"] = forOther, ["53421"] = forOther
+    };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Member_claimed_by_same_cvr_customers_goes_to_the_earliest_cos(bool ownRowFirst)
+    {
+        var state = StateWith213438And953420();
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            ownRowFirst ? [OwnGroup, OtherGroup] : [OtherGroup, OwnGroup], "production",
+            cvrByAccount: Cvrs());
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(["213438"], state.Accounts.Single(a => a.SettlAccountNumber == "213438").SourceAccounts);
+        Assert.Equal(["213439", "53420", "53421"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "953420").SourceAccounts);
+        Assert.Equal(new OwnershipTieBreak("213439", "953420", "213438|953420", "EarliestCos",
+            new DateOnly(2026, 5, 1)), Assert.Single(result.TieBreaks!));
+    }
+
+    [Fact]
+    public void Same_cos_tie_goes_to_the_lowest_customer_number()
+    {
+        var state = StateWith213438And953420();
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state,
+            [OtherGroup with { Cos = OwnGroup.Cos }, OwnGroup], "production", cvrByAccount: Cvrs());
+
+        Assert.Empty(result.Issues);
         Assert.Equal(["213438", "213439"],
             state.Accounts.Single(a => a.SettlAccountNumber == "213438").SourceAccounts);
-        Assert.Equal(["53420", "53421"],
-            state.Accounts.Single(a => a.SettlAccountNumber == "953420").SourceAccounts);
+        Assert.Equal("LowestCustomerNumber", Assert.Single(result.TieBreaks!).DecidedBy);
+    }
+
+    [Fact]
+    public void Claimant_the_account_resolves_to_beats_an_earlier_same_cvr_claim()
+    {
+        var state = new MigrationStateDocument { Accounts =
+        [
+            new MigratedAccount { SettlAccountNumber = "403522" },
+            new MigratedAccount { SettlAccountNumber = "446977" }
+        ] };
+        var representative = SameCvrRow with { MeteringPoint = "MP2", SettlCustomerNumber = "446977",
+            Cos = new DateOnly(2026, 7, 1) };
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [SameCvrRow, representative],
+            "production", cvrByAccount: new Dictionary<string, string>
+                { ["447135"] = "36665030", ["403522"] = "36665030", ["446977"] = "36665030" });
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(["446977", "447135", "447136"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "446977").SourceAccounts);
+        Assert.Equal("RepresentativeAtCos", Assert.Single(result.TieBreaks!).DecidedBy);
+        Assert.Empty(result.SameCvrAccepted!);
+    }
+
+    [Theory]
+    [InlineData("87654321")]
+    [InlineData("")]
+    public void Member_claimed_by_customers_with_another_cvr_still_conflicts(string otherCvr)
+    {
+        var state = StateWith213438And953420();
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [OwnGroup, OtherGroup],
+            "production", skipUnresolvedSources: true, cvrByAccount: Cvrs(otherCvr));
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("XellentSourceClaimedByMultipleCustomers", issue.Reason);
+        Assert.Equal("213439", issue.SourceAccount);
+        Assert.Empty(result.TieBreaks!);
+        Assert.All(state.Accounts, a => Assert.DoesNotContain("213439", a.SourceAccounts));
+    }
+
+    [Fact]
+    public void Placeholder_cvr_on_the_member_still_conflicts()
+    {
+        var cvrs = Cvrs("11111111");
+        cvrs["213438"] = cvrs["213439"] = "11111111";
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(StateWith213438And953420(),
+            [OwnGroup, OtherGroup], "production", skipUnresolvedSources: true, cvrByAccount: cvrs);
+
+        Assert.Equal("XellentSourceClaimedByMultipleCustomers", Assert.Single(result.Issues).Reason);
+    }
+
+    [Fact]
+    public void Tie_break_report_sits_beside_the_state_file()
+    {
+        var csv = SourceAccountOwnership.BuildTieBreakCsv(
+            [new OwnershipTieBreak("213439", "953420", "213438|953420", "EarliestCos", new DateOnly(2026, 5, 1))]);
+
+        Assert.Equal(["SourceAccount;ChosenCustomer;Claimants;DecidedBy;ChosenCosDate",
+            "213439;953420;213438|953420;EarliestCos;2026-05-01"], csv.Trim().Split(Environment.NewLine));
+        Assert.Equal(Path.Combine("out", "state-ownership-tie-breaks.csv"),
+            SourceAccountOwnership.TieBreakReportPath(Path.Combine("out", "state.json")));
     }
 
     [Theory]

@@ -15,7 +15,20 @@ internal sealed record SourceAccountOwnershipResult(
     int MappedSourceAccounts,
     int CosResolvedSourceAccounts,
     IReadOnlyList<SourceAccountOwnershipIssue> Issues,
-    IReadOnlyList<SameCvrAcceptance>? SameCvrAccepted = null);
+    IReadOnlyList<SameCvrAcceptance>? SameCvrAccepted = null,
+    IReadOnlyList<OwnershipTieBreak>? TieBreaks = null);
+
+/// <summary>
+/// An account claimed by several Settl customers that all carry its CVR, given to one of them.
+/// <paramref name="DecidedBy"/> names the first rule that separated the winner from the runner-up:
+/// RepresentativeAtCos, EarliestCos or LowestCustomerNumber.
+/// </summary>
+internal sealed record OwnershipTieBreak(
+    string SourceAccount,
+    string ChosenCustomer,
+    string Claimants,
+    string DecidedBy,
+    DateOnly ChosenCosDate);
 
 /// <summary>A metering point whose Settl customer was accepted only because its CVR matches the source account.</summary>
 internal sealed record SameCvrAcceptance(
@@ -186,6 +199,28 @@ internal static class SourceAccountOwnership
     {
         var directory = Path.GetDirectoryName(stateOutputPath);
         var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-same-cvr-accepted.csv";
+        return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
+    }
+
+    internal static string BuildTieBreakCsv(IReadOnlyList<OwnershipTieBreak> tieBreaks)
+    {
+        var csv = new StringBuilder();
+        csv.AppendLine("SourceAccount;ChosenCustomer;Claimants;DecidedBy;ChosenCosDate");
+        foreach (var row in tieBreaks.OrderBy(r => r.SourceAccount, StringComparer.Ordinal))
+        {
+            csv.Append(Csv(row.SourceAccount)).Append(';')
+                .Append(Csv(row.ChosenCustomer)).Append(';')
+                .Append(Csv(row.Claimants)).Append(';')
+                .Append(Csv(row.DecidedBy)).Append(';')
+                .AppendLine(row.ChosenCosDate.ToString("yyyy-MM-dd"));
+        }
+        return csv.ToString();
+    }
+
+    internal static string TieBreakReportPath(string stateOutputPath)
+    {
+        var directory = Path.GetDirectoryName(stateOutputPath);
+        var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-ownership-tie-breaks.csv";
         return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
     }
 

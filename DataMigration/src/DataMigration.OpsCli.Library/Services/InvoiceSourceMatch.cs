@@ -27,12 +27,46 @@ internal static class InvoiceSourceMatch
         IReadOnlyDictionary<string, string> cvrByAccount, IReadOnlySet<string> settlCustomers, string? env)
     {
         if (settlCustomers.Contains(CustomerNumberPolicy.PadForEnv(source, env, out _))) return false;
-        if (!cvrByAccount.TryGetValue(source, out var sourceCvr)) return false;
-        var cvr = sourceCvr.Trim();
-        if (cvr.Length == 0 || cvr.All(c => c == cvr[0])) return false;
+        var cvr = RealCvr(source, cvrByAccount);
+        return cvr is not null && CustomerCvr(customerNumber, cvrByAccount, env) == cvr;
+    }
+
+    /// <summary>
+    /// True when <paramref name="source"/> is not a Settl customer itself, has a real CVR, and every
+    /// claiming customer number is a Xellent account with that same CVR. Only then may several
+    /// claims on one account be settled by a tie-break instead of a conflict.
+    /// </summary>
+    internal static bool AllClaimantsShareCvr(string source, IReadOnlyCollection<string> claimants,
+        IReadOnlyDictionary<string, string> cvrByAccount, IReadOnlySet<string> settlCustomers, string? env)
+    {
+        try { if (settlCustomers.Contains(CustomerNumberPolicy.PadForEnv(source, env, out _))) return false; }
+        catch (InvalidOperationException) { }
+        var cvr = RealCvr(source, cvrByAccount);
+        return cvr is not null && claimants.All(c => CustomerCvr(c, cvrByAccount, env) == cvr);
+    }
+
+    /// <summary>
+    /// The account's trimmed CVR. Null when it is unknown, blank, or a placeholder such as
+    /// 11111111 that Xellent holds on unrelated accounts.
+    /// </summary>
+    private static string? RealCvr(string account, IReadOnlyDictionary<string, string> cvrByAccount)
+    {
+        if (!cvrByAccount.TryGetValue(account, out var raw)) return null;
+        var cvr = raw.Trim();
+        return cvr.Length == 0 || cvr.All(c => c == cvr[0]) ? null : cvr;
+    }
+
+    /// <summary>
+    /// The CVR of the Xellent account behind a Settl customer number. The number as written is
+    /// tried before its unpadded forms, so a real six-digit account is never mistaken for a padded
+    /// shorter one.
+    /// </summary>
+    private static string? CustomerCvr(string customerNumber,
+        IReadOnlyDictionary<string, string> cvrByAccount, string? env)
+    {
         var account = CustomerNumberPolicy.AccountCandidates(customerNumber, env)
             .FirstOrDefault(cvrByAccount.ContainsKey);
-        return account is not null && cvrByAccount[account].Trim() == cvr;
+        return account is null ? null : cvrByAccount[account].Trim();
     }
 
     /// <summary>

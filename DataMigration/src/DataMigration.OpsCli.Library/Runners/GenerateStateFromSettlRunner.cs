@@ -119,6 +119,7 @@ public class GenerateStateFromSettlRunner
     private StateSourceSnapshot? _sourceSnapshot;
     private IReadOnlyList<SourceAccountOwnershipIssue>? _ownershipIssues;
     private IReadOnlyList<SameCvrAcceptance>? _sameCvrAccepted;
+    private IReadOnlyList<OwnershipTieBreak>? _ownershipTieBreaks;
     private IReadOnlyList<HistoricalSourceDecision>? _historicalSourceDecisions;
     private IReadOnlyList<ExcludedCompanyInvoice>? _excludedCompanyInvoices;
     private IReadOnlyList<DeliveryStartAudit>? _deliveryStartAudit;
@@ -622,6 +623,7 @@ public class GenerateStateFromSettlRunner
         var stopwatch = Stopwatch.StartNew();
         _ownershipIssues = null;
         _sameCvrAccepted = null;
+        _ownershipTieBreaks = null;
         _historicalSourceDecisions = null;
         _excludedCompanyInvoices = null;
         _deliveryStartAudit = null;
@@ -701,6 +703,14 @@ public class GenerateStateFromSettlRunner
                 SourceAccountOwnership.BuildSameCvrCsv(sameCvrAccepted),
                 new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
             Log($"  Same-CVR acceptance report: {sameCvrReportPath} ({sameCvrAccepted.Count} row(s))");
+        }
+        if (_ownershipTieBreaks is { } ownershipTieBreaks)
+        {
+            var tieBreakReportPath = SourceAccountOwnership.TieBreakReportPath(options.OutputPath);
+            await File.WriteAllTextAsync(tieBreakReportPath,
+                SourceAccountOwnership.BuildTieBreakCsv(ownershipTieBreaks),
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
+            Log($"  Ownership tie-break report: {tieBreakReportPath} ({ownershipTieBreaks.Count} row(s))");
         }
         if (_historicalSourceDecisions is { } historicalDecisions)
         {
@@ -1035,6 +1045,12 @@ public class GenerateStateFromSettlRunner
             Log($"  Same-CVR rule accepted {acceptedBySameCvr.Count} metering point(s) whose Settl customer " +
                 "does not match the Xellent account or its representative");
         }
+        if (ownership.TieBreaks is { } tieBreaks)
+        {
+            _ownershipTieBreaks = tieBreaks;
+            Log($"  Ownership tie-break gave {tieBreaks.Count} account(s) claimed by several same-CVR " +
+                "Settl customers to one of them");
+        }
         if (ownership.Issues.Count > 0 && !options.SkipUnresolvedSourceAccounts)
         {
             Log($"ERROR: {ownership.Issues.Count} Xellent account(s) do not have a unique COS-1 owner " +
@@ -1250,9 +1266,11 @@ public class GenerateStateFromSettlRunner
         }
         _ownershipEvidence = evidence;
 
-        // The same-CVR rule also needs the CVR of the account behind each Settl customer number.
+        // The same-CVR rule also needs the CVR of the account behind each Settl customer number,
+        // and the ownership tie-break the CVR of every group member a customer claims.
         foreach (var chunk in evidence
-            .SelectMany(e => CustomerNumberPolicy.AccountCandidates(e.SettlCustomerNumber, options.Env))
+            .SelectMany(e => CustomerNumberPolicy.AccountCandidates(e.SettlCustomerNumber, options.Env)
+                .Concat(e.RepresentativeMembers))
             .Where(a => !cvrByAccount.ContainsKey(a))
             .Distinct(StringComparer.Ordinal).Chunk(1500))
         {
@@ -1314,6 +1332,10 @@ public class GenerateStateFromSettlRunner
         if (mismatches > 0)
             Log($"  Offline: skipped the same-CVR rule for {mismatches} rejected metering point(s); " +
                 "saved source data does not hold CVRs");
+        var conflicts = issues.Count(i => i.Reason == "XellentSourceClaimedByMultipleCustomers");
+        if (conflicts > 0)
+            Log($"  Offline: skipped the same-CVR ownership tie-break for {conflicts} account(s) " +
+                "claimed by several customers; saved source data does not hold CVRs");
     }
 
     /// <param name="cvrByAccount">Xellent account → CVR. Null means the CVRs are not available and
@@ -1331,7 +1353,8 @@ public class GenerateStateFromSettlRunner
     {
         var issues = new List<SourceAccountOwnershipIssue>();
         var ownerBySource = new Dictionary<string, string>(StringComparer.Ordinal);
-        var conflictingSources = new HashSet<string>(StringComparer.Ordinal);
+        var claimsBySource = new Dictionary<string, List<SourceClaim>>(StringComparer.Ordinal);
+        var conflictBySource = new Dictionary<string, SourceAccountOwnershipIssue>(StringComparer.Ordinal);
         var knownCustomers = state.Accounts.Select(a => a.SettlAccountNumber)
             .ToHashSet(StringComparer.Ordinal);
         var customers = settlCustomers ?? knownCustomers;
@@ -1370,28 +1393,60 @@ public class GenerateStateFromSettlRunner
             if (match == InvoiceSourceMatch.Kind.SameCvr) sameCvrRows.Add(row);
             // Today's representative group is what disagrees with Settl here, so a same-CVR
             // acceptance vouches for the source account alone, not for its group.
-            // A group holding another Settl customer disagrees with Settl, like a same-CVR match:
-            // it vouches for the source account and the representative only. Its other members
-            // may have been merged into that other customer, so they stay with whoever else claims them.
+            // A group vouches for all its members except those that are a Settl customer under
+            // their own number: they were not merged into anyone at migration.
             var approved = match is InvoiceSourceMatch.Kind.Direct or InvoiceSourceMatch.Kind.SameCvr
                 ? [row.SourceAccount]
-                : row.RepresentativeMembers.Any(m => InvoiceSourceMatch.IsOtherSettlCustomer(
-                    m, row.SettlCustomerNumber, customers, env))
-                    ? [.. new[] { row.SourceAccount, row.Representative }.Distinct(StringComparer.Ordinal)]
-                    : row.RepresentativeMembers;
+                : row.RepresentativeMembers.Where(m => !InvoiceSourceMatch.IsOtherSettlCustomer(
+                    m, row.SettlCustomerNumber, customers, env)).ToArray();
+            var claim = new SourceClaim(row.SettlCustomerNumber, row.Cos,
+                RepresentativeIsClaimant(row.Representative, row.SettlCustomerNumber, env));
             foreach (var source in approved)
             {
                 if (excludedSources?.Contains(source) == true) continue;
-                if (conflictingSources.Contains(source)) continue;
-                if (ownerBySource.TryGetValue(source, out var other) && other != row.SettlCustomerNumber)
+                if (!claimsBySource.TryGetValue(source, out var claims))
+                    claimsBySource[source] = claims = [];
+                if (claims.Count > 0 && !conflictBySource.ContainsKey(source)
+                    && claims.All(c => c.Customer != row.SettlCustomerNumber))
                 {
-                    issues.Add(new SourceAccountOwnershipIssue(
-                        "XellentSourceClaimedByMultipleCustomers", source, row.MeteringPoint, $"{other}|{row.SettlCustomerNumber}"));
-                    ownerBySource.Remove(source);
-                    conflictingSources.Add(source);
+                    var conflict = new SourceAccountOwnershipIssue("XellentSourceClaimedByMultipleCustomers",
+                        source, row.MeteringPoint, $"{claims[0].Customer}|{row.SettlCustomerNumber}");
+                    issues.Add(conflict);
+                    conflictBySource[source] = conflict;
                 }
-                else ownerBySource[source] = row.SettlCustomerNumber;
+                claims.Add(claim);
             }
+        }
+        // Several customers claiming one account conflict, unless the account is no Settl customer
+        // itself and every claimant carries its real CVR. Then one claimant wins: the one the
+        // account's representative at that claimant's COS-1 points to, then the earliest COS, then
+        // the lowest customer number.
+        var tieBreaks = new List<OwnershipTieBreak>();
+        foreach (var (source, claims) in claimsBySource)
+        {
+            var ranked = claims.GroupBy(c => c.Customer, StringComparer.Ordinal)
+                .Select(g => new SourceClaim(g.Key, g.Min(c => c.Cos), g.Any(c => c.RepresentativeIsClaimant)))
+                .OrderByDescending(c => c.RepresentativeIsClaimant)
+                .ThenBy(c => c.Cos)
+                .ThenBy(c => c.Customer.Length).ThenBy(c => c.Customer, StringComparer.Ordinal)
+                .ToArray();
+            if (ranked.Length == 1)
+            {
+                ownerBySource[source] = ranked[0].Customer;
+                continue;
+            }
+            var claimants = ranked.Select(c => c.Customer).ToArray();
+            if (cvrByAccount is null
+                || !InvoiceSourceMatch.AllClaimantsShareCvr(source, claimants, cvrByAccount, customers, env))
+                continue;
+            var (winner, runnerUp) = (ranked[0], ranked[1]);
+            ownerBySource[source] = winner.Customer;
+            issues.Remove(conflictBySource[source]);
+            tieBreaks.Add(new OwnershipTieBreak(source, winner.Customer,
+                string.Join('|', claimants.Order(StringComparer.Ordinal)),
+                winner.RepresentativeIsClaimant != runnerUp.RepresentativeIsClaimant ? "RepresentativeAtCos"
+                    : winner.Cos != runnerUp.Cos ? "EarliestCos" : "LowestCustomerNumber",
+                winner.Cos));
         }
         if (issues.Count == 0 || skipUnresolvedSources)
         {
@@ -1407,7 +1462,17 @@ public class GenerateStateFromSettlRunner
                 .Where(r => ownerBySource.GetValueOrDefault(r.SourceAccount) == r.SettlCustomerNumber)
                 .Select(r => new SameCvrAcceptance(r.SourceAccount, r.Representative, r.MeteringPoint,
                     r.SettlCustomerNumber, r.Cos))];
-        return new(evidence.Count, ownerBySource.Count, representativeMatches, issues, sameCvrAccepted);
+        return new(evidence.Count, ownerBySource.Count, representativeMatches, issues, sameCvrAccepted,
+            cvrByAccount is null ? null : tieBreaks);
+    }
+
+    private sealed record SourceClaim(string Customer, DateOnly Cos, bool RepresentativeIsClaimant);
+
+    /// <summary>True when the row's representative at its COS-1 is the claiming customer itself.</summary>
+    private static bool RepresentativeIsClaimant(string representative, string customer, string? env)
+    {
+        try { return CustomerNumberPolicy.PadForEnv(representative, env, out _) == customer; }
+        catch (InvalidOperationException) { return false; }
     }
 
     private static async Task<IReadOnlySet<string>> LoadMehMeteringPointIdsAsync(
