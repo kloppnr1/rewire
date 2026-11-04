@@ -238,7 +238,7 @@ public class GenerateStateFromSettlCustomerLookupTests
     }
 
     [Fact]
-    public void Group_member_known_only_from_the_full_settl_list_is_not_claimed()
+    public void Group_member_whose_own_settl_customer_claims_nothing_stays_with_the_group()
     {
         var group = new GenerateStateOfflineCache.OwnershipEvidence(
             "MP1", "953420", "53421", "53420", new DateOnly(2026, 6, 11), ["53420", "53421", "213438"]);
@@ -248,7 +248,30 @@ public class GenerateStateFromSettlCustomerLookupTests
             "production", settlCustomers: new HashSet<string> { "953420", "213438" });
 
         Assert.Empty(result.Issues);
-        Assert.Equal(["53420", "53421"], Assert.Single(state.Accounts).SourceAccounts);
+        Assert.Equal(["213438", "53420", "53421"], Assert.Single(state.Accounts).SourceAccounts);
+    }
+
+    [Fact]
+    public void Source_whose_own_settl_customer_claims_nothing_keeps_its_representative_claim()
+    {
+        // 293360 and 514740 are Settl customers too, but no metering point links them to their own account.
+        var state = new MigrationStateDocument { Accounts =
+        [
+            new MigratedAccount { SettlAccountNumber = "293359" },
+            new MigratedAccount { SettlAccountNumber = "293360" },
+            new MigratedAccount { SettlAccountNumber = "514740" }
+        ] };
+        var row = new GenerateStateOfflineCache.OwnershipEvidence("571313114900175297", "293359", "293360",
+            "293359", new DateOnly(2026, 6, 11), ["293359", "293360", "514740"]);
+
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [row], "production",
+            skipUnresolvedSources: true);
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(["293359", "293360", "514740"],
+            state.Accounts.Single(a => a.SettlAccountNumber == "293359").SourceAccounts);
+        Assert.Empty(state.Accounts.Single(a => a.SettlAccountNumber == "293360").SourceAccounts);
+        Assert.Empty(state.Accounts.Single(a => a.SettlAccountNumber == "514740").SourceAccounts);
     }
 
     private static readonly GenerateStateOfflineCache.OwnershipEvidence OwnClaim = new(
@@ -440,17 +463,19 @@ public class GenerateStateFromSettlCustomerLookupTests
     }
 
     [Fact]
-    public void Padded_source_that_is_its_own_settl_customer_gets_no_same_cvr_claim()
+    public void Same_cvr_claim_stands_when_the_sources_own_settl_customer_claims_nothing()
     {
         var row = SameCvrRow with { SourceAccount = "52461", Representative = "52461" };
+        var state = StateWith("403522");
 
-        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(StateWith("403522"), [row], "production",
+        var result = GenerateStateFromSettlRunner.ApplyOwnershipEvidence(state, [row], "production",
             skipUnresolvedSources: true,
             cvrByAccount: new Dictionary<string, string> { ["52461"] = "36665030", ["403522"] = "36665030" },
             settlCustomers: new HashSet<string> { "403522", "952461" });
 
-        Assert.Equal("XellentAccountDoesNotMatchSettlCustomer", Assert.Single(result.Issues).Reason);
-        Assert.Empty(result.SameCvrAccepted!);
+        Assert.Empty(result.Issues);
+        Assert.Equal(["52461"], Assert.Single(state.Accounts).SourceAccounts);
+        Assert.Single(result.SameCvrAccepted!);
     }
 
     [Fact]

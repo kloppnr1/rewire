@@ -18,8 +18,9 @@ internal static class InvoiceSourceMatch
     /// Accounts merged at migration under an older rule can sit under a Settl customer today's
     /// resolver no longer groups them with. True when that customer number is a Xellent account
     /// with the source account's CVR. A blank CVR, or the placeholder 11111111 that Xellent holds
-    /// on unrelated accounts, never matches. Nor does a source account that is a Settl customer
-    /// itself: it was not merged into anyone, so a shared CVR gives no other customer a claim on it.
+    /// on unrelated accounts, never matches. Nor does a source account in
+    /// <paramref name="settlCustomers"/>: its own Settl customer claims it, so a shared CVR gives no
+    /// other customer a claim on it.
     /// The Settl number as written is tried before its unpadded forms, so a real six-digit account
     /// is never mistaken for a padded shorter one.
     /// </summary>
