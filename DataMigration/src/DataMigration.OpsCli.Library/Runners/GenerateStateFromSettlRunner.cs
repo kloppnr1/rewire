@@ -72,6 +72,13 @@ public class GenerateStateFromSettlRunOptions
     /// </summary>
     public int HistoryYears { get; set; } = Invoice.ExportHistoryYears;
     public bool Offline { get; set; }
+    /// <summary>
+    /// Semicolon CSV of ownership issues already handled. They are reported apart from new issues;
+    /// the state is unchanged. Null: use <see cref="HandledIssuesDefaultPath"/> when it exists.
+    /// </summary>
+    public string? HandledIssuesPath { get; set; }
+    /// <summary>Test override for the default handled-issues list.</summary>
+    public string HandledIssuesDefaultPath { get; set; } = HandledOwnershipIssues.DefaultPath;
     /// <summary>Test override; the CLI uses the user's local application-data directory.</summary>
     public string? OfflineCacheDirectory { get; set; }
 }
@@ -620,6 +627,13 @@ public class GenerateStateFromSettlRunner
             Log("ERROR: only a confirmed first ChangeOfSupplier start can establish invoice ownership.");
             return 1;
         }
+        // Read before the long run, so a missing or malformed list stops it straight away.
+        var handledIssuesPath = HandledOwnershipIssues.ResolvePath(options.HandledIssuesPath,
+            options.HandledIssuesDefaultPath);
+        var handledIssues = handledIssuesPath is null ? null : HandledOwnershipIssues.Load(handledIssuesPath);
+        Log(handledIssuesPath is null
+            ? $"  Handled ownership issues: none ({options.HandledIssuesDefaultPath} does not exist)"
+            : $"  Handled ownership issues: {handledIssuesPath} ({handledIssues!.Count} row(s))");
         var stopwatch = Stopwatch.StartNew();
         _ownershipIssues = null;
         _sameCvrAccepted = null;
@@ -688,6 +702,24 @@ public class GenerateStateFromSettlRunner
         exitCode = await EnrichCosDrivenAsync(state, customerNumbersById, options, cancellationToken);
         if (_ownershipIssues is { } issues)
         {
+            if (handledIssues is not null)
+            {
+                // Reporting only: handled issues were omitted from the state like any other.
+                var split = HandledOwnershipIssues.Split(issues, handledIssues);
+                issues = split.New;
+                var handledReportPath = HandledOwnershipIssues.HandledReportPath(options.OutputPath);
+                await File.WriteAllTextAsync(handledReportPath,
+                    HandledOwnershipIssues.BuildHandledCsv(split.Handled),
+                    new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
+                var noLongerSeenPath = HandledOwnershipIssues.NoLongerSeenReportPath(options.OutputPath);
+                await File.WriteAllTextAsync(noLongerSeenPath,
+                    HandledOwnershipIssues.BuildNoLongerSeenCsv(split.NoLongerSeen),
+                    new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
+                Log($"  Ownership issues: {split.Handled.Count} still handled, {split.New.Count} new, " +
+                    $"{split.NoLongerSeen.Count} handled row(s) no longer seen");
+                Log($"  Handled issue report: {handledReportPath}");
+                Log($"  Handled rows no longer seen: {noLongerSeenPath}");
+            }
             var issueReportPath = SourceAccountOwnership.IssueReportPath(options.OutputPath);
             await File.WriteAllTextAsync(
                 issueReportPath,

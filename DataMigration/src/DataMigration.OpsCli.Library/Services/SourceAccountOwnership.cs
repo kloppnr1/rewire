@@ -224,7 +224,7 @@ internal static class SourceAccountOwnership
         return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
     }
 
-    private static string Csv(string value) =>
+    internal static string Csv(string value) =>
         value.IndexOfAny([';', '"', '\n', '\r']) < 0
             ? value
             : '"' + value.Replace("\"", "\"\"") + '"';

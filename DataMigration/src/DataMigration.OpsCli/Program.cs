@@ -1673,6 +1673,7 @@ var generateStateFromSettlNoInvoicesOption = new Option<bool>("--no-invoices") {
 var generateStateFromSettlSkipUnresolvedOption = new Option<bool>("--skip-unresolved-source-accounts") { Description = "Omit metering points without a clear Settl customer and Xellent source accounts with unresolved ownership, including their invoices; report every omission." };
 var generateStateFromSettlIncludeUnknownStartsOption = new Option<bool>("--include-unknown-delivery-starts") { Description = "Allow a dated first delivery whose Settl start reason is Unknown. MoveIn, conflicting reasons, and missing starts remain excluded. Offline use requires a new pull-state-sources capture." };
 var generateStateFromSettlOfflineOption = new Option<bool>("--offline") { Description = "Generate state from locally captured source inputs without Settl or Xellent connections." };
+var generateStateFromSettlHandledIssuesOption = new Option<string>("--handled-issues") { Description = @"Semicolon CSV (Reason;SourceAccount;MeteringPoint;SettlCustomers;Note;HandledDate) of ownership issues already handled. Matching issues go to <state>-handled-issues.csv instead of the ownership-issues CSV; the state is unchanged. Default: C:\Services\DataMigration\data\handled-ownership-issues.csv when it exists." };
 
 var generateStateFromSettlCommand = new Command("generate-state-from-settl", "Generate invoice state from each migrated metering point's first supplier change, its Settl customer, and Xellent source accounts.")
 {
@@ -1688,6 +1689,7 @@ var generateStateFromSettlCommand = new Command("generate-state-from-settl", "Ge
     generateStateFromSettlSkipUnresolvedOption,
     generateStateFromSettlIncludeUnknownStartsOption,
     generateStateFromSettlOfflineOption,
+    generateStateFromSettlHandledIssuesOption,
 };
 
 generateStateFromSettlCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -1703,6 +1705,7 @@ generateStateFromSettlCommand.SetAction(async (parseResult, cancellationToken) =
     var skipUnresolvedSourceAccounts = parseResult.GetValue(generateStateFromSettlSkipUnresolvedOption);
     var includeUnknownDeliveryStarts = parseResult.GetValue(generateStateFromSettlIncludeUnknownStartsOption);
     var offline = parseResult.GetValue(generateStateFromSettlOfflineOption);
+    var handledIssues = parseResult.GetValue(generateStateFromSettlHandledIssuesOption);
 
     if (flatReferenceDate || includeNotInDeliveryCos.HasValue)
     {
@@ -1749,6 +1752,7 @@ generateStateFromSettlCommand.SetAction(async (parseResult, cancellationToken) =
             IncludeUnknownDeliveryStarts = includeUnknownDeliveryStarts,
             HistoryYears = historyYears,
             Offline = offline,
+            HandledIssuesPath = handledIssues,
         }, cancellationToken);
     }
     catch (Exception ex)
