@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DataMigration.OpsCli.IntegrationTests;
 
-/// <summary>Read-only: the raw TAKEORPAYPREVDATE query finds the COS-1 resolver's contract parts.</summary>
+/// <summary>Read-only: the raw contract-part and billing-dates queries against AXDB50_TEST.</summary>
 public sealed class SettlementCheckIntegrationTests(SettlFeaturetestFixture fixture)
     : IClassFixture<SettlFeaturetestFixture>
 {
@@ -41,12 +41,32 @@ public sealed class SettlementCheckIntegrationTests(SettlFeaturetestFixture fixt
             .ToList();
         Assert.NotEmpty(subjects);
 
-        var parts = await SettlementCheck.ReadPartsAsync(context, subjects, CancellationToken.None);
-        var byMp = parts.ToLookup(p => p.MeteringPoint);
-        var rows = subjects.Select(s => SettlementCheck.Classify(s, byMp[s.MeteringPoint])).ToList();
+        var xellent = await SettlementCheck.ReadAsync(context, subjects, CancellationToken.None);
+        var parts = xellent.Parts.ToLookup(p => p.MeteringPoint);
+        var statements = xellent.Statements.ToLookup(p => p.MeteringPoint);
+        var rows = subjects.Select(s => SettlementCheck.Classify(s, parts[s.MeteringPoint], statements[s.MeteringPoint])).ToList();
 
-        Assert.All(parts, p => Assert.Contains(p.MeteringPoint, cosByMp.Keys));
-        Assert.All(rows, r => Assert.NotEqual(SettlementCheck.Missing, r.Status));
-        Assert.All(rows, r => Assert.All(r.ContractPartIds.Split('|'), id => Assert.True(long.Parse(id) > 0)));
+        Assert.All(xellent.Parts, p => Assert.Contains(p.MeteringPoint, cosByMp.Keys));
+        Assert.All(xellent.Statements, p => Assert.Contains(p.MeteringPoint, cosByMp.Keys));
+        Assert.All(rows, r => Assert.NotEqual("", r.ContractPartIds));
+    }
+
+    /// <summary>
+    /// The point back office verified in production (contract 10461316, COS 2026-05-01, latest
+    /// statement 2026-04-30). AXDB50_TEST is an older copy where that contract's latest statement
+    /// is 2025-03-31, so here it must come out NotSettled with that date.
+    /// </summary>
+    [Fact]
+    public async Task Verified_point_reads_the_max_statement_date_of_its_contract_and_agreement()
+    {
+        await using var context = Context();
+        var subject = new SettlementCheck.Subject("000000", "000000", "571313115200045310", "10461316",
+            new DateOnly(2026, 5, 1));
+
+        var xellent = await SettlementCheck.ReadAsync(context, [subject], CancellationToken.None);
+        var row = SettlementCheck.Classify(subject, xellent.Parts, xellent.Statements);
+
+        Assert.Equal(new DateOnly(2025, 3, 31), row.LatestStatementDate);
+        Assert.Equal(SettlementCheck.NotSettled, row.Status);
     }
 }

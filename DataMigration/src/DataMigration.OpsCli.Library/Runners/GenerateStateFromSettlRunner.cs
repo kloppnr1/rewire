@@ -83,7 +83,7 @@ public class GenerateStateFromSettlRunOptions
     public string? OfflineCacheDirectory { get; set; }
     /// <summary>
     /// Also write <c>&lt;state&gt;-settlement-check.csv</c>: per metering point in the state, whether
-    /// its COS-1 contract part has TAKEORPAYPREVDATE = COS-1. Read-only; the state is unchanged.
+    /// the latest statement date billed for its COS-1 contract and agreement is COS-1. Read-only; the state is unchanged.
     /// Needs live Xellent, so it cannot be combined with <see cref="Offline"/>.
     /// </summary>
     public bool SettlementCheck { get; set; }
@@ -825,15 +825,17 @@ public class GenerateStateFromSettlRunner
         var subjects = SettlementCheck.Subjects(state, _ownershipEvidence ?? [],
             _ownerContractByMp.ToDictionary(kv => kv.Key, kv => kv.Value.ContractNumber, StringComparer.Ordinal),
             (_ownershipIssues ?? []).Select(i => i.MeteringPoint));
-        Log($"  Settlement check: reading COS-1 contract parts for {subjects.Count} metering point(s) " +
+        Log($"  Settlement check: reading latest statement dates for {subjects.Count} metering point(s) " +
             $"in chunks of {SettlementCheck.MeteringPointChunkSize}...");
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
             .UseSqlServer(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
             .Options;
         await using var context = new XellentDbContext(dbOptions);
-        var parts = await SettlementCheck.ReadPartsAsync(context, subjects, ct);
-        var partsByMp = parts.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
-        var rows = subjects.Select(s => SettlementCheck.Classify(s, partsByMp[s.MeteringPoint])).ToList();
+        var xellent = await SettlementCheck.ReadAsync(context, subjects, ct);
+        var partsByMp = xellent.Parts.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
+        var statementsByMp = xellent.Statements.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
+        var rows = subjects.Select(s => SettlementCheck.Classify(s, partsByMp[s.MeteringPoint],
+            statementsByMp[s.MeteringPoint])).ToList();
         var reportPath = SettlementCheck.ReportPath(options.OutputPath);
         await File.WriteAllTextAsync(reportPath, SettlementCheck.BuildCsv(rows),
             new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);

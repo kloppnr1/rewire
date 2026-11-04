@@ -9,9 +9,10 @@ namespace DataMigration.OpsCli.Services;
 
 /// <summary>
 /// Read-only check, per metering point in the state, of whether Xellent settled the customer up to
-/// the change of supplier. Back office rule: the contract part that held the point at COS-1 is
-/// settled when its <c>TAKEORPAYPREVDATE</c> equals COS-1. Invoice billing categories (Slutafregning)
-/// are deliberately not used.
+/// the change of supplier. Back office rule: take the latest statement date that Xellent billed for
+/// the point's COS-1 contract and agreement (<c>EXU_ContractPartTable.latestStatementDate()</c>, which
+/// reads <c>EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE</c>). The customer is settled when that date is
+/// COS-1. Invoice billing categories (Slutafregning) are deliberately not used.
 /// </summary>
 internal static class SettlementCheck
 {
@@ -30,8 +31,8 @@ internal static class SettlementCheck
     internal sealed record Subject(string SettlCustomer, string SourceAccount, string MeteringPoint,
         string? ContractNumber, DateOnly Cos);
 
-    /// <summary>One Xellent contract part on a metering point's delpoint. Settable properties because
-    /// EF maps raw SQL results by column name.</summary>
+    /// <summary>One Xellent contract part on a metering point's delpoint, for the part-id column.
+    /// Settable properties because EF maps raw SQL results by column name.</summary>
     internal sealed class PartRow
     {
         public string MeteringPoint { get; set; } = "";
@@ -39,11 +40,20 @@ internal static class SettlementCheck
         public long RecId { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
-        public DateTime TakeOrPayPrevDate { get; set; }
     }
 
-    internal sealed record Row(Subject Subject, string ContractPartIds, string TakeOrPayPrevDates,
+    /// <summary>The latest statement date billed for a contract on a metering point's agreement.</summary>
+    internal sealed class StatementRow
+    {
+        public string MeteringPoint { get; set; } = "";
+        public string ContractNumber { get; set; } = "";
+        public DateTime LatestStatementDate { get; set; }
+    }
+
+    internal sealed record Row(Subject Subject, string ContractPartIds, DateOnly? LatestStatementDate,
         string Status);
+
+    internal sealed record XellentRows(IReadOnlyList<PartRow> Parts, IReadOnlyList<StatementRow> Statements);
 
     /// <summary>
     /// The metering points that ended up in the state: an ownership claim whose source account the
@@ -73,34 +83,37 @@ internal static class SettlementCheck
     }
 
     /// <summary>
-    /// Settled when every part of the pinned contract on this point that was in force on COS-1 has
-    /// <c>TAKEORPAYPREVDATE</c> = COS-1; NotSettled when any of them has another date; Missing when
-    /// no such part exists.
+    /// Settled when the latest statement date of the pinned contract on this point is COS-1;
+    /// NotSettled when it is earlier or later; Missing when Xellent has no billing row for it.
+    /// The part ids are the pinned contract's parts in force on COS-1, for reference only.
     /// </summary>
-    internal static Row Classify(Subject subject, IEnumerable<PartRow> parts)
+    internal static Row Classify(Subject subject, IEnumerable<PartRow> parts, IEnumerable<StatementRow> statements)
     {
+        if (subject.ContractNumber is null) return new Row(subject, "", null, Missing);
         var day = subject.Cos.AddDays(-1).ToDateTime(TimeOnly.MinValue);
-        var held = subject.ContractNumber is null
-            ? []
-            : parts.Where(p => p.MeteringPoint == subject.MeteringPoint
-                    && string.Equals(p.ContractNumber.Trim(), subject.ContractNumber.Trim(), StringComparison.Ordinal)
-                    && p.StartDate.Date <= day
-                    && (p.EndDate.Date == OpenEnd || p.EndDate.Date >= day))
-                .GroupBy(p => p.RecId).Select(g => g.First())
-                .OrderBy(p => p.RecId).ToList();
-        if (held.Count == 0) return new Row(subject, "", "", Missing);
-        var status = held.All(p => p.TakeOrPayPrevDate.Date == day) ? Settled : NotSettled;
-        return new Row(subject,
-            string.Join('|', held.Select(p => p.RecId)),
-            string.Join('|', held.Select(p => FormatDate(p.TakeOrPayPrevDate)).Distinct()),
-            status);
+        var partIds = parts.Where(p => IsPinned(p.MeteringPoint, p.ContractNumber, subject)
+                && p.StartDate.Date <= day
+                && (p.EndDate.Date == OpenEnd || p.EndDate.Date >= day))
+            .Select(p => p.RecId).Distinct().Order();
+        var dates = statements.Where(s => IsPinned(s.MeteringPoint, s.ContractNumber, subject))
+            .Select(s => s.LatestStatementDate.Date).ToList();
+        var ids = string.Join('|', partIds);
+        if (dates.Count == 0) return new Row(subject, ids, null, Missing);
+        var latest = dates.Max();
+        return new Row(subject, ids, DateOnly.FromDateTime(latest), latest == day ? Settled : NotSettled);
     }
 
-    /// <summary>Reads the contract parts for the subjects' points and pinned contracts, in chunks.</summary>
-    internal static async Task<IReadOnlyList<PartRow>> ReadPartsAsync(XellentDbContext context,
+    private static bool IsPinned(string meteringPoint, string contractNumber, Subject subject) =>
+        meteringPoint == subject.MeteringPoint
+        && string.Equals(contractNumber.Trim(), subject.ContractNumber?.Trim(), StringComparison.Ordinal);
+
+    /// <summary>Reads contract parts and latest statement dates for the subjects' points and pinned
+    /// contracts, in chunks.</summary>
+    internal static async Task<XellentRows> ReadAsync(XellentDbContext context,
         IReadOnlyList<Subject> subjects, CancellationToken ct)
     {
-        var rows = new List<PartRow>();
+        var parts = new List<PartRow>();
+        var statements = new List<StatementRow>();
         var pinned = subjects.Where(s => s.ContractNumber is not null).ToList();
         foreach (var chunk in pinned.Select(s => s.MeteringPoint).Distinct(StringComparer.Ordinal)
                      .Chunk(MeteringPointChunkSize))
@@ -109,52 +122,58 @@ internal static class SettlementCheck
             var points = chunk.ToHashSet(StringComparer.Ordinal);
             var contracts = pinned.Where(s => points.Contains(s.MeteringPoint))
                 .Select(s => s.ContractNumber!).Distinct(StringComparer.Ordinal).ToArray();
-            var parameters = new List<SqlParameter>
-            {
-                new("@area", MigrationConstants.DataAreaId),
-                new("@category", MigrationConstants.DeliveryCategoryElectricity),
-            };
-            var pointNames = AddList(parameters, "m", chunk);
-            var contractNames = AddList(parameters, "c", contracts);
-            // Same join as MeteringPointAccountResolver: part → agreement → delpoint on
-            // agreement, data area and company. TAKEORPAYPREVDATE is not in the EF model, hence raw SQL.
-            var sql = $"""
+            var pointList = string.Join(", ", chunk.Select((_, i) => $"@m{i}"));
+            var contractList = string.Join(", ", contracts.Select((_, i) => $"@c{i}"));
+            var companies = $"('{ForInvoiceScope.CompanyId}', '')";
+
+            // Same join as MeteringPointAccountResolver: part → agreement → delpoint on agreement,
+            // data area and company.
+            var partSql = $"""
                 SELECT d.METERINGPOINT AS MeteringPoint, cp.CONTRACTNUM AS ContractNumber,
-                       cp.RECID AS RecId, cp.STARTDATE AS StartDate, cp.ENDDATE AS EndDate,
-                       cp.TAKEORPAYPREVDATE AS TakeOrPayPrevDate
+                       cp.RECID AS RecId, cp.STARTDATE AS StartDate, cp.ENDDATE AS EndDate
                 FROM EXU_CONTRACTPARTTABLE cp
                 JOIN EXU_AGREEMENTTABLE a ON a.AGREEMENTNUM = cp.INSTAGREENUM
                     AND a.DATAAREAID = cp.DATAAREAID AND a.COMPANYID = cp.COMPANYID
                 JOIN EXU_DELPOINT d ON d.ATTACHMENTNUM = a.AGREEMENTNUM
                     AND d.DATAAREAID = a.DATAAREAID AND d.COMPANYID = a.COMPANYID
                 WHERE cp.DATAAREAID = @area AND d.DELIVERYCATEGORY = @category
-                    AND cp.COMPANYID IN ('{ForInvoiceScope.CompanyId}', '')
-                    AND d.METERINGPOINT IN ({pointNames})
-                    AND cp.CONTRACTNUM IN ({contractNames})
+                    AND cp.COMPANYID IN {companies}
+                    AND d.METERINGPOINT IN ({pointList}) AND cp.CONTRACTNUM IN ({contractList})
                 """;
-            rows.AddRange(await context.Database
-                .SqlQueryRaw<PartRow>(sql, parameters.ToArray<object>())
+            parts.AddRange(await context.Database.SqlQueryRaw<PartRow>(partSql, Parameters(chunk, contracts))
                 .ToListAsync(ct));
+
+            // One billing-dates row per billing run, keyed by contract and agreement (ATTACHMENTNUM).
+            // Not in the EF model, hence raw SQL.
+            var statementSql = $"""
+                SELECT d.METERINGPOINT AS MeteringPoint, lb.CONTRACTNUM AS ContractNumber,
+                       MAX(lb.LATESTSTATEMENTDATE) AS LatestStatementDate
+                FROM EXU_LATESTBILLINGDATES lb
+                JOIN EXU_DELPOINT d ON d.ATTACHMENTNUM = lb.ATTACHMENTNUM AND d.DATAAREAID = lb.DATAAREAID
+                WHERE lb.DATAAREAID = @area AND d.DELIVERYCATEGORY = @category
+                    AND lb.COMPANYID IN {companies} AND d.COMPANYID IN {companies}
+                    AND d.METERINGPOINT IN ({pointList}) AND lb.CONTRACTNUM IN ({contractList})
+                GROUP BY d.METERINGPOINT, lb.CONTRACTNUM
+                """;
+            statements.AddRange(await context.Database.SqlQueryRaw<StatementRow>(statementSql,
+                Parameters(chunk, contracts)).ToListAsync(ct));
         }
-        return rows;
+        return new XellentRows(parts, statements);
     }
 
-    private static string AddList(List<SqlParameter> parameters, string prefix, IReadOnlyList<string> values)
-    {
-        var names = new List<string>(values.Count);
-        for (var i = 0; i < values.Count; i++)
-        {
-            var name = $"@{prefix}{i}";
-            parameters.Add(new SqlParameter(name, values[i]));
-            names.Add(name);
-        }
-        return string.Join(", ", names);
-    }
+    /// <summary>Fresh parameter objects per query: SqlClient refuses one already used by another command.</summary>
+    private static object[] Parameters(IReadOnlyList<string> points, IReadOnlyList<string> contracts) =>
+    [
+        new SqlParameter("@area", MigrationConstants.DataAreaId),
+        new SqlParameter("@category", MigrationConstants.DeliveryCategoryElectricity),
+        .. points.Select((p, i) => new SqlParameter($"@m{i}", p)),
+        .. contracts.Select((c, i) => new SqlParameter($"@c{i}", c)),
+    ];
 
     internal static string BuildCsv(IEnumerable<Row> rows)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("SettlCustomer;SourceAccount;MeteringPoint;ContractNumber;ContractPartId;Cos;TakeOrPayPrevDate;Status");
+        csv.AppendLine("SettlCustomer;SourceAccount;MeteringPoint;ContractNumber;ContractPartId;Cos;LatestStatementDate;Status");
         foreach (var row in rows)
         {
             csv.Append(Csv(row.Subject.SettlCustomer)).Append(';')
@@ -163,7 +182,7 @@ internal static class SettlementCheck
                 .Append(Csv(row.Subject.ContractNumber ?? "")).Append(';')
                 .Append(Csv(row.ContractPartIds)).Append(';')
                 .Append(row.Subject.Cos.ToString("yyyy-MM-dd")).Append(';')
-                .Append(Csv(row.TakeOrPayPrevDates)).Append(';')
+                .Append(row.LatestStatementDate?.ToString("yyyy-MM-dd") ?? "").Append(';')
                 .AppendLine(row.Status);
         }
         return csv.ToString();
@@ -175,10 +194,6 @@ internal static class SettlementCheck
         var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-settlement-check.csv";
         return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
     }
-
-    /// <summary>Xellent's 1900-01-01 means "never set"; the CSV shows it empty.</summary>
-    private static string FormatDate(DateTime date) =>
-        date.Date == OpenEnd ? "" : date.ToString("yyyy-MM-dd");
 
     private static string Csv(string value) =>
         value.IndexOfAny([';', '"', '\n', '\r']) < 0 ? value : '"' + value.Replace("\"", "\"\"") + '"';
