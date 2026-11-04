@@ -81,6 +81,12 @@ public class GenerateStateFromSettlRunOptions
     public string HandledIssuesDefaultPath { get; set; } = HandledOwnershipIssues.DefaultPath;
     /// <summary>Test override; the CLI uses the user's local application-data directory.</summary>
     public string? OfflineCacheDirectory { get; set; }
+    /// <summary>
+    /// Also write <c>&lt;state&gt;-settlement-check.csv</c>: per metering point in the state, whether
+    /// its COS-1 contract part has TAKEORPAYPREVDATE = COS-1. Read-only; the state is unchanged.
+    /// Needs live Xellent, so it cannot be combined with <see cref="Offline"/>.
+    /// </summary>
+    public bool SettlementCheck { get; set; }
 }
 
 /// <summary>
@@ -132,6 +138,8 @@ public class GenerateStateFromSettlRunner
     private IReadOnlyList<DeliveryStartAudit>? _deliveryStartAudit;
     private IReadOnlyList<GenerateStateOfflineCache.OwnershipEvidence>? _ownershipEvidence;
     private IReadOnlyList<string> _excludedSourceAccounts = [];
+    private IReadOnlyDictionary<string, MeteringPointAccountResolver.OwnerContract> _ownerContractByMp =
+        new Dictionary<string, MeteringPointAccountResolver.OwnerContract>();
     private IReadOnlySet<string> _settlCustomerNumbers = new HashSet<string>();
     // Bygger sit eget Xellent-lag udenom XellentDomainLoader, så listen skal med her.
     private readonly IReadOnlyList<string> _ignoredGroups;
@@ -627,6 +635,11 @@ public class GenerateStateFromSettlRunner
             Log("ERROR: only a confirmed first ChangeOfSupplier start can establish invoice ownership.");
             return 1;
         }
+        if (options.SettlementCheck && options.Offline)
+        {
+            Log("ERROR: --settlement-check reads Xellent live and cannot be combined with --offline.");
+            return 1;
+        }
         // Read before the long run, so a missing or malformed list stops it straight away.
         var handledIssuesPath = HandledOwnershipIssues.ResolvePath(options.HandledIssuesPath,
             options.HandledIssuesDefaultPath);
@@ -643,6 +656,7 @@ public class GenerateStateFromSettlRunner
         _deliveryStartAudit = null;
         _ownershipEvidence = null;
         _excludedSourceAccounts = [];
+        _ownerContractByMp = new Dictionary<string, MeteringPointAccountResolver.OwnerContract>();
 
         // --- Step 1: enumerate all Settl customers ---
         Console.Error.Write("  Loading customers from Settl...");
@@ -772,6 +786,10 @@ public class GenerateStateFromSettlRunner
         var updatedJson = JsonSerializer.Serialize(state, JsonOptions);
         await File.WriteAllTextAsync(options.OutputPath, updatedJson, cancellationToken);
 
+        // After the state is written and from the finished state, so the check can never change it.
+        if (options.SettlementCheck)
+            await WriteSettlementCheckAsync(state, options, cancellationToken);
+
         stopwatch.Stop();
         Console.ForegroundColor = ConsoleColor.Green;
         if (options.NoInvoices)
@@ -799,6 +817,29 @@ public class GenerateStateFromSettlRunner
             Log($"  {unresolvedSourceAccounts} unresolved Xellent source account(s) and their invoices omitted; " +
                 "review the ownership-issues CSV before uploading PDFs.");
         return 0;
+    }
+
+    private async Task WriteSettlementCheckAsync(MigrationStateDocument state,
+        GenerateStateFromSettlRunOptions options, CancellationToken ct)
+    {
+        var subjects = SettlementCheck.Subjects(state, _ownershipEvidence ?? [],
+            _ownerContractByMp.ToDictionary(kv => kv.Key, kv => kv.Value.ContractNumber, StringComparer.Ordinal),
+            (_ownershipIssues ?? []).Select(i => i.MeteringPoint));
+        Log($"  Settlement check: reading COS-1 contract parts for {subjects.Count} metering point(s) " +
+            $"in chunks of {SettlementCheck.MeteringPointChunkSize}...");
+        var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
+            .UseSqlServer(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+            .Options;
+        await using var context = new XellentDbContext(dbOptions);
+        var parts = await SettlementCheck.ReadPartsAsync(context, subjects, ct);
+        var partsByMp = parts.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
+        var rows = subjects.Select(s => SettlementCheck.Classify(s, partsByMp[s.MeteringPoint])).ToList();
+        var reportPath = SettlementCheck.ReportPath(options.OutputPath);
+        await File.WriteAllTextAsync(reportPath, SettlementCheck.BuildCsv(rows),
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
+        Log($"  Settlement check: {rows.Count(r => r.Status == SettlementCheck.Settled)} Settled, " +
+            $"{rows.Count(r => r.Status == SettlementCheck.NotSettled)} NotSettled, " +
+            $"{rows.Count(r => r.Status == SettlementCheck.Missing)} Missing → {reportPath}");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -897,6 +938,7 @@ public class GenerateStateFromSettlRunner
             : await MeteringPointAccountResolver.ResolveAsync(
                 options.ConnectionString!, allCosByMp, MigrationConstants.DataAreaId,
                 ct: ct, companyId: InvoiceCompanyId, includeBlankCompany: true);
+        _ownerContractByMp = mpResolution.OwnerContractByMpId;
         var (forMps, scopeAudit) = FilterForXellentOrigin(
             inScope, mpResolution.XellentMpIds, deliveryFilter.Audit);
         _deliveryStartAudit = scopeAudit;
