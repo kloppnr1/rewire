@@ -27,6 +27,7 @@ var offlineStateRun = args.Contains("generate-state-from-settl", StringComparer.
     || args.Contains("report-contract-impact", StringComparer.Ordinal)
     || args.Contains("prepare-aborabat-repair", StringComparer.Ordinal)
     || args.Contains("apply-aborabat-repair", StringComparer.Ordinal)
+    || args.Contains("export-active-customers", StringComparer.Ordinal)
     || args.Contains("pull-state-sources", StringComparer.Ordinal)
         && (args.Contains("--only=settl", StringComparer.Ordinal)
             || args.SkipWhile(a => a != "--only").Skip(1).FirstOrDefault() == "settl");
@@ -141,6 +142,7 @@ services.AddHttpClient<ISettlCustomerLinkLookup, SettlCustomerLinkLookup>();
 services.AddHttpClient<ISettlContractClient, SettlContractClient>();
 services.AddHttpClient<ISettlSettlementGroupClient, SettlSettlementGroupClient>();
 services.AddHttpClient<ISettlPriceListClient, SettlPriceListClient>();
+services.AddHttpClient<ISettlRawReader, SettlRawReader>();
 
 var serviceProvider = services.BuildServiceProvider();
 
@@ -271,6 +273,64 @@ reportPayersCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 rootCommand.Subcommands.Add(reportPayersCommand);
+
+// === export-active-customers command ===
+var exportActiveEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production, production-hev, production-vhel)" };
+var exportActiveOutputOption = new Option<string?>("--output") { Description = "Output JSON path (default: active-customers-<env>-<timestamp>.json)" };
+var exportActiveCustomersOption = new Option<string[]>("--customer")
+{
+    Description = "Only these Settl customer numbers (skips the env-wide scan; for testing)",
+    AllowMultipleArgumentsPerToken = true
+};
+var exportActiveLimitOption = new Option<int>("--limit") { Description = "Stop after this many customers (0 = all)" };
+var exportActiveParallelOption = new Option<int>("--parallel") { Description = "Customers read concurrently", DefaultValueFactory = _ => 8 };
+var exportActivePrettyOption = new Option<bool>("--pretty") { Description = "Indent the JSON (much bigger file)" };
+var exportActivePseudonymiseOption = new Option<bool>("--pseudonymise") { Description = "Replace CPR, CVR, names, addresses, email, phone and other identifiers with consistent fake values (sample data)" };
+
+var exportActiveCustomersCommand = new Command("export-active-customers",
+    "Read-only: every Settl customer linked today to an electricity metering point in delivery, as nested JSON")
+{
+    exportActiveEnvOption,
+    exportActiveOutputOption,
+    exportActiveCustomersOption,
+    exportActiveLimitOption,
+    exportActiveParallelOption,
+    exportActivePrettyOption,
+    exportActivePseudonymiseOption
+};
+
+exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    try
+    {
+        var runner = new ExportActiveCustomersRunner(
+            serviceProvider.GetRequiredService<ISettlRawReader>(),
+            serviceProvider.GetRequiredService<ISettlMeteringPointClient>(),
+            serviceProvider.GetRequiredService<ISettlCustomerLinkLookup>(),
+            serviceProvider.GetRequiredService<ISettlCustomerClient>());
+        return await runner.RunAsync(new ExportActiveCustomersRunOptions
+        {
+            OutputPath = parseResult.GetValue(exportActiveOutputOption)
+                ?? $"active-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+            CustomerNumbers = (parseResult.GetValue(exportActiveCustomersOption) ?? [])
+                .SelectMany(c => c.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .ToArray(),
+            Limit = parseResult.GetValue(exportActiveLimitOption),
+            Parallelism = parseResult.GetValue(exportActiveParallelOption),
+            Pretty = parseResult.GetValue(exportActivePrettyOption),
+            Pseudonymise = parseResult.GetValue(exportActivePseudonymiseOption),
+        }, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine($"ERROR: {ex.Message}");
+        Console.ResetColor();
+        return 1;
+    }
+});
+
+rootCommand.Subcommands.Add(exportActiveCustomersCommand);
 
 
 // === report-payer-diff command ===
