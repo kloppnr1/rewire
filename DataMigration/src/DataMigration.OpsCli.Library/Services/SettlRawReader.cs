@@ -36,18 +36,56 @@ public sealed class SettlRawReader(HttpClient http, ISettlAuthService auth,
 
     public SettlApiOptions Settings => Options;
 
-    public async Task<(JsonNode? Node, string? Error)> GetAsync(string url, CancellationToken ct)
+    // A full production export makes hundreds of thousands of calls over most of an hour; one dropped
+    // connection must not end the run. Waits 2, 4, 8, 16 and 32 seconds between attempts.
+    private const int MaxAttempts = 6;
+
+    public Task<(JsonNode? Node, string? Error)> GetAsync(string url, CancellationToken ct) =>
+        WithRetryAsync(async () =>
+        {
+            var (content, error) = await GetRawAsync(url, ct);
+            if (error != null) return (null, error);
+            return string.IsNullOrWhiteSpace(content) ? (null, null) : (JsonNode.Parse(content, NodeOptions), null);
+        }, ct);
+
+    public Task<(JsonNode? Node, string? Error)> PostSearchAsync(string url, object body, CancellationToken ct) =>
+        WithRetryAsync(async () =>
+        {
+            var (node, error) = await SendAsync<JsonNode>(HttpMethod.Post, url, body, ct);
+            return error != null || node == null ? (node, error) : (JsonNode.Parse(node.ToJsonString(), NodeOptions), null);
+        }, ct);
+
+    /// <summary>
+    /// Retries network failures, timeouts, 429 and 5xx. Anything else (404, 400) is an answer, not a
+    /// glitch, and comes back at once. When the attempts run out the failure is returned as an error,
+    /// never thrown, so the caller records it on the customer and carries on.
+    /// </summary>
+    private async Task<(JsonNode? Node, string? Error)> WithRetryAsync(
+        Func<Task<(JsonNode? Node, string? Error)>> call, CancellationToken ct)
     {
-        var (content, error) = await GetRawAsync(url, ct);
-        if (error != null) return (null, error);
-        return string.IsNullOrWhiteSpace(content) ? (null, null) : (JsonNode.Parse(content, NodeOptions), null);
+        for (var attempt = 1; ; attempt++)
+        {
+            string error;
+            try
+            {
+                var result = await call();
+                if (result.Error == null || !IsTransient(result.Error)) return result;
+                error = result.Error;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested
+                                       && ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                error = $"{ex.GetType().Name}: {ex.Message}";
+            }
+
+            if (attempt >= MaxAttempts) return (null, $"{error} (gave up after {attempt} attempts)");
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), ct);
+        }
     }
 
-    public async Task<(JsonNode? Node, string? Error)> PostSearchAsync(string url, object body, CancellationToken ct)
-    {
-        var (node, error) = await SendAsync<JsonNode>(HttpMethod.Post, url, body, ct);
-        return error != null || node == null ? (node, error) : (JsonNode.Parse(node.ToJsonString(), NodeOptions), null);
-    }
+    private static bool IsTransient(string error) =>
+        error.StartsWith("HTTP 429", StringComparison.Ordinal)
+        || error.StartsWith("HTTP 5", StringComparison.Ordinal);
 
     // Settl mixes PascalCase and camelCase between APIs; lookups by name must not care.
     private static readonly JsonNodeOptions NodeOptions = new() { PropertyNameCaseInsensitive = true };

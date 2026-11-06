@@ -117,7 +117,21 @@ public class ExportActiveCustomersRunner
             new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, options.Parallelism), CancellationToken = ct },
             async (customerId, token) =>
             {
-                var customer = await ExportCustomerAsync(customerId, token);
+                JsonObject customer;
+                try
+                {
+                    customer = await ExportCustomerAsync(customerId, token);
+                }
+                catch (Exception ex) when (!token.IsCancellationRequested)
+                {
+                    // Last line of defence: one customer that cannot be read is written with its error,
+                    // the rest of the run goes on.
+                    customer = new JsonObject
+                    {
+                        ["customerId"] = customerId.ToString(),
+                        ["errors"] = new JsonArray(new JsonObject { ["section"] = "customer", ["error"] = $"{ex.GetType().Name}: {ex.Message}" }),
+                    };
+                }
                 if (customer["errors"] is JsonArray { Count: > 0 } customerErrors)
                 {
                     Interlocked.Increment(ref withErrors);
@@ -206,7 +220,9 @@ public class ExportActiveCustomersRunner
         while (limit <= 0 || customers.Count < limit)
         {
             ct.ThrowIfCancellationRequested();
-            var (items, count, err) = await _meteringPointClient.FindMeteringPointsAsync(PageSize, skip, doCount: skip == 0, ct);
+            var pageSkip = skip;
+            var (items, count, err) = await RetryOnNetworkErrorAsync(
+                () => _meteringPointClient.FindMeteringPointsAsync(PageSize, pageSkip, doCount: pageSkip == 0, ct), ct);
             if (err != null)
             {
                 _log($"ERROR: Settl FindMeteringPoints failed at skip {skip}: {err}");
@@ -225,7 +241,8 @@ public class ExportActiveCustomersRunner
 
             foreach (var batch in inDelivery.Chunk(LinkLookupBatchSize))
             {
-                var (entries, error) = await _linkLookup.FindCustomersForMeteringPointsAsync(batch, today, ct);
+                var (entries, error) = await RetryOnNetworkErrorAsync(
+                    () => _linkLookup.FindCustomersForMeteringPointsAsync(batch, today, ct), ct);
                 if (error != null || entries == null)
                 {
                     _log($"ERROR: customer link lookup failed: {error}");
@@ -251,6 +268,24 @@ public class ExportActiveCustomersRunner
         _log($"  {selected} in delivery of {scanned} scanned; {customers.Count} customer(s); " +
              $"{unlinked} metering point(s) in delivery have no customer link today");
         return customers;
+    }
+
+    /// <summary>The selection scan's calls go through the typed clients, which throw on a dropped
+    /// connection. Retry those a few times before giving up the run.</summary>
+    private static async Task<T> RetryOnNetworkErrorAsync<T>(Func<Task<T>> call, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await call();
+            }
+            catch (Exception ex) when (attempt < 6 && !ct.IsCancellationRequested
+                                       && ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), ct);
+            }
+        }
     }
 
     /// <summary>
