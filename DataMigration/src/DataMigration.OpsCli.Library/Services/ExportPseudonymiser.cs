@@ -66,9 +66,10 @@ public sealed class ExportPseudonymiser
     private const int MinEmbeddedLength = 5;
 
     /// <summary>
-    /// Rewrites the nodes in place. Pass the whole export at once: the second pass removes every real
-    /// value found anywhere from free text everywhere — a name typed into a contract description, a
-    /// street in an invoice line text, also when it belongs to another customer in the file.
+    /// Rewrites the nodes in place. The second pass removes every real value found in the nodes from
+    /// free text in the same nodes — a name typed into a contract description, a street in an invoice
+    /// line text. export-active-customers passes one customer at a time so a full run never holds the
+    /// whole export; the fakes stay consistent across calls because the key lives for the run.
     /// </summary>
     public void Apply(IEnumerable<JsonNode?> nodes)
     {

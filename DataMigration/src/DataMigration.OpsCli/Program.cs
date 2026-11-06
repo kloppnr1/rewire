@@ -285,6 +285,7 @@ var exportActiveCustomersOption = new Option<string[]>("--customer")
 var exportActiveLimitOption = new Option<int>("--limit") { Description = "Stop after this many customers (0 = all)" };
 var exportActiveParallelOption = new Option<int>("--parallel") { Description = "Customers read concurrently", DefaultValueFactory = _ => 8 };
 var exportActivePrettyOption = new Option<bool>("--pretty") { Description = "Indent the JSON (much bigger file)" };
+var exportActiveRawOption = new Option<bool>("--raw") { Description = "Write the Settl responses whole instead of the customer example shape (much bigger)" };
 var exportActivePseudonymiseOption = new Option<bool>("--pseudonymise") { Description = "Replace CPR, CVR, names, addresses, email, phone and other identifiers with consistent fake values (sample data)" };
 
 var exportActiveCustomersCommand = new Command("export-active-customers",
@@ -296,7 +297,8 @@ var exportActiveCustomersCommand = new Command("export-active-customers",
     exportActiveLimitOption,
     exportActiveParallelOption,
     exportActivePrettyOption,
-    exportActivePseudonymiseOption
+    exportActivePseudonymiseOption,
+    exportActiveRawOption
 };
 
 exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -319,6 +321,7 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             Parallelism = parseResult.GetValue(exportActiveParallelOption),
             Pretty = parseResult.GetValue(exportActivePrettyOption),
             Pseudonymise = parseResult.GetValue(exportActivePseudonymiseOption),
+            Raw = parseResult.GetValue(exportActiveRawOption),
         }, cancellationToken);
     }
     catch (Exception ex)

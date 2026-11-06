@@ -24,11 +24,17 @@ public class ExportActiveCustomersRunOptions
     /// <summary>Replace personal data with consistent fake values (sample files for outside parties).
     /// See <see cref="ExportPseudonymiser"/>.</summary>
     public bool Pseudonymise { get; set; }
+
+    /// <summary>Write the Settl responses whole instead of the approved customer shape
+    /// (<see cref="CustomerExportProjection"/>).</summary>
+    public bool Raw { get; set; }
 }
 
 /// <summary>
-/// Read-only carve-out of every active Settl customer as JSON, one object per customer with the
-/// Settl responses nested as Settl returned them (no DTO projection, so no field is dropped).
+/// Read-only carve-out of every active Settl customer as JSON, one object per customer in the
+/// approved customer shape (<see cref="CustomerExportProjection"/>). <c>--raw</c> writes the Settl
+/// responses whole instead. Each customer is written as soon as it is read, so a run of all ~51,000
+/// customers (~59,000 metering points, about 1 KB each) never holds more than the customers in flight.
 ///
 /// <para>Active = linked today to at least one electricity metering point that is in delivery.
 /// The population comes from the market-v3 metering point list (electricity only, child metering
@@ -102,16 +108,14 @@ public class ExportActiveCustomersRunner
             : "customers linked today to an electricity metering point in delivery (market v3, children skipped)")
             + "; only links to active metering points are kept");
         writer.WriteBoolean("pseudonymised", options.Pseudonymise);
+        writer.WriteString("shape", options.Raw ? "raw Settl responses" : "customer example (Customer_405013)");
         writer.WritePropertyName("customers");
         writer.WriteStartArray();
 
         var done = 0;
         var withErrors = 0;
         var errorsBySection = new ConcurrentDictionary<string, int>();
-        // Pseudonymising needs every real value in the file before it can scrub free text, so those
-        // runs hold all customers in memory and write at the end. Sample runs are small.
         var pseudonymiser = options.Pseudonymise ? new ExportPseudonymiser() : null;
-        var held = new List<JsonObject>();
         sw.Restart();
         await Parallel.ForEachAsync(customerIds,
             new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, options.Parallelism), CancellationToken = ct },
@@ -144,8 +148,11 @@ public class ExportActiveCustomersRunner
                 await writeLock.WaitAsync(token);
                 try
                 {
-                    if (pseudonymiser != null) held.Add(customer);
-                    else customer.WriteTo(writer);
+                    // Pseudonymise the raw responses (the scrambler knows Settl's field names), then cut
+                    // down to the approved shape. Inside the lock: the scrambler is not thread-safe.
+                    pseudonymiser?.Apply(customer);
+                    var output = options.Raw ? customer : CustomerExportProjection.Project(customer);
+                    output.WriteTo(writer);
                     var n = ++done;
                     if (n % 100 == 0) await writer.FlushAsync(token);
                     if (n % 50 == 0 || n == customerIds.Count)
@@ -157,11 +164,6 @@ public class ExportActiveCustomersRunner
                 }
             });
 
-        if (pseudonymiser != null)
-        {
-            pseudonymiser.Apply(held);
-            foreach (var customer in held) customer.WriteTo(writer);
-        }
 
         writer.WriteEndArray();
         writer.WriteNumber("customerCount", done);
