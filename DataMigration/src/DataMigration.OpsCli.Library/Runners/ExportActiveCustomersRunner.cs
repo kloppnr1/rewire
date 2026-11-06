@@ -32,7 +32,9 @@ public class ExportActiveCustomersRunOptions
 ///
 /// <para>Active = linked today to at least one electricity metering point that is in delivery.
 /// The population comes from the market-v3 metering point list (electricity only, child metering
-/// points skipped, <c>InDelivery</c> true), then the customer link at today's date. Only those
+/// points skipped, <c>InDelivery</c> true), then the customer link at today's date; with a limit the
+/// scan stops once enough customers are found. Per customer the same rule is checked again on each
+/// linked metering point's own market data. Only those
 /// metering points are linked in the export: customer, payer and contract links to anything else
 /// (moved-out, water, not in delivery) are left out, and so are contracts with no active link.</para>
 ///
@@ -75,12 +77,9 @@ public class ExportActiveCustomersRunner
         }
 
         var sw = Stopwatch.StartNew();
-        var active = await SelectActiveAsync(ct);
-        if (active == null) return 1;
-        _activeMeteringPoints = active.Value.MeteringPointIds;
         var customerIds = options.CustomerNumbers.Length > 0
             ? await ResolveCustomerNumbersAsync(options.CustomerNumbers, ct)
-            : active.Value.CustomerIds;
+            : await SelectActiveCustomersAsync(options.Limit, ct);
         if (customerIds == null) return 1;
 
         if (options.Limit > 0 && customerIds.Count > options.Limit)
@@ -189,56 +188,94 @@ public class ExportActiveCustomersRunner
     }
 
     /// <summary>
-    /// The active population: electricity metering points in delivery that a customer is linked to
-    /// today, and those customers. Every link list in the export is cut down to these metering points.
+    /// Customers linked today to an electricity metering point in delivery (market v3, children
+    /// skipped). Pages through the metering points and looks up their customers page by page, so a
+    /// <paramref name="limit"/> stops the scan as soon as enough customers are found.
     /// </summary>
-    private async Task<(List<Guid> CustomerIds, HashSet<Guid> MeteringPointIds)?> SelectActiveAsync(CancellationToken ct)
+    private async Task<List<Guid>?> SelectActiveCustomersAsync(int limit, CancellationToken ct)
     {
-        _log("Selecting electricity metering points in delivery (market v3)...");
-        var selection = await SettlMeteringPointScanner.SelectAsync(
-            _meteringPointClient, includeChildren: false, includeNotInDelivery: false, s => Console.Error.Write(s), ct);
-        Console.Error.WriteLine();
-        _log($"  {selection.MeteringPointIds.Count} in delivery of {selection.Scanned} scanned " +
-             $"({selection.SkippedChildren} children, {selection.SkippedNotInDelivery} not in delivery skipped)");
+        _log(limit > 0
+            ? $"Selecting the first {limit} customer(s) with an electricity metering point in delivery..."
+            : "Selecting customers with an electricity metering point in delivery (market v3)...");
 
-        var customers = new HashSet<Guid>();
-        var linked = new HashSet<Guid>();
+        var customers = new List<Guid>();
+        var seenCustomers = new HashSet<Guid>();
         var today = DateTime.UtcNow.Date;
-        foreach (var batch in selection.MeteringPointIds.Chunk(LinkLookupBatchSize))
+        int skip = 0, total = 0, scanned = 0, selected = 0, unlinked = 0;
+
+        while (limit <= 0 || customers.Count < limit)
         {
-            var (entries, error) = await _linkLookup.FindCustomersForMeteringPointsAsync(batch, today, ct);
-            if (error != null || entries == null)
+            ct.ThrowIfCancellationRequested();
+            var (items, count, err) = await _meteringPointClient.FindMeteringPointsAsync(PageSize, skip, doCount: skip == 0, ct);
+            if (err != null)
             {
-                _log($"ERROR: customer link lookup failed: {error}");
+                _log($"ERROR: Settl FindMeteringPoints failed at skip {skip}: {err}");
                 return null;
             }
-            foreach (var entry in entries)
-            {
-                if (entry.Customer is not { } customer) continue;
-                customers.Add(customer.Id);
-                foreach (var mp in entry.MeteringPoints ?? []) linked.Add(mp.MeteringPointId);
-            }
-        }
+            if (skip == 0 && count > 0) total = count;
+            if (items.Count == 0) break;
+            scanned += items.Count;
 
-        var unlinked = selection.MeteringPointIds.Count(id => !linked.Contains(id));
-        _log($"  {customers.Count} customer(s); {unlinked} metering point(s) in delivery have no customer link today");
-        return (customers.OrderBy(id => id).ToList(), linked);
+            var inDelivery = items
+                .Where(mp => mp.InDelivery == true
+                             && (mp.ParentMeteringPoint?.Id is not { } parent || parent == Guid.Empty))
+                .Select(mp => mp.Id)
+                .ToList();
+            selected += inDelivery.Count;
+
+            foreach (var batch in inDelivery.Chunk(LinkLookupBatchSize))
+            {
+                var (entries, error) = await _linkLookup.FindCustomersForMeteringPointsAsync(batch, today, ct);
+                if (error != null || entries == null)
+                {
+                    _log($"ERROR: customer link lookup failed: {error}");
+                    return null;
+                }
+                var linked = new HashSet<Guid>();
+                foreach (var entry in entries)
+                {
+                    if (entry.Customer is not { } customer) continue;
+                    if (seenCustomers.Add(customer.Id)) customers.Add(customer.Id);
+                    foreach (var mp in entry.MeteringPoints ?? []) linked.Add(mp.MeteringPointId);
+                }
+                unlinked += batch.Count(id => !linked.Contains(id));
+            }
+
+            Console.Error.Write($"\r  Scanned {scanned}{(total > 0 ? $"/{total}" : "")} metering point(s), {customers.Count} customer(s)");
+            skip += PageSize;
+            if (items.Count < PageSize || (total > 0 && skip >= total)) break;
+        }
+        Console.Error.WriteLine();
+
+        if (limit > 0 && customers.Count > limit) customers = customers.Take(limit).ToList();
+        _log($"  {selected} in delivery of {scanned} scanned; {customers.Count} customer(s); " +
+             $"{unlinked} metering point(s) in delivery have no customer link today");
+        return customers;
     }
 
-    private HashSet<Guid> _activeMeteringPoints = [];
-
     /// <summary>
-    /// True when a link (customer, payer or contract → metering point) points at an active metering
-    /// point and is open today. Settl writes open-ended links as year 9999.
+    /// True when a link (customer, payer or contract → metering point) points at one of the customer's
+    /// active metering points and is open today. Settl writes open-ended links as year 9999.
     /// </summary>
-    private bool IsActiveLink(JsonNode? link, DateTime today)
+    private static bool IsActiveLink(JsonNode? link, DateTime today, HashSet<Guid> active) =>
+        Guid.TryParse(link?["MeteringPointId"]?.GetValue<string>(), out var mpId)
+        && active.Contains(mpId)
+        && IsOpen(link, today);
+
+    private static bool IsOpen(JsonNode? link, DateTime today)
     {
-        if (!Guid.TryParse(link?["MeteringPointId"]?.GetValue<string>(), out var mpId)
-            || !_activeMeteringPoints.Contains(mpId))
-            return false;
         var start = ParseDate(link?["Start"]);
         var end = ParseDate(link?["End"]);
         return (start == null || start <= today) && (end == null || end > today);
+    }
+
+    /// <summary>In delivery and not a child, read from the metering point's own market data — the same
+    /// two facts the scan filters the market list on.</summary>
+    private static bool IsActiveMeteringPoint(JsonNode? market)
+    {
+        if (market?["DeliveryStatus"]?["InDelivery"]?.GetValue<bool>() != true) return false;
+        var parent = market["Relation"]?["ParentMeteringPointId"]?.GetValue<string>();
+        return !Guid.TryParse(parent, out var parentId) || parentId == Guid.Empty;
     }
 
     private static DateTime? ParseDate(JsonNode? node) =>
@@ -248,8 +285,8 @@ public class ExportActiveCustomersRunner
             ? d
             : null;
 
-    private JsonArray ActiveLinks(JsonArray links, DateTime today) =>
-        new(links.Where(l => IsActiveLink(l, today)).Select(l => l!.DeepClone()).ToArray());
+    private static JsonArray ActiveLinks(JsonArray links, DateTime today, HashSet<Guid> active) =>
+        new(links.Where(l => IsActiveLink(l, today, active)).Select(l => l!.DeepClone()).ToArray());
 
     private async Task<JsonObject> ExportCustomerAsync(Guid customerId, CancellationToken ct)
     {
@@ -274,33 +311,28 @@ public class ExportActiveCustomersRunner
         var customerV3 = await Get("customer", $"{billing}/api/v3/customers/{customerId}");
         var customerV2 = await Get("customerV2", $"{billing}/api/v2/customers/{customerId}");
         var today = DateTime.UtcNow.Date;
-        var mpLinks = ActiveLinks(
-            await GetAll("meteringPointLinks", $"{billing}/api/v2/customers/{customerId}/meteringPoints"), today);
+        var allLinks = await GetAll("meteringPointLinks", $"{billing}/api/v2/customers/{customerId}/meteringPoints");
 
-        var payers = new JsonArray();
-        foreach (var payerInfo in await GetAll("payers", $"{billing}/api/v1/Payers?CustomerId={customerId}&CountryCode=DK"))
-        {
-            var payerId = payerInfo?["Id"]?.GetValue<string>();
-            if (payerId == null) continue;
-            payers.Add(new JsonObject
-            {
-                ["payer"] = await Get($"payer {payerId}", $"{billing}/api/v1/Payers/{payerId}"),
-                ["meteringPointLinks"] = ActiveLinks(await GetAll($"payer {payerId} meteringPointLinks",
-                    $"{billing}/api/v1/Payers/{payerId}/MeteringPoints"), today),
-            });
-        }
-
+        // Active = an electricity metering point the customer is linked to today that is in delivery
+        // and not a child. Decided per metering point from its own market data, so no env-wide scan
+        // is needed; every link list below is cut down to this set.
+        var active = new HashSet<Guid>();
         var meteringPoints = new JsonArray();
-        var electricityMpIds = mpLinks
-            .Select(l => l?["MeteringPointId"]?.GetValue<string>())
-            .OfType<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-        foreach (var mpId in electricityMpIds)
+        var candidates = allLinks
+            .Where(l => string.Equals(l?["CommodityType"]?.GetValue<string>(), "Electricity", StringComparison.OrdinalIgnoreCase)
+                        && IsOpen(l, today))
+            .Select(l => Guid.TryParse(l?["MeteringPointId"]?.GetValue<string>(), out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct();
+        foreach (var mpId in candidates)
         {
+            var marketData = await Get($"mp {mpId} market", $"{market}/api/v3/meteringPoints/{mpId}");
+            if (!IsActiveMeteringPoint(marketData)) continue;
+            active.Add(mpId);
             meteringPoints.Add(new JsonObject
             {
-                ["meteringPointId"] = mpId,
-                ["market"] = await Get($"mp {mpId} market", $"{market}/api/v3/meteringPoints/{mpId}"),
+                ["meteringPointId"] = mpId.ToString(),
+                ["market"] = marketData,
                 ["consumerNationalIds"] = await Get($"mp {mpId} consumerNationalIds",
                     $"{market}/api/v4/meteringPoints/{mpId}/nationalIdentificationNumber"),
                 ["deliveryStatuses"] = await Get($"mp {mpId} deliveryStatuses",
@@ -311,6 +343,21 @@ public class ExportActiveCustomersRunner
             });
         }
 
+        var mpLinks = ActiveLinks(allLinks, today, active);
+
+        var payers = new JsonArray();
+        foreach (var payerInfo in await GetAll("payers", $"{billing}/api/v1/Payers?CustomerId={customerId}&CountryCode=DK"))
+        {
+            var payerId = payerInfo?["Id"]?.GetValue<string>();
+            if (payerId == null) continue;
+            payers.Add(new JsonObject
+            {
+                ["payer"] = await Get($"payer {payerId}", $"{billing}/api/v1/Payers/{payerId}"),
+                ["meteringPointLinks"] = ActiveLinks(await GetAll($"payer {payerId} meteringPointLinks",
+                    $"{billing}/api/v1/Payers/{payerId}/MeteringPoints"), today, active),
+            });
+        }
+
         // A contract here is the contract on a metering point, so one left with no active metering
         // point is dropped.
         var contracts = new JsonArray();
@@ -318,7 +365,7 @@ public class ExportActiveCustomersRunner
                      $"{billing}/api/v1/contracts/customer/{customerId}/metering-point-contracts?CommodityTypes=Electricity"))
         {
             if (contract is not JsonObject c || c["MeteringPoints"] is not JsonArray contractMps) continue;
-            var activeMps = ActiveLinks(contractMps, today);
+            var activeMps = ActiveLinks(contractMps, today, active);
             if (activeMps.Count == 0) continue;
             var copy = (JsonObject)c.DeepClone();
             copy["MeteringPoints"] = activeMps;
