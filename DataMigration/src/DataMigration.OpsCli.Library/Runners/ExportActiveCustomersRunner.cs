@@ -38,8 +38,7 @@ public class ExportActiveCustomersRunOptions
 ///
 /// <para>Per customer: customer (v2 + v3), metering point links, payers with their metering point
 /// links, each electricity metering point (market, billing, delivery statuses, consumer national
-/// ids, settlement groups), contracts, price list associations, account info, account entries and
-/// extra invoice lines. A failed read is recorded under <c>errors</c> on the customer; the run
+/// ids, settlement groups), contracts, price list associations and extra invoice lines. A failed read is recorded under <c>errors</c> on the customer; the run
 /// continues.</para>
 /// </summary>
 public class ExportActiveCustomersRunner
@@ -256,7 +255,6 @@ public class ExportActiveCustomersRunner
     {
         var billing = _reader.Settings.BillingBaseUrl;
         var market = _reader.Settings.MarketBaseUrl;
-        var debtors = _reader.Settings.DebtorsBaseUrl;
         var errors = new ConcurrentBag<JsonObject>();
 
         async Task<JsonNode?> Get(string section, string url)
@@ -330,11 +328,6 @@ public class ExportActiveCustomersRunner
         var (priceLists, priceListError) = await _reader.PostSearchAsync(
             $"{billing}/api/v2/customers/{customerId}/pricelists/search", new { }, ct);
         if (priceListError != null) errors.Add(new JsonObject { ["section"] = "priceLists", ["error"] = priceListError });
-
-        var accountInfo = await Get("accountInfo",
-            $"{debtors}/api/v1/debtorAccountEntries/customerAccountInfo?CustomerId={customerId}");
-        var accountEntries = await GetAll("accountEntries",
-            $"{debtors}/api/v1/debtorAccountEntries/findEntriesForCustomer?CustomerId={customerId}");
         var extraInvoiceLines = await GetAll("extraInvoiceLines",
             $"{billing}/api/v2/customers/{customerId}/extraInvoiceLines?countryCode=DK");
 
@@ -349,8 +342,6 @@ public class ExportActiveCustomersRunner
             ["meteringPoints"] = meteringPoints,
             ["contracts"] = contracts,
             ["priceLists"] = priceLists,
-            ["accountInfo"] = accountInfo,
-            ["accountEntries"] = accountEntries,
             ["extraInvoiceLines"] = extraInvoiceLines,
             ["errors"] = new JsonArray(errors.Select(e => (JsonNode)e).ToArray()),
         };
