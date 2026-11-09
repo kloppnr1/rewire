@@ -244,17 +244,53 @@ public class TimeSeriesRunner
         AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)),
             dataHub == null ? BlockedCsvHeader : [.. BlockedCsvHeader, .. DataHubCsvColumns],
             dataHub == null ? row : [.. row, dataHub.Occurrences, dataHub.SameDate, dataHub.PreviousMessages, dataHub.Messages]);
+        if (dataHub != null && _switchesFile is { } switchesFile)
+            foreach (var s in dataHub.Switches.Where(s => _switchesSameDate is not { } wanted || s.SameDate == wanted))
+            {
+                File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, s.SwitchDate.ToString("yyyy-MM-dd"),
+                    s.Occurrence?.ToString("yyyy-MM-dd") ?? "none", s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
+                _switchesRows++;
+            }
     }
+
+    // post --all's list of resolution switches for Systemate, in the resolution-changes style: one row per switch.
+    // Null outside post --all (and in the seed's done check). _switchesSameDate keeps only rows with that SameDate.
+    private string? _switchesFile;
+    private bool? _switchesSameDate;
+    private int _switchesRows;
+
+    internal static string SwitchesFileName(string environment) => $"resolution-switches-{environment}.csv";
+
+    private static readonly string[] SwitchesColumns =
+        ["MeteringPointId", "ChangeDate", "DataHubOccurrence", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
+
+    // Semicolons, no quotes, BOM and CRLF like resolution-changes. A field holding a semicolon or a line break (an
+    // XML entity such as &amp; does) is quoted, so the columns still line up; the quotes inside XML stay as they are.
+    private static string SwitchesLine(params string[] fields) =>
+        string.Join(";", fields.Select(f => f.IndexOfAny([';', '\r', '\n']) >= 0 ? $"\"{f.Replace("\"", "\"\"")}\"" : f)) + "\r\n";
 
     /// <summary>One switch to find the DataHub message for: the switch date, the MeterReadingOccurrence switched
     /// to (PT15M or PT1H), and the start of the reading period before it (a message before that belongs to an
     /// earlier switch).</summary>
     internal sealed record SwitchToFind(DateOnly SwitchDate, string ReadingOccurrence, DateOnly After);
 
-    /// <summary>The csv columns: per switch the message's Occurrence (Danish date, "none" when there is no
+    /// <summary>What was found for one switch: the message's Occurrence (Danish date; null when there is no
+    /// message), whether that is the switch date, the message received just before it and the message.</summary>
+    internal sealed record SwitchMessage(DateOnly SwitchDate, DateOnly? Occurrence, string PreviousMessage, string Message)
+    {
+        public bool SameDate => Occurrence == SwitchDate;
+    }
+
+    /// <summary>The blocked file's columns: per switch the message's Occurrence (Danish date, "none" when there is no
     /// message), "yes" when every switch has a message on its own switch date, else "no", the message of the
-    /// same type received just before each one, and the messages.</summary>
-    internal sealed record DataHubSwitchMessages(string Occurrences, string SameDate, string PreviousMessages, string Messages);
+    /// same type received just before each one, and the messages. <see cref="Switches"/> holds them one by one.</summary>
+    internal sealed record DataHubSwitchMessages(IReadOnlyList<SwitchMessage> Switches)
+    {
+        public string Occurrences => string.Join(", ", Switches.Select(s => s.Occurrence?.ToString("yyyy-MM-dd") ?? "none"));
+        public string SameDate => Switches.Count > 0 && Switches.All(s => s.SameDate) ? "yes" : "no";
+        public string PreviousMessages => string.Join(" | ", Switches.Where(s => s.Occurrence != null).Select(s => s.PreviousMessage));
+        public string Messages => string.Join(" | ", Switches.Where(s => s.Occurrence != null).Select(s => s.Message));
+    }
 
     /// <summary>
     /// Per switch, the first incoming DK_NotifyMasterDataMeteringPoint (by Creation) whose MeterReadingOccurrence is
@@ -303,11 +339,11 @@ public class TimeSeriesRunner
         // The DK_NotifyMasterDataMeteringPoint received just before it, to show what it changed from.
         string Previous(DateTimeOffset created) =>
             parsed.Where(m => m.Created < created).OrderByDescending(m => m.Created).Select(m => m.Xml).FirstOrDefault() ?? "";
-        return new DataHubSwitchMessages(
-            string.Join(", ", found.Select(f => f.Message is { } m ? m.Occurrence.ToString("yyyy-MM-dd") : "none")),
-            found.Count > 0 && found.All(f => f.Message?.Occurrence == f.SwitchDate) ? "yes" : "no",
-            string.Join(" | ", found.Where(f => f.Message != null).Select(f => Previous(f.Message!.Value.Created))),
-            string.Join(" | ", found.Where(f => f.Message != null).Select(f => f.Message!.Value.Xml)));
+        return new DataHubSwitchMessages(found
+            .Select(f => f.Message is { } m
+                ? new SwitchMessage(f.SwitchDate, m.Occurrence, Previous(m.Created), m.Xml)
+                : new SwitchMessage(f.SwitchDate, null, "", ""))
+            .ToList());
     }
 
     /// <summary>The DataHub message behind each switch: the reading period starting on the switch date says
@@ -1110,12 +1146,21 @@ public class TimeSeriesRunner
         int? skip = null,
         bool offline = false,
         CancellationToken cancellationToken = default,
-        bool allowSwitches = false)
+        bool allowSwitches = false,
+        bool? sameDate = null)
     {
         // The run's states go to states.json in the snapshot folder while it runs and when it ends.
         _statesRun = (SnapshotDirectory(environment), environment, dryRun, DateTimeOffset.UtcNow);
         (_statesChecked, _statesTotal, _statesCompleted) = (0, 0, false);
         _statesLastWrite = DateTimeOffset.MinValue;
+        // The blocked resolution switches, for Systemate: written again by every run that blocks them.
+        if (!allowSwitches)
+        {
+            Directory.CreateDirectory(_outputBaseDirectory);
+            _switchesFile = Path.Combine(_outputBaseDirectory, SwitchesFileName(environment));
+            _switchesSameDate = sameDate;
+            File.WriteAllText(_switchesFile, SwitchesLine(SwitchesColumns), CsvEncoding);
+        }
         try
         {
             return await RunPostAllWithDoneMarksAsync(environment, dryRun, continueOnError, skipResolutionChange,
@@ -1125,6 +1170,12 @@ public class TimeSeriesRunner
         {
             WriteStates(_statesCompleted ? "Completed" : "Stopped", force: true);
             _statesRun = null;
+            if (_switchesFile != null)
+            {
+                _log($"Resolution switches for Systemate{(sameDate is { } s ? $" (SameDate={(s ? "yes" : "no")})" : "")}: " +
+                     $"{_switchesRows} row(s) → {Path.GetFullPath(_switchesFile)}");
+            }
+            (_switchesFile, _switchesSameDate, _switchesRows) = (null, null, 0);
         }
     }
 

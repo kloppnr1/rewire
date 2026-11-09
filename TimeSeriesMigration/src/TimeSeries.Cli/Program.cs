@@ -40,6 +40,8 @@ var skipOption = new Option<int?>("--skip") { Description = "With --all: pass ov
 var limitOption = new Option<int?>("--limit") { Description = "With --all: stop once N metering points are sent (ready, in a dry run); skipped, excluded, blocked and done ones do not count" };
 var offlineOption = new Option<bool>("--offline") { Description = "With --all: read Settl and Xellent from the environment's snapshot (made by the snapshot command) instead of asking them again. Missing entries are read live and added. Time series points are always read fresh; posts always go to Settl." };
 var allowSwitchesOption = new Option<bool>("--allow-switches") { Description = "With --all: also send metering points whose reading periods switch resolution inside the window. Without it they are blocked until Settl confirms their series." };
+var sameDateOption = new Option<string?>("--same-date") { Description = "With --all: only list switches in resolution-switches-<env>.csv whose DataHub message is (yes) or is not (no) on the switch date. Default: all." };
+sameDateOption.AcceptOnlyFromAmong("yes", "no");
 
 // Snapshot-specific
 var parallelOption = new Option<int?>("--parallel") { Description = "Settl reads per metering point run this many at a time (default 6)" };
@@ -72,7 +74,7 @@ extractCommand.SetAction(async (parseResult, cancellationToken) =>
 var postCommand = new Command("post", "Extract time series from Xellent and POST to Settl API")
 {
     accountOption, meteringPointOption, startOption, endOption,
-    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption, allowSwitchesOption
+    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption, allowSwitchesOption, sameDateOption
 };
 
 postCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -98,9 +100,15 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
         }
     }
     else if (parseResult.GetValue(cosFromOption) != null || parseResult.GetValue(cosToOption) != null || parseResult.GetValue(skipOption) != null
-             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption) || parseResult.GetValue(allowSwitchesOption))
+             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption) || parseResult.GetValue(allowSwitchesOption)
+             || parseResult.GetValue(sameDateOption) != null)
     {
-        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit, --offline and --allow-switches only apply with --all");
+        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit, --offline, --allow-switches and --same-date only apply with --all");
+        return 1;
+    }
+    if (parseResult.GetValue(sameDateOption) != null && parseResult.GetValue(allowSwitchesOption))
+    {
+        Console.Error.WriteLine("ERROR: --same-date picks blocked switches; with --allow-switches none are blocked");
         return 1;
     }
 
@@ -130,7 +138,8 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
             skip: parseResult.GetValue(skipOption),
             offline: parseResult.GetValue(offlineOption),
             cancellationToken: cancellationToken,
-            allowSwitches: parseResult.GetValue(allowSwitchesOption));
+            allowSwitches: parseResult.GetValue(allowSwitchesOption),
+            sameDate: parseResult.GetValue(sameDateOption) switch { "yes" => true, "no" => false, _ => null });
     }
 
     return await runner.RunPostAsync(new PostOptions

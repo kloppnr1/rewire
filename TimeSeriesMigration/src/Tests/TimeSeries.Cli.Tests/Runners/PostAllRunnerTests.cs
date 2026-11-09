@@ -1002,6 +1002,58 @@ public class PostAllRunnerTests : IDisposable
         Assert.DoesNotContain("2023-04-20T10:00:00Z", fields[3]);
     }
 
+    private const string SwitchesHeader = "MeteringPointId;ChangeDate;DataHubOccurrence;SameDate;PreviousDataHubMessage;DataHubMessage";
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task RunPostAllAsync_AResolutionSwitch_IsListedForSystemateUnquoted(bool? sameDate, bool listed)
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-19T10:00:00Z", "2023-04-18T22:00:00Z", "PT1H"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-20T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false,
+            sameDate: sameDate));
+
+        var file = Path.Combine(OutputDir, "resolution-switches-test.csv");
+        var bytes = File.ReadAllBytes(file);
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
+        var lines = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(SwitchesHeader, lines[0]);
+        Assert.Equal(listed ? 2 : 1, lines.Length);
+        Assert.Contains(logs, l => l.StartsWith("Resolution switches for Systemate", StringComparison.Ordinal)
+            && l.Contains($"{(listed ? 1 : 0)} row(s)", StringComparison.Ordinal));
+        if (!listed)
+            return;
+        var fields = lines[1].Split(';');
+        Assert.Equal([MpId1, "2023-04-26", "2023-04-26", "yes"], fields[..4]);
+        Assert.StartsWith("<ns0:DK_NotifyMasterDataMeteringPoint", fields[4]);  // no quotes around the XML
+        Assert.Contains("2023-04-19T10:00:00Z", fields[4]);
+        Assert.Contains("PT1H", fields[4]);
+        Assert.Contains("2023-04-20T10:00:00Z", fields[5]);
+        Assert.Contains("PT15M", fields[5]);
+        Assert.DoesNotContain("Somestreet", lines[1]);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_AllowSwitches_WritesNoSystemateList()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false, allowSwitches: true));
+
+        Assert.False(File.Exists(Path.Combine(OutputDir, "resolution-switches-test.csv")));
+    }
+
     [Fact]
     public async Task RunPostAllAsync_AResolutionSwitchWithNoDataHubMessage_SaysNone()
     {
