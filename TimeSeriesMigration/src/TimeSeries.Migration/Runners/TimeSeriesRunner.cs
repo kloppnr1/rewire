@@ -228,7 +228,8 @@ public class TimeSeriesRunner
     private static string BlockedCsvFileName(string reason) =>
         "blocked-" + System.Text.RegularExpressions.Regex.Replace(reason.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-') + ".csv";
 
-    private static readonly string[] DataHubCsvColumns = ["DataHubOccurrence", "SameDate", "DataHubMessage"];
+    private static readonly string[] DataHubCsvColumns =
+        ["DataHubOccurrence", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
 
     /// <summary>Counts a blocked metering point and lists it in the CSV for its reason. A resolution switch
     /// also gets the DataHub message behind it (<paramref name="dataHub"/>), in columns of its own.</summary>
@@ -242,7 +243,7 @@ public class TimeSeriesRunner
         string[] row = [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail];
         AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)),
             dataHub == null ? BlockedCsvHeader : [.. BlockedCsvHeader, .. DataHubCsvColumns],
-            dataHub == null ? row : [.. row, dataHub.Occurrences, dataHub.SameDate, dataHub.Messages]);
+            dataHub == null ? row : [.. row, dataHub.Occurrences, dataHub.SameDate, dataHub.PreviousMessages, dataHub.Messages]);
     }
 
     /// <summary>One switch to find the DataHub message for: the switch date, the MeterReadingOccurrence switched
@@ -251,8 +252,9 @@ public class TimeSeriesRunner
     internal sealed record SwitchToFind(DateOnly SwitchDate, string ReadingOccurrence, DateOnly After);
 
     /// <summary>The csv columns: per switch the message's Occurrence (Danish date, "none" when there is no
-    /// message), "yes" when every switch has a message on its own switch date, else "no", and the messages.</summary>
-    internal sealed record DataHubSwitchMessages(string Occurrences, string SameDate, string Messages);
+    /// message), "yes" when every switch has a message on its own switch date, else "no", the message of the
+    /// same type received just before each one, and the messages.</summary>
+    internal sealed record DataHubSwitchMessages(string Occurrences, string SameDate, string PreviousMessages, string Messages);
 
     /// <summary>
     /// Per switch, the first incoming DK_NotifyMasterDataMeteringPoint (by Creation) whose MeterReadingOccurrence is
@@ -295,12 +297,16 @@ public class TimeSeriesRunner
             .Select(s => (s.SwitchDate, Message: parsed
                 .Where(m => m.ReadingOccurrence == s.ReadingOccurrence && m.Occurrence >= s.After)
                 .OrderBy(m => m.Created)
-                .Select(m => ((DateOnly Occurrence, string Xml)?)(m.Occurrence, m.Xml))
+                .Select(m => ((DateOnly Occurrence, DateTimeOffset Created, string Xml)?)(m.Occurrence, m.Created, m.Xml))
                 .FirstOrDefault()))
             .ToList();
+        // The DK_NotifyMasterDataMeteringPoint received just before it, to show what it changed from.
+        string Previous(DateTimeOffset created) =>
+            parsed.Where(m => m.Created < created).OrderByDescending(m => m.Created).Select(m => m.Xml).FirstOrDefault() ?? "";
         return new DataHubSwitchMessages(
             string.Join(", ", found.Select(f => f.Message is { } m ? m.Occurrence.ToString("yyyy-MM-dd") : "none")),
             found.Count > 0 && found.All(f => f.Message?.Occurrence == f.SwitchDate) ? "yes" : "no",
+            string.Join(" | ", found.Where(f => f.Message != null).Select(f => Previous(f.Message!.Value.Created))),
             string.Join(" | ", found.Where(f => f.Message != null).Select(f => f.Message!.Value.Xml)));
     }
 

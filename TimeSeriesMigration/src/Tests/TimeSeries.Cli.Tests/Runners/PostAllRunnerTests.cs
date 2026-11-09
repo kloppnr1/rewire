@@ -936,13 +936,13 @@ public class PostAllRunnerTests : IDisposable
         "<ns0:InstallationLocationAddress><ns0:StreetName>Somestreet</ns0:StreetName></ns0:InstallationLocationAddress>" +
         "</ns0:PayloadMasterDataMPEvent></ns0:DK_NotifyMasterDataMeteringPoint>";
 
-    // The blocked row's last three fields: DataHubOccurrence, SameDate, DataHubMessage.
+    // The blocked row's last four fields: DataHubOccurrence, SameDate, PreviousDataHubMessage, DataHubMessage.
     private string[] SwitchBlockedDataHubFields()
     {
         var rows = File.ReadAllLines(Path.Combine(OutputDir, SwitchBlockedFile));
         Assert.Equal(2, rows.Length);
-        Assert.EndsWith(";\"DataHubOccurrence\";\"SameDate\";\"DataHubMessage\"", rows[0]);
-        return rows[1].Split("\";\"")[^3..].Select(f => f.Trim('"').Replace("\"\"", "\"")).ToArray();
+        Assert.EndsWith(";\"DataHubOccurrence\";\"SameDate\";\"PreviousDataHubMessage\";\"DataHubMessage\"", rows[0]);
+        return rows[1].Split("\";\"")[^4..].Select(f => f.Trim('"').Replace("\"\"", "\"")).ToArray();
     }
 
     [Fact]
@@ -963,9 +963,14 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
 
         var fields = SwitchBlockedDataHubFields();
-        var (occurrence, sameDate, message) = (fields[0], fields[1], fields[2]);
+        var (occurrence, sameDate, previous, message) = (fields[0], fields[1], fields[2], fields[3]);
         Assert.Equal("2023-04-26", occurrence);
         Assert.Equal("yes", sameDate);
+        // The one received just before: still hourly.
+        Assert.Contains("2023-04-19T10:00:00Z", previous);
+        Assert.Contains("PT1H", previous);
+        Assert.DoesNotContain(" | ", previous);
+        Assert.DoesNotContain("Somestreet", previous);
         Assert.Contains("2023-04-20T10:00:00Z", message);
         Assert.DoesNotContain(" | ", message);                  // one message
         Assert.DoesNotContain("PT1H", message);                 // other resolution
@@ -992,8 +997,9 @@ public class PostAllRunnerTests : IDisposable
         var fields = SwitchBlockedDataHubFields();
         Assert.Equal("2023-03-01", fields[0]);
         Assert.Equal("no", fields[1]);
-        Assert.Contains("2023-03-01T10:00:00Z", fields[2]);
-        Assert.DoesNotContain("2023-04-20T10:00:00Z", fields[2]);
+        Assert.Equal("", fields[2]);  // nothing received before it
+        Assert.Contains("2023-03-01T10:00:00Z", fields[3]);
+        Assert.DoesNotContain("2023-04-20T10:00:00Z", fields[3]);
     }
 
     [Fact]
@@ -1006,7 +1012,7 @@ public class PostAllRunnerTests : IDisposable
 
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
 
-        Assert.Equal(["none", "no", ""], SwitchBlockedDataHubFields());
+        Assert.Equal(["none", "no", "", ""], SwitchBlockedDataHubFields());
     }
 
     [Fact]

@@ -134,7 +134,10 @@ A metering point whose reading periods (`EXU_TIMEREADINGSPERIOD`) switch resolut
 |--------|-------|
 | `DataHubOccurrence` | The message's `Occurrence` as a Danish date, per switch; `none` when there is no message |
 | `SameDate` | `yes` when every switch's message is on its switch date, otherwise `no` |
-| `DataHubMessage` | The messages, one line each, joined by ` \| `; `InstallationLocationAddress` is left out | When Settl has confirmed the series, send them with `--allow-switches`.
+| `PreviousDataHubMessage` | The `DK_NotifyMasterDataMeteringPoint` received just before each message, so the old resolution shows; empty when there is none |
+| `DataHubMessage` | The messages |
+
+Messages are one line each, several switches are joined by ` | `, and `InstallationLocationAddress` is left out. When Settl has confirmed the series, send them with `--allow-switches`.
 
 The metering point's subtype in Xellent is `EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE` (1 = physical, 2 = virtual, 3 = calculated), read from the delivery point whose agreement starts last, on its meter row that starts last. Blank — no meter row on that agreement, or a value other than 1–3 — is blocked as `subtype blank in Xellent` in `blocked-subtype-blank-in-xellent.csv`, just before the switch block; a metering point with no meter installed is checked first and stays skipped. The detail column names the agreement. Physical, virtual (E18 production) and calculated are migrated like any other.
 
