@@ -213,6 +213,33 @@ requarterCommand.SetAction(async (parseResult, cancellationToken) =>
         parseResult.GetValue(requarterOutOption), cancellationToken);
 });
 
+// === switch-import command ===
+var switchImportInOption = new Option<string?>("--in") { Description = "The resolution-switches file to read (default: <Output:BaseDirectory>/resolution-switches-<env>.csv, written by post --all)" };
+var switchImportParallelOption = new Option<int>("--parallel")
+{
+    Description = "How many metering points to ask Settl about at a time (default 6)",
+    DefaultValueFactory = _ => 6
+};
+var switchImportCommand = new Command("switch-import",
+    "Write Settl's import workbooks (MeteringPointMeters_V8, TimeSeries_V1) for the resolution switches post --all listed: " +
+    "the old resolution from Settl's earliest meter entry, the new one from the DataHub message's date. " +
+    "Read-only: it changes nothing in Settl.")
+{
+    envOption, switchImportInOption, switchImportParallelOption
+};
+
+switchImportCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    var outputDir = config["Output:BaseDirectory"] ?? "output";
+    await using var provider = BuildSettlServices(config);
+    var reader = new SettlSwitchImportReader(provider.GetRequiredService<ISettlMeteringPointClient>(),
+        provider.GetRequiredService<ISettlTimeSeriesMeteringPointClient>());
+    var runner = new SwitchImportRunner(reader, Console.WriteLine);
+    return await runner.RunAsync(settlEnv,
+        parseResult.GetValue(switchImportInOption) ?? Path.Combine(outputDir, $"resolution-switches-{settlEnv}.csv"),
+        outputDir, parseResult.GetValue(switchImportParallelOption), DateOnly.FromDateTime(DateTime.Today), cancellationToken);
+});
+
 // === progress command ===
 var progressWatchOption = new Option<bool>("--watch") { Description = "Repaint the report in place every --refresh seconds until Ctrl+C" };
 var progressRefreshOption = new Option<int>("--refresh")
@@ -241,6 +268,7 @@ rootCommand.Subcommands.Add(extractCommand);
 rootCommand.Subcommands.Add(postCommand);
 rootCommand.Subcommands.Add(snapshotCommand);
 rootCommand.Subcommands.Add(progressCommand);
+rootCommand.Subcommands.Add(switchImportCommand);
 
 var parseResultTop = rootCommand.Parse(args);
 return await parseResultTop.InvokeAsync();
@@ -258,6 +286,7 @@ static ServiceProvider BuildSettlServices(IConfiguration config)
     services.AddHttpClient<ISettlAuthService, SettlAuthService>();
     services.AddHttpClient<ISettlTimeSeriesClient, SettlTimeSeriesClient>();
     services.AddHttpClient<ISettlTimeSeriesMeteringPointClient, SettlTimeSeriesMeteringPointClient>();
+    services.AddHttpClient<ISettlMeteringPointClient, SettlMeteringPointClient>();
     services.AddHttpClient<ISettlCustomerClient, SettlCustomerClient>();
     services.AddHttpClient<ISettlPayerClient, SettlPayerClient>();
     return services.BuildServiceProvider();

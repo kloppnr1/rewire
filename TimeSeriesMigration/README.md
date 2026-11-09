@@ -207,6 +207,28 @@ dotnet run --project src/TimeSeries.Cli -- resolution-changes --env production -
 
 Columns: `MeteringPointId;ChangeDate;MissingSeries`. No quotes, semicolons, a BOM and CRLF line ends, so it opens straight in Danish Excel. `<out>-unclear-delivery.csv` has the same format. The dashboard's "Opløsningsskift" card lists a switch at any time, so it can have more meters.
 
+## `switch-import`
+
+Writes Settl's two import workbooks for the resolution switches `post --all` listed in `resolution-switches-<env>.csv`, so Settl holds the resolution from before the switch until the DataHub message's date. Read-only: it reads Settl's market API and changes nothing there. The files are for importing in Settl by hand.
+
+```powershell
+.\TimeSeries.Cli.exe post --all --env production --dry-run --force
+.\TimeSeries.Cli.exe switch-import --env production
+```
+
+Per metering point with one switch (the old resolution is the other side of the DataHub message's `MeterReadingOccurrence`):
+
+- `MeteringPointMeters_V8_<env>_<date>.xlsx`: two `Update` rows, `OverwriteFuture` `False`, `CountryCode` `DK`. The first is dated Settl's earliest MeterCharacteristics entry (Danish date) with the old `MeterReadingOccurrence` and series (`Hourly`, `<MP>_PT1H`). The second is dated `ChangeDate` with the new ones (`QuarterHourly`, `<MP>_PT15M`). Other columns stay empty.
+- `TimeSeries_V1_<env>_<date>.xlsx`: a `Create` row for the old resolution's series when Settl has none: `<MP>_PT1H`, `Measured Time Series - PT1H`, `Active`, `Quantity`, `DKK`, `kWh`, `Hour`, `1`, `False`, `MarketIdentification` = the metering point.
+
+Both files start with the two header rows of Settl's templates (`MeteringPointMeter` version 8, `TimeSeries` version 1). Left out, and named in the output: a switch on or before Settl's earliest entry (Settl is right already), an earliest entry that already has the old value (imported before), a metering point with more than one switch (by hand) or not found in Settl. If Settl cannot be read for a metering point, no files are written and the exit code is 1.
+
+| Option | Meaning |
+|--------|---------|
+| `--env <name>` | Which environment |
+| `--in <file>` | The resolution-switches file. Default `output/resolution-switches-<env>.csv` |
+| `--parallel <n>` | Metering points asked about at a time (default 6) |
+
 ## `requarter`
 
 Lists the done metering points that were posted as hourly values where Xellent's reading period says 15-minute. Those were posted before hourly values were split into quarters (story 45902), and their done mark keeps every later run away from them.
@@ -275,7 +297,7 @@ In CI/deploy, the pipeline writes the same paths into `appsettings.json` directl
 
 ## Project Structure
 
-- **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `resolution-changes`, `extract`)
+- **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `resolution-changes`, `switch-import`, `extract`)
 - **TimeSeries.Migration** — the runner, Xellent extraction and the snapshot store; published as the `NewSettlement.TimeSeriesMigration` package (used by MigrationDashboard)
 - **TimeSeries.Core** — shared DTOs; published as `NewSettlement.TimeSeriesMigration.Core`
 - Xellent and Settl access come from the `NewSettlement.XellentDomain.*` and `NewSettlement.SettlClient.Api` packages
