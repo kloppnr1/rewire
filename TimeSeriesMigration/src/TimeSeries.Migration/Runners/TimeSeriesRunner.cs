@@ -228,15 +228,74 @@ public class TimeSeriesRunner
     private static string BlockedCsvFileName(string reason) =>
         "blocked-" + System.Text.RegularExpressions.Regex.Replace(reason.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-') + ".csv";
 
-    /// <summary>Counts a blocked metering point and lists it in the CSV for its reason.</summary>
-    private void CountBlocked(string reason, string meteringPoint, Guid settlId, string? account, string detail)
+    /// <summary>Counts a blocked metering point and lists it in the CSV for its reason. A resolution switch
+    /// also gets the DataHub message behind it (<paramref name="dataHubMessage"/>), in a column of its own.</summary>
+    private void CountBlocked(string reason, string meteringPoint, Guid settlId, string? account, string detail,
+        string? dataHubMessage = null)
     {
         if (_markDoneMode)
             return;
         CountState("Blocked", reason);
         Directory.CreateDirectory(_outputBaseDirectory);
-        AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)), BlockedCsvHeader,
-            [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail]);
+        string[] row = [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail];
+        AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)),
+            dataHubMessage == null ? BlockedCsvHeader : [.. BlockedCsvHeader, "DataHubMessage"],
+            dataHubMessage == null ? row : [.. row, dataHubMessage]);
+    }
+
+    /// <summary>
+    /// Per switch date, the first incoming DK_NotifyMasterDataMeteringPoint (by Creation) whose Occurrence falls on
+    /// that date (Danish calendar date: 2025-12-08T23:00:00Z is 2025-12-09) and whose MeterReadingOccurrence is the
+    /// resolution switched to (PT15M or PT1H). One line each, in date order, joined by " | "; a date with no such
+    /// message adds nothing. The installation address is taken out: no personal data in the reports.
+    /// </summary>
+    internal static string DataHubMessagesOn(IEnumerable<string> messages, IReadOnlyDictionary<DateOnly, string> readingOccurrenceFrom)
+    {
+        var matches = new List<(DateOnly Date, DateTimeOffset Created, string Xml)>();
+        foreach (var message in messages)
+        {
+            System.Xml.Linq.XDocument doc;
+            try
+            {
+                doc = System.Xml.Linq.XDocument.Parse(message);
+            }
+            catch (System.Xml.XmlException)
+            {
+                continue;
+            }
+            if (doc.Root?.Name.LocalName != "DK_NotifyMasterDataMeteringPoint")
+                continue;
+            DateTimeOffset? Time(string name) =>
+                doc.Descendants().FirstOrDefault(e => e.Name.LocalName == name) is { } e
+                && DateTimeOffset.TryParse(e.Value.Trim(), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var t) ? t : null;
+            if (Time("Occurrence") is not { } occurrence
+                || !readingOccurrenceFrom.TryGetValue(ToDanishDate(occurrence), out var expected)
+                || doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "MeterReadingOccurrence")?.Value.Trim() != expected)
+                continue;
+            System.Xml.Linq.Extensions.Remove(doc.Descendants().Where(e => e.Name.LocalName == "InstallationLocationAddress"));
+            matches.Add((ToDanishDate(occurrence), Time("Creation") ?? DateTimeOffset.MaxValue,
+                doc.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)));
+        }
+        return string.Join(" | ", matches
+            .GroupBy(m => m.Date)
+            .OrderBy(g => g.Key)
+            .Select(g => g.OrderBy(m => m.Created).First().Xml));
+    }
+
+    /// <summary>The DataHub message behind each switch: the reading period starting on the switch date says
+    /// which resolution it switched to.</summary>
+    private async Task<string> DataHubMessagesOnAsync(string meteringPoint, IReadOnlyCollection<DateOnly> switchDates,
+        IEnumerable<TimeSeriesExtractionService.ReadingPeriod> periods)
+    {
+        var readingOccurrenceFrom = periods
+            .Where(p => switchDates.Contains(p.Start))
+            .GroupBy(p => p.Start)
+            .ToDictionary(g => g.Key, g => g.First().Resolution == "Quarter" ? "PT15M" : "PT1H");
+        await using var context = BuildXellentContext();
+        var messages = await new TimeSeriesExtractionService(context, BatchDeliveryCategory)
+            .GetIncomingDataHubMessagesAsync(meteringPoint);
+        return DataHubMessagesOn(messages, readingOccurrenceFrom);
     }
 
     /// <summary>
@@ -2128,7 +2187,8 @@ public class TimeSeriesRunner
             {
                 RecordCoverageExclusion("Resolution switch", isChild);
                 var detail = $"reading periods switch resolution on {string.Join(", ", switchDates.Select(d => d.ToString("yyyy-MM-dd")))}";
-                CountBlocked(ResolutionSwitchReason, identification, mpGuid, accountNumber, detail);
+                CountBlocked(ResolutionSwitchReason, identification, mpGuid, accountNumber, detail,
+                    await DataHubMessagesOnAsync(identification, switchDates, periods ?? []));
                 _log($"BLOCKED:   MP {identification}: {detail}");
                 continue;
             }

@@ -154,6 +154,22 @@ public class TimeSeriesExtractionService
         return result;
     }
 
+    /// <summary>
+    /// The XML of every incoming DataHub message Xellent logged for this metering point, as received.
+    /// EMS_ZDATAHUBLOG (METERINGPOINT, MESSAGEDIRECTION 1 = incoming) → EMS_ZDATAHUBLOGMESSAGES
+    /// (ZEVENTQUEUEREFRECID) → EXU_ZEVENTQUEUEDATATABLE.XMLDATA. MP 571313104200130218: the
+    /// DK_NotifyMasterDataMeteringPoint with Occurrence 2025-12-08T23:00:00Z is event 5713304140.
+    /// These tables are not in the XellentData model, so the query is written out.
+    /// </summary>
+    public Task<List<string>> GetIncomingDataHubMessagesAsync(string meteringPoint) =>
+        _context.Database.SqlQuery<string>($"""
+            SELECT d.XMLDATA AS Value
+            FROM EMS_ZDATAHUBLOG l
+            JOIN EMS_ZDATAHUBLOGMESSAGES m ON m.DATAHUBLOGID = l.ID AND m.DATAAREAID = l.DATAAREAID
+            JOIN EXU_ZEVENTQUEUEDATATABLE d ON d.ZEVENTQUEUEREFRECID = m.ZEVENTQUEUEREFRECID AND d.DATAAREAID = m.DATAAREAID
+            WHERE l.DATAAREAID = {DataAreaId} AND l.MESSAGEDIRECTION = 1 AND l.METERINGPOINT = {meteringPoint}
+            """).ToListAsync();
+
     /// <summary>A metering point's subtype in Xellent: EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE (1 = physical,
     /// 2 = virtual, 3 = calculated) on its latest agreement. <paramref name="SubType"/> is null when that agreement
     /// has no meter row.</summary>

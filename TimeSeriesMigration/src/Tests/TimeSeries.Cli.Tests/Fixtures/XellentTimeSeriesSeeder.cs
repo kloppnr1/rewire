@@ -29,9 +29,29 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
 
         using var ctx = CreateContext();
         ctx.Database.EnsureCreated();
+        // The DataHub log tables are not in the XellentData model; the runner queries them by hand.
+        ctx.Database.ExecuteSqlRaw("""
+            CREATE TABLE EMS_ZDATAHUBLOG (ID TEXT, MESSAGEDIRECTION INTEGER, METERINGPOINT TEXT, DATAAREAID TEXT);
+            CREATE TABLE EMS_ZDATAHUBLOGMESSAGES (DATAHUBLOGID TEXT, ZEVENTQUEUEREFRECID INTEGER, DATAAREAID TEXT);
+            CREATE TABLE EXU_ZEVENTQUEUEDATATABLE (ZEVENTQUEUEREFRECID INTEGER, XMLDATA TEXT, DATAAREAID TEXT);
+            """);
     }
 
     public XellentDbContext CreateContext() => new(_options);
+
+    /// <summary>
+    /// Seed one DataHub message Xellent logged for <paramref name="meteringPoint"/>: EMS_ZDATAHUBLOG →
+    /// EMS_ZDATAHUBLOGMESSAGES → EXU_ZEVENTQUEUEDATATABLE.XMLDATA. Direction 1 = incoming.
+    /// </summary>
+    public void SeedDataHubMessage(string meteringPoint, string xml, int direction = 1)
+    {
+        using var ctx = CreateContext();
+        var recid = _nextRecid++;
+        var logId = recid.ToString();
+        ctx.Database.ExecuteSql($"INSERT INTO EMS_ZDATAHUBLOG (ID, MESSAGEDIRECTION, METERINGPOINT, DATAAREAID) VALUES ({logId}, {direction}, {meteringPoint}, {DataAreaId})");
+        ctx.Database.ExecuteSql($"INSERT INTO EMS_ZDATAHUBLOGMESSAGES (DATAHUBLOGID, ZEVENTQUEUEREFRECID, DATAAREAID) VALUES ({logId}, {recid}, {DataAreaId})");
+        ctx.Database.ExecuteSql($"INSERT INTO EXU_ZEVENTQUEUEDATATABLE (ZEVENTQUEUEREFRECID, XMLDATA, DATAAREAID) VALUES ({recid}, {xml}, {DataAreaId})");
+    }
 
     private const string DefaultCompanyId = "tst";
     private const int DeliveryCeased = 5; // EMS_AgreementStatusebIX "Leverance ophørt"

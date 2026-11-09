@@ -926,6 +926,63 @@ public class PostAllRunnerTests : IDisposable
         Assert.Contains(logs, l => l.Contains($"→ {SwitchBlockedFile}", StringComparison.Ordinal));
     }
 
+    // A DK_NotifyMasterDataMeteringPoint as Xellent stores it (one line), trimmed to what the match reads.
+    private static string NotifyMasterData(string meteringPoint, string creation, string occurrence, string readingOccurrence) =>
+        "<ns0:DK_NotifyMasterDataMeteringPoint xmlns:ns0=\"un:unece:260:data:EEM-DK_NotifyMasterDataMeteringPoint:v3\">" +
+        $"<ns0:HeaderEnergyDocument><ns0:Identification>{creation}</ns0:Identification><ns0:Creation>{creation}</ns0:Creation></ns0:HeaderEnergyDocument>" +
+        $"<ns0:PayloadMasterDataMPEvent><ns0:MeteringPointDomainLocation><ns0:Identification schemeAgencyIdentifier=\"9\">{meteringPoint}</ns0:Identification></ns0:MeteringPointDomainLocation>" +
+        $"<ns0:DetailMeteringPointCharacteristic><ns0:MeterReadingOccurrence>{readingOccurrence}</ns0:MeterReadingOccurrence></ns0:DetailMeteringPointCharacteristic>" +
+        $"<ns0:Occurrence>{occurrence}</ns0:Occurrence>" +
+        "<ns0:InstallationLocationAddress><ns0:StreetName>Somestreet</ns0:StreetName></ns0:InstallationLocationAddress>" +
+        "</ns0:PayloadMasterDataMPEvent></ns0:DK_NotifyMasterDataMeteringPoint>";
+
+    [Fact]
+    public async Task RunPostAllAsync_AResolutionSwitch_ListsTheFirstDataHubMessageSwitchingOnThatDate()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);  // hourly → 15-minute on 2023-04-26
+        // 2023-04-25T22:00:00Z is 2023-04-26 in Denmark. Production 571313114400587514 has a PT15M message
+        // months before its switch and two on the switch date; the first of those two is the one.
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-21T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-20T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-19T10:00:00Z", "2023-04-25T22:00:00Z", "PT1H"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-03-01T10:00:00Z", "2023-02-28T23:00:00Z", "PT15M"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-01-05T10:00:00Z", "2023-01-04T23:00:00Z", "PT1H"));
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-18T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"), direction: 2);
+        _xellent.SeedDataHubMessage(MpId2, NotifyMasterData(MpId2, "2023-04-22T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        var rows = File.ReadAllLines(Path.Combine(OutputDir, SwitchBlockedFile));
+        Assert.Equal(2, rows.Length);
+        Assert.EndsWith(";\"DataHubMessage\"", rows[0]);
+        Assert.Contains("2023-04-20T10:00:00Z", rows[1]);
+        Assert.DoesNotContain(" | ", rows[1]);                  // one message
+        Assert.DoesNotContain("PT1H", rows[1]);                 // other resolution, another day
+        Assert.DoesNotContain("2023-03-01T10:00:00Z", rows[1]); // earlier PT15M, not on the switch date
+        Assert.DoesNotContain("2023-04-18T10:00:00Z", rows[1]); // outgoing
+        Assert.DoesNotContain("2023-04-22T10:00:00Z", rows[1]); // another metering point
+        Assert.DoesNotContain("InstallationLocationAddress", rows[1]);
+        Assert.DoesNotContain("Somestreet", rows[1]);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_AResolutionSwitchWithNoDataHubMessage_LeavesTheColumnEmpty()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        var rows = File.ReadAllLines(Path.Combine(OutputDir, SwitchBlockedFile));
+        Assert.Equal(2, rows.Length);
+        Assert.EndsWith(";\"\"", rows[1]);
+    }
+
     [Fact]
     public async Task RunPostAllAsync_SeveralSwitches_AreAllNamedInTheBlockedDetail()
     {
