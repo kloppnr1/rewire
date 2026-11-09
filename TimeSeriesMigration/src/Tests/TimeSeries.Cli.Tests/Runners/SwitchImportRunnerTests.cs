@@ -107,12 +107,12 @@ public sealed class SwitchImportRunnerTests : IDisposable
              meters[0]["CountryCode"], meters[0]["MeterReadingOccurrence"], meters[0]["MeasuredTimeSeriesName"]));
         Assert.Equal(("2025-12-09", "QuarterHourly", $"{Mp1}_PT15M"),
             (meters[1]["Date"], meters[1]["MeterReadingOccurrence"], meters[1]["MeasuredTimeSeriesName"]));
-        // A real date shown as Settl's template asks, not text Settl can read as month-day.
+        // A real date shown year first, so Settl's month-first parsing cannot swap or reject it.
         using (var book = new XLWorkbook(MetersPath))
         {
             var date = book.Worksheets.First().Cell(4, Array.IndexOf(SwitchImportRunner.MetersColumns, "Date") + 1);
             Assert.Equal(XLDataType.DateTime, date.DataType);
-            Assert.Equal("09-12-2025", date.GetFormattedString());
+            Assert.Equal("2025-12-09", date.GetFormattedString());
         }
         Assert.Equal("", meters[0]["MeterIdentification"]);  // only the columns that change are filled
 

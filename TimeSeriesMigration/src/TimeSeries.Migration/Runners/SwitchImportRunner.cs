@@ -345,11 +345,12 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         Set("Action", "Update");
         Set("OverwriteFuture", "False");
         Set("MeteringPointIdentification", meteringPoint);
-        // A real Excel date, not text: Settl read the text "09-12-2025" as 12 September (featuretest
-        // 571313175200223668, 2026-11-09), although its template says DD-MM-YYYY.
+        // A real Excel date shown as yyyy-mm-dd. Settl's importer parses the shown text month first, whatever its
+        // template says: the text "09-12-2025" became 12 September (featuretest 571313175200223668) and production
+        // rejected "22-10-2025" (2026-11-09). yyyy-mm-dd reads the same either way.
         var dateCell = Cell("Date");
         dateCell.Value = date.ToDateTime(TimeOnly.MinValue);
-        dateCell.Style.DateFormat.Format = "dd-mm-yyyy";
+        dateCell.Style.DateFormat.Format = "yyyy-mm-dd";
         Set("CountryCode", "DK");
         Set("MeterReadingOccurrence", resolution.Occurrence);
         Set("MeasuredTimeSeriesName", SeriesName(meteringPoint, resolution));
