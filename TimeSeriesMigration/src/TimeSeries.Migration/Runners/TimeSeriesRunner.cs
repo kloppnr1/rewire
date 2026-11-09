@@ -245,19 +245,18 @@ public class TimeSeriesRunner
             dataHub == null ? BlockedCsvHeader : [.. BlockedCsvHeader, .. DataHubCsvColumns],
             dataHub == null ? row : [.. row, dataHub.Occurrences, dataHub.SameDate, dataHub.PreviousMessages, dataHub.Messages]);
         if (dataHub != null && _switchesFile is { } switchesFile)
-            foreach (var s in dataHub.Switches.Where(s => _switchesSameDate is not { } wanted || s.SameDate == wanted))
+            // Only switches with a DataHub message; ChangeDate is that message's date.
+            foreach (var s in dataHub.Switches.Where(s => s.Occurrence != null))
             {
-                // ChangeDate is the DataHub message's date; without a message, the reading period's.
-                File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, (s.Occurrence ?? s.SwitchDate).ToString("yyyy-MM-dd"),
+                File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, s.Occurrence!.Value.ToString("yyyy-MM-dd"),
                     s.SwitchDate.ToString("yyyy-MM-dd"), s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
                 _switchesRows++;
             }
     }
 
     // post --all's list of resolution switches for Systemate, in the resolution-changes style: one row per switch.
-    // Null outside post --all (and in the seed's done check). _switchesSameDate keeps only rows with that SameDate.
+    // Null outside post --all (and in the seed's done check).
     private string? _switchesFile;
-    private bool? _switchesSameDate;
     private int _switchesRows;
 
     internal static string SwitchesFileName(string environment) => $"resolution-switches-{environment}.csv";
@@ -1147,8 +1146,7 @@ public class TimeSeriesRunner
         int? skip = null,
         bool offline = false,
         CancellationToken cancellationToken = default,
-        bool allowSwitches = false,
-        bool? sameDate = null)
+        bool allowSwitches = false)
     {
         // The run's states go to states.json in the snapshot folder while it runs and when it ends.
         _statesRun = (SnapshotDirectory(environment), environment, dryRun, DateTimeOffset.UtcNow);
@@ -1159,7 +1157,6 @@ public class TimeSeriesRunner
         {
             Directory.CreateDirectory(_outputBaseDirectory);
             _switchesFile = Path.Combine(_outputBaseDirectory, SwitchesFileName(environment));
-            _switchesSameDate = sameDate;
             File.WriteAllText(_switchesFile, SwitchesLine(SwitchesColumns), CsvEncoding);
         }
         try
@@ -1173,10 +1170,9 @@ public class TimeSeriesRunner
             _statesRun = null;
             if (_switchesFile != null)
             {
-                _log($"Resolution switches for Systemate{(sameDate is { } s ? $" (SameDate={(s ? "yes" : "no")})" : "")}: " +
-                     $"{_switchesRows} row(s) → {Path.GetFullPath(_switchesFile)}");
+                _log($"Resolution switches for Systemate: {_switchesRows} row(s) → {Path.GetFullPath(_switchesFile)}");
             }
-            (_switchesFile, _switchesSameDate, _switchesRows) = (null, null, 0);
+            (_switchesFile, _switchesRows) = (null, 0);
         }
     }
 

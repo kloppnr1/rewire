@@ -1027,7 +1027,7 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task RunPostAllAsync_ASwitchWithNoDataHubMessage_IsListedForSystemateWithXellentsDate()
+    public async Task RunPostAllAsync_ASwitchWithNoDataHubMessage_IsNotListedForSystemate()
     {
         InDeliveryFrom(new DateTime(2026, 1, 1));
         SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
@@ -1036,14 +1036,12 @@ public class PostAllRunnerTests : IDisposable
 
         Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
 
-        Assert.Equal($"{MpId1};2023-04-26;2023-04-26;no;;", SwitchesLines()[1]);
+        Assert.Equal([SwitchesHeader], SwitchesLines());
+        Assert.Contains(MpId1, File.ReadAllText(Path.Combine(OutputDir, SwitchBlockedFile)));  // still blocked
     }
 
-    [Theory]
-    [InlineData(null, true)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public async Task RunPostAllAsync_AResolutionSwitch_IsListedForSystemateUnquoted(bool? sameDate, bool listed)
+    [Fact]
+    public async Task RunPostAllAsync_AResolutionSwitch_IsListedForSystemateUnquoted()
     {
         InDeliveryFrom(new DateTime(2026, 1, 1));
         SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
@@ -1053,19 +1051,15 @@ public class PostAllRunnerTests : IDisposable
         BothSeriesInSettl();
         var logs = new List<string>();
 
-        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false,
-            sameDate: sameDate));
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false));
 
         var file = Path.Combine(OutputDir, "resolution-switches-test.csv");
         var bytes = File.ReadAllBytes(file);
         Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
         var lines = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(SwitchesHeader, lines[0]);
-        Assert.Equal(listed ? 2 : 1, lines.Length);
-        Assert.Contains(logs, l => l.StartsWith("Resolution switches for Systemate", StringComparison.Ordinal)
-            && l.Contains($"{(listed ? 1 : 0)} row(s)", StringComparison.Ordinal));
-        if (!listed)
-            return;
+        Assert.Equal(2, lines.Length);
+        Assert.Contains(logs, l => l.StartsWith("Resolution switches for Systemate: 1 row(s)", StringComparison.Ordinal));
         var fields = lines[1].Split(';');
         Assert.Equal([MpId1, "2023-04-26", "2023-04-26", "yes"], fields[..4]);
         Assert.StartsWith("<ns0:DK_NotifyMasterDataMeteringPoint", fields[4]);  // no quotes around the XML
