@@ -2,7 +2,7 @@
 
 Generated from C# entity classes and `DbContext` configuration by
 `python tools/generate-xellent-schema-reference.py`. No database queries are made.
-Coverage: **53 distinct mapped tables**: 40 in XellentDomain's
+Coverage: **56 distinct mapped tables**: 43 in XellentDomain's
 `XellentDbContext` and 13 additional tables in CustomerSupport's
 `XellentDatabaseModelContext`. This is the union of those code models, not an inventory
 of the entire SQL Server database. See [the model guide](xellent-model-guide.md) for
@@ -41,6 +41,8 @@ differences and the important codes, units, dates, and history rules.
 | [`EGS_METERPOINTTYPECODEPERIOD`](#egs_meterpointtypecodeperiod) | X, CS | 9 |
 | [`EMS_TIMESERIES`](#ems_timeseries) | X, CS | 8 |
 | [`EMS_TIMESERIESVALUES`](#ems_timeseriesvalues) | X, CS | 7 |
+| [`EMS_ZDATAHUBLOG`](#ems_zdatahublog) | X | 19 |
+| [`EMS_ZDATAHUBLOGMESSAGES`](#ems_zdatahublogmessages) | X | 9 |
 | [`EXU_AGREEMENTTABLE`](#exu_agreementtable) | X, CS | 20 |
 | [`EXU_BILLINGMETHODPERIOD`](#exu_billingmethodperiod) | X, CS | 9 |
 | [`EXU_BILLINGPLAN`](#exu_billingplan) | CS | 3 |
@@ -70,6 +72,7 @@ differences and the important codes, units, dates, and history rules.
 | [`EXU_STREET`](#exu_street) | X, CS | 5 |
 | [`EXU_TIMEREADINGSPERIOD`](#exu_timereadingsperiod) | X | 9 |
 | [`EXU_UTILITYINSTALLATION`](#exu_utilityinstallation) | X, CS | 4 |
+| [`EXU_ZEVENTQUEUEDATATABLE`](#exu_zeventqueuedatatable) | X | 5 |
 | [`INVENTTABLE`](#inventtable) | X, CS | 6 |
 | [`VDOSALESJOURNALENTRY`](#vdosalesjournalentry) | CS | 9 |
 | [`VDOSALESJOURNALPRODUCT`](#vdosalesjournalproduct) | CS | 6 |
@@ -449,6 +452,48 @@ differences and the important codes, units, dates, and history rules.
 | `TIMESERIESREFRECID` | X: `Timeseriesrefrecid`; CS: `Timeseriesrefrecid` | X: `long`; CS: `long` |
 | `VALUE` | X: `Value`; CS: `Value` | X: `decimal; SQL numeric(28, 12)`; CS: `decimal; SQL numeric(28, 12)` |
 | `VERSIONTOEXCL` | X: `Versiontoexcl`; CS: `Versiontoexcl` | X: `DateTime; SQL datetime`; CS: `DateTime; SQL datetime` |
+
+## EMS_ZDATAHUBLOG
+
+- **X:** [`EmsZdatahublog`](../src/DataMigration.XellentData/Entities/EmsZdatahublog.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+
+| SQL column | C# property / model | Type and mapping |
+|---|---|---|
+| `CLIENTTYPE` | X: `Clienttype` | X: `int` |
+| `COMPANYID` | X: `Companyid` | X: `string (max 4)` |
+| `CREATEDBY` | X: `Createdby` | X: `string (max 5)` |
+| `CREATEDDATETIME` | X: `Createddatetime` | X: `DateTime; SQL datetime` |
+| `DATAAREAID` | X: `Dataareaid` | X: `string (max 4)` |
+| `DELIVERYCATEGORY` | X: `Deliverycategory` | X: `string (max 10)` |
+| `EANNUMBER` | X: `Eannumber` | X: `decimal; SQL numeric(28, 12)` |
+| `ID` | X: `Id` | X: `string (max 10)` |
+| `MESSAGEDIRECTION` | X: `Messagedirection` | X: `int` |
+| `MESSAGEGROUP` | X: `Messagegroup` | X: `int` |
+| `MESSAGEINTYPE` | X: `Messageintype` | X: `int` |
+| `MESSAGEOUTTYPE` | X: `Messageouttype` | X: `int` |
+| `MESSAGESTATUS` | X: `Messagestatus` | X: `int` |
+| `METERINGPOINT` | X: `Meteringpoint` | X: `string (max 30)` |
+| `ORIGINALBUSINESSREFERENCEID` | X: `Originalbusinessreferenceid` | X: `string (max 40)` |
+| `RECID` | X: `Recid` | X: `long` |
+| `RECVERSION` | X: `Recversion` | X: `int` |
+| `TIMESERIESREFRECID` | X: `Timeseriesrefrecid` | X: `long` |
+| `ZEBIXSCENARIOID` | X: `Zebixscenarioid` | X: `long` |
+
+## EMS_ZDATAHUBLOGMESSAGES
+
+- **X:** [`EmsZdatahublogMessages`](../src/DataMigration.XellentData/Entities/EmsZdatahublogMessages.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+
+| SQL column | C# property / model | Type and mapping |
+|---|---|---|
+| `DATAAREAID` | X: `Dataareaid` | X: `string (max 4)` |
+| `DATAHUBLOGID` | X: `Datahublogid` | X: `string (max 10)` |
+| `DCMESSAGEID` | X: `Dcmessageid` | X: `string (max 40)` |
+| `DCSCENARIODETAILSID` | X: `Dcscenariodetailsid` | X: `string (max 40)` |
+| `MESSAGEDIRECTION` | X: `Messagedirection` | X: `int` |
+| `MESSAGEOUTREFRECID` | X: `Messageoutrefrecid` | X: `long` |
+| `RECID` | X: `Recid` | X: `long` |
+| `RECVERSION` | X: `Recversion` | X: `int` |
+| `ZEVENTQUEUEREFRECID` | X: `Zeventqueuerefrecid` | X: `long` |
 
 ## EXU_AGREEMENTTABLE
 
@@ -985,6 +1030,18 @@ differences and the important codes, units, dates, and history rules.
 | `DELIVERYCATEGORY` | X: `Deliverycategory`; CS: `Deliverycategory` | X: `string (max 10)`; CS: `string (max 10)` |
 | `INSTNUM` | X: `Instnum`; CS: `Instnum` | X: `string (max 10)`; CS: `string (max 10)` |
 | `TECHNICGROUP1` | X: `Technicgroup1`; CS: `Technicgroup1` | X: `string? (max 20)`; CS: `string? (max 20)` |
+
+## EXU_ZEVENTQUEUEDATATABLE
+
+- **X:** [`ExuZeventqueueDataTable`](../src/DataMigration.XellentData/Entities/ExuZeventqueueDataTable.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+
+| SQL column | C# property / model | Type and mapping |
+|---|---|---|
+| `DATAAREAID` | X: `Dataareaid` | X: `string (max 4)` |
+| `RECID` | X: `Recid` | X: `long` |
+| `RECVERSION` | X: `Recversion` | X: `int` |
+| `XMLDATA` | X: `Xmldata` | X: `string?; SQL ntext` |
+| `ZEVENTQUEUEREFRECID` | X: `Zeventqueuerefrecid` | X: `long` |
 
 ## INVENTTABLE
 

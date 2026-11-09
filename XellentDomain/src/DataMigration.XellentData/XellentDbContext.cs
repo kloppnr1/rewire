@@ -50,6 +50,9 @@ public class XellentDbContext : DbContext
     public DbSet<EmsTimeseriesValues> EmsTimeseriesValues { get; set; } = null!;
     public DbSet<ExuContractPartLog> ExuContractPartLogs { get; set; } = null!;
     public DbSet<ExuMeterPointStatusPeriod> ExuMeterPointStatusPeriods { get; set; } = null!;
+    public DbSet<EmsZdatahublog> EmsZdatahublogs { get; set; } = null!;
+    public DbSet<EmsZdatahublogMessages> EmsZdatahublogMessages { get; set; } = null!;
+    public DbSet<ExuZeventqueueDataTable> ExuZeventqueueDataTables { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
