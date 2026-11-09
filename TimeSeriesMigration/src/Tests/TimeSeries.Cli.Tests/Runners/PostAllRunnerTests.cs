@@ -1002,7 +1002,22 @@ public class PostAllRunnerTests : IDisposable
         Assert.DoesNotContain("2023-04-20T10:00:00Z", fields[3]);
     }
 
-    private const string SwitchesHeader = "MeteringPointId;ChangeDate;XellentChangeDate;SameDate;PreviousDataHubMessage;DataHubMessage";
+    // Starts with the columns of the resolution-changes list sent to Systemate before.
+    private const string SwitchesHeader = "MeteringPointId;ChangeDate;MissingSeries;XellentChangeDate;SameDate;PreviousDataHubMessage;DataHubMessage";
+
+    [Fact]
+    public async Task RunPostAllAsync_ASwitchListedForSystemate_NamesTheSeriesSettlLacks()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-04-20T10:00:00Z", "2023-04-25T22:00:00Z", "PT15M"));
+        InSettl((MpId1, Guid.NewGuid()));
+        _mp.GetTimeSeriesResponse = _ => [new TimeSeriesInfoDto { Id = Guid.NewGuid(), TimeResolution = new TimeResolutionInfoDto { Length = 15, Unit = "Minutes" } }];
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Equal([MpId1, "2023-04-26", "Hour", "2023-04-26", "yes"], SwitchesLines()[1].Split(';')[..5]);
+    }
 
     private string[] SwitchesLines()
     {
@@ -1023,7 +1038,7 @@ public class PostAllRunnerTests : IDisposable
 
         var lines = SwitchesLines();
         Assert.Equal(2, lines.Length);
-        Assert.Equal([MpId1, "2023-03-01", "2023-04-26", "no"], lines[1].Split(';')[..4]);
+        Assert.Equal([MpId1, "2023-03-01", "", "2023-04-26", "no"], lines[1].Split(';')[..5]);
     }
 
     [Fact]
@@ -1061,12 +1076,12 @@ public class PostAllRunnerTests : IDisposable
         Assert.Equal(2, lines.Length);
         Assert.Contains(logs, l => l.StartsWith("Resolution switches for Systemate: 1 row(s)", StringComparison.Ordinal));
         var fields = lines[1].Split(';');
-        Assert.Equal([MpId1, "2023-04-26", "2023-04-26", "yes"], fields[..4]);
-        Assert.StartsWith("<ns0:DK_NotifyMasterDataMeteringPoint", fields[4]);  // no quotes around the XML
-        Assert.Contains("2023-04-19T10:00:00Z", fields[4]);
-        Assert.Contains("PT1H", fields[4]);
-        Assert.Contains("2023-04-20T10:00:00Z", fields[5]);
-        Assert.Contains("PT15M", fields[5]);
+        Assert.Equal([MpId1, "2023-04-26", "", "2023-04-26", "yes"], fields[..5]);  // Settl has both series
+        Assert.StartsWith("<ns0:DK_NotifyMasterDataMeteringPoint", fields[5]);  // no quotes around the XML
+        Assert.Contains("2023-04-19T10:00:00Z", fields[5]);
+        Assert.Contains("PT1H", fields[5]);
+        Assert.Contains("2023-04-20T10:00:00Z", fields[6]);
+        Assert.Contains("PT15M", fields[6]);
         Assert.DoesNotContain("Somestreet", lines[1]);
     }
 

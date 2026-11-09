@@ -249,7 +249,7 @@ public class TimeSeriesRunner
             foreach (var s in dataHub.Switches.Where(s => s.Occurrence != null))
             {
                 File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, s.Occurrence!.Value.ToString("yyyy-MM-dd"),
-                    s.SwitchDate.ToString("yyyy-MM-dd"), s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
+                    dataHub.MissingSeries, s.SwitchDate.ToString("yyyy-MM-dd"), s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
                 _switchesRows++;
             }
     }
@@ -262,7 +262,20 @@ public class TimeSeriesRunner
     internal static string SwitchesFileName(string environment) => $"resolution-switches-{environment}.csv";
 
     private static readonly string[] SwitchesColumns =
-        ["MeteringPointId", "ChangeDate", "XellentChangeDate", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
+        ["MeteringPointId", "ChangeDate", "MissingSeries", "XellentChangeDate", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
+
+    // resolution-changes' MissingSeries for one metering point: which of Hour and Quarter Settl has no series for.
+    private async Task<string> MissingSettlSeriesAsync(string meteringPoint, Guid settlId, CancellationToken cancellationToken)
+    {
+        var (series, error) = await GetTimeSeriesListAsync(settlId, cancellationToken);
+        if (error != null)
+        {
+            _log($"WARNING: MP {meteringPoint}: Settl GetTimeSeries failed, MissingSeries left as 'unknown': {error}");
+            return "unknown";
+        }
+        var settlResolutions = (series ?? []).Select(t => SettlResolutionName(t.TimeResolution));
+        return string.Join(" + ", new[] { "Hour", "Quarter" }.Except(settlResolutions, StringComparer.OrdinalIgnoreCase));
+    }
 
     // Semicolons, no quotes, BOM and CRLF like resolution-changes. A field holding a semicolon or a line break (an
     // XML entity such as &amp; does) is quoted, so the columns still line up; the quotes inside XML stay as they are.
@@ -286,6 +299,9 @@ public class TimeSeriesRunner
     /// same type received just before each one, and the messages. <see cref="Switches"/> holds them one by one.</summary>
     internal sealed record DataHubSwitchMessages(IReadOnlyList<SwitchMessage> Switches)
     {
+        /// <summary>For the Systemate list: the series Settl lacks ("Hour", "Quarter", "Hour + Quarter" or empty).</summary>
+        public string MissingSeries { get; init; } = "";
+
         public string Occurrences => string.Join(", ", Switches.Select(s => s.Occurrence?.ToString("yyyy-MM-dd") ?? "none"));
         public string SameDate => Switches.Count > 0 && Switches.All(s => s.SameDate) ? "yes" : "no";
         public string PreviousMessages => string.Join(" | ", Switches.Where(s => s.Occurrence != null).Select(s => s.PreviousMessage));
@@ -2265,8 +2281,12 @@ public class TimeSeriesRunner
             {
                 RecordCoverageExclusion("Resolution switch", isChild);
                 var detail = $"reading periods switch resolution on {string.Join(", ", switchDates.Select(d => d.ToString("yyyy-MM-dd")))}";
-                CountBlocked(ResolutionSwitchReason, identification, mpGuid, accountNumber, detail,
-                    await DataHubMessagesForAsync(identification, switchDates, periods ?? []));
+                var dataHub = await DataHubMessagesForAsync(identification, switchDates, periods ?? []);
+                // The Systemate list carries resolution-changes' MissingSeries: the series Settl has no Hour or
+                // Quarter for. Only asked when the metering point goes on that list.
+                if (_switchesFile != null && dataHub.Switches.Any(s => s.Occurrence != null))
+                    dataHub = dataHub with { MissingSeries = await MissingSettlSeriesAsync(identification, mpGuid, cancellationToken) };
+                CountBlocked(ResolutionSwitchReason, identification, mpGuid, accountNumber, detail, dataHub);
                 _log($"BLOCKED:   MP {identification}: {detail}");
                 continue;
             }
