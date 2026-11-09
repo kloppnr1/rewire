@@ -239,6 +239,8 @@ public class TimeSeriesRunner
         if (_markDoneMode)
             return;
         CountState("Blocked", reason);
+        if (_onlyMeteringPoints != null)
+            return;
         Directory.CreateDirectory(_outputBaseDirectory);
         string[] row = [meteringPoint, _meteringPointType, settlId.ToString(), account ?? "", reason, detail];
         AppendCsvRow(Path.Combine(_outputBaseDirectory, BlockedCsvFileName(reason)),
@@ -253,6 +255,10 @@ public class TimeSeriesRunner
                 _switchesRows++;
             }
     }
+
+    // post --all --only: the run is narrowed to these metering points and leaves the run's lists (skip-*, blocked-*,
+    // resolution-switches) as the last full run wrote them. Null for a full run.
+    private HashSet<string>? _onlyMeteringPoints;
 
     // post --all's list of resolution switches for Systemate, in the resolution-changes style: one row per switch.
     // Null outside post --all (and in the seed's done check).
@@ -1162,14 +1168,16 @@ public class TimeSeriesRunner
         int? skip = null,
         bool offline = false,
         CancellationToken cancellationToken = default,
-        bool allowSwitches = false)
+        bool allowSwitches = false,
+        IReadOnlyCollection<string>? only = null)
     {
         // The run's states go to states.json in the snapshot folder while it runs and when it ends.
         _statesRun = (SnapshotDirectory(environment), environment, dryRun, DateTimeOffset.UtcNow);
         (_statesChecked, _statesTotal, _statesCompleted) = (0, 0, false);
         _statesLastWrite = DateTimeOffset.MinValue;
-        // The blocked resolution switches, for Systemate: written again by every run that blocks them.
-        if (!allowSwitches)
+        _onlyMeteringPoints = only is { Count: > 0 } ? new HashSet<string>(only, StringComparer.Ordinal) : null;
+        // The blocked resolution switches, for Systemate: written again by every full run that blocks them.
+        if (!allowSwitches && _onlyMeteringPoints == null)
         {
             Directory.CreateDirectory(_outputBaseDirectory);
             _switchesFile = Path.Combine(_outputBaseDirectory, SwitchesFileName(environment));
@@ -1189,6 +1197,7 @@ public class TimeSeriesRunner
                 _log($"Resolution switches for Systemate: {_switchesRows} row(s) → {Path.GetFullPath(_switchesFile)}");
             }
             (_switchesFile, _switchesRows) = (null, 0);
+            _onlyMeteringPoints = null;
         }
     }
 
@@ -1817,7 +1826,8 @@ public class TimeSeriesRunner
         CancellationToken cancellationToken,
         bool allowSwitches = false)
     {
-        ResetSkipArtifacts();
+        if (_onlyMeteringPoints == null)
+            ResetSkipArtifacts();
 
         if (_settlMeteringPointClient == null)
             return Error("Settl API clients not configured. DI registration missing.");
@@ -1840,6 +1850,8 @@ public class TimeSeriesRunner
         if (continueOnError) _log("Continue on error: Yes (--force — failed MPs are skipped, run still exits non-zero)");
         if (skipIfExistingPoints) _log("Skip if existing points: Yes (--skip-if-existing-points)");
         if (allowSwitches) _log("Resolution switches: sent (--allow-switches)");
+        if (_onlyMeteringPoints != null)
+            _log($"Only: {string.Join(", ", _onlyMeteringPoints.Order(StringComparer.Ordinal))} (--only; the skip-*, blocked-* and resolution-switches files are left as they are)");
         _log("");
 
         _settlMeteringPointClient.SetDeliveryCategory(deliveryCategory);
@@ -1873,6 +1885,14 @@ public class TimeSeriesRunner
         catch (InvalidOperationException ex)
         {
             return Error(ex.Message);
+        }
+
+        // --only: the same run, narrowed to the metering points asked for. One Settl does not list is named.
+        if (_onlyMeteringPoints != null)
+        {
+            settlMeteringPoints = settlMeteringPoints.Where(m => _onlyMeteringPoints.Contains(m.Identification)).ToList();
+            foreach (var missing in _onlyMeteringPoints.Where(id => settlMeteringPoints.All(m => m.Identification != id)).Order(StringComparer.Ordinal))
+                _log($"Only: MP {missing} is not among Settl's metering points for this run (not found, or outside the delivery-start range)");
         }
 
         // Metering points already posted by an earlier live run are left out before anything else, and
@@ -2382,9 +2402,9 @@ public class TimeSeriesRunner
             {
                 _log($"  {state}: {StateTotal(state):N0}");
                 foreach (var (reason, count) in _states[state].OrderByDescending(r => r.Value))
-                    _log($"    {count,8:N0}  {reason}" + (state == "Blocked" ? $"  → {BlockedCsvFileName(reason)}" : ""));
+                    _log($"    {count,8:N0}  {reason}" + (state == "Blocked" && _onlyMeteringPoints == null ? $"  → {BlockedCsvFileName(reason)}" : ""));
             }
-            if (StateTotal("Blocked") > 0)
+            if (StateTotal("Blocked") > 0 && _onlyMeteringPoints == null)
             {
                 _log($"  Blocked metering points are listed per reason in {Path.GetFullPath(_outputBaseDirectory)}: " +
                      "hand each file to whoever has to fix that group.");
@@ -3316,7 +3336,7 @@ public class TimeSeriesRunner
     {
         if (category != TimeSeriesSkipCategory.KnownIssueXellentResolution)
             _lastSkip = category;
-        if (_markDoneMode)
+        if (_markDoneMode || _onlyMeteringPoints != null)
             return;
         Directory.CreateDirectory(_outputBaseDirectory);
         var path = Path.Combine(_outputBaseDirectory, SkipCsvFileNames[category]);
@@ -3338,7 +3358,7 @@ public class TimeSeriesRunner
         Guid settlMeteringPointId,
         IReadOnlyList<DeliveryStatusDto> activeStatuses)
     {
-        if (_markDoneMode)
+        if (_markDoneMode || _onlyMeteringPoints != null)
             return;
         Directory.CreateDirectory(_outputBaseDirectory);
         var path = Path.Combine(_outputBaseDirectory, AmbiguousRevisionCsvFileName);

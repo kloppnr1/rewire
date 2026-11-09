@@ -40,6 +40,7 @@ var skipOption = new Option<int?>("--skip") { Description = "With --all: pass ov
 var limitOption = new Option<int?>("--limit") { Description = "With --all: stop once N metering points are sent (ready, in a dry run); skipped, excluded, blocked and done ones do not count" };
 var offlineOption = new Option<bool>("--offline") { Description = "With --all: read Settl and Xellent from the environment's snapshot (made by the snapshot command) instead of asking them again. Missing entries are read live and added. Time series points are always read fresh; posts always go to Settl." };
 var allowSwitchesOption = new Option<bool>("--allow-switches") { Description = "With --all: also send metering points whose reading periods switch resolution inside the window. Without it they are blocked until Settl confirms their series." };
+var onlyOption = new Option<string?>("--only") { Description = "With --all: only these metering points (identifications, comma-separated), with the same rules as the full run. The skip-*, blocked-* and resolution-switches files are left as the last full run wrote them." };
 // Snapshot-specific
 var parallelOption = new Option<int?>("--parallel") { Description = "Settl reads per metering point run this many at a time (default 6)" };
 var refreshOption = new Option<bool>("--refresh") { Description = "Throw the stored reads away and read everything again (done marks are kept). Without it, only what is missing is read." };
@@ -71,7 +72,7 @@ extractCommand.SetAction(async (parseResult, cancellationToken) =>
 var postCommand = new Command("post", "Extract time series from Xellent and POST to Settl API")
 {
     accountOption, meteringPointOption, startOption, endOption,
-    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption, allowSwitchesOption
+    deliveryCategoryOption, envOption, dryRunOption, forceOption, skipResolutionChangeOption, skipIfExistingPointsOption, allOption, cosFromOption, cosToOption, skipOption, limitOption, offlineOption, allowSwitchesOption, onlyOption
 };
 
 postCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -97,9 +98,16 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
         }
     }
     else if (parseResult.GetValue(cosFromOption) != null || parseResult.GetValue(cosToOption) != null || parseResult.GetValue(skipOption) != null
-             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption) || parseResult.GetValue(allowSwitchesOption))
+             || parseResult.GetValue(limitOption) != null || parseResult.GetValue(offlineOption) || parseResult.GetValue(allowSwitchesOption)
+             || parseResult.GetValue(onlyOption) != null)
     {
-        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit, --offline and --allow-switches only apply with --all");
+        Console.Error.WriteLine("ERROR: --cos-from, --cos-to, --skip, --limit, --offline, --allow-switches and --only only apply with --all");
+        return 1;
+    }
+    var only = (parseResult.GetValue(onlyOption) ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    if (only.Any(id => id.Length != 18 || !id.All(char.IsDigit)))
+    {
+        Console.Error.WriteLine("ERROR: --only takes 18-digit metering point identifications, comma-separated");
         return 1;
     }
 
@@ -129,7 +137,8 @@ postCommand.SetAction(async (parseResult, cancellationToken) =>
             skip: parseResult.GetValue(skipOption),
             offline: parseResult.GetValue(offlineOption),
             cancellationToken: cancellationToken,
-            allowSwitches: parseResult.GetValue(allowSwitchesOption));
+            allowSwitches: parseResult.GetValue(allowSwitchesOption),
+            only: only.Length > 0 ? only : null);
     }
 
     return await runner.RunPostAsync(new PostOptions

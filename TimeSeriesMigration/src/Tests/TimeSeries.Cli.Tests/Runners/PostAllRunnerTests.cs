@@ -2040,6 +2040,36 @@ public class PostAllRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPostAllAsync_Only_PostsJustThoseMeteringPoints_AndLeavesTheRunsListsAlone()
+    {
+        var supplyStart = new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedHourlyTimeSeries(MpId2, supplyStart.AddYears(-3), hours: 1);
+        _xellent.SeedContract("acct1", MpId1, migratedOn: supplyStart);
+        _xellent.SeedContract("acct2", MpId2, migratedOn: supplyStart);
+        var mp2Guid = Guid.NewGuid();
+        InSettl((MpId1, Guid.NewGuid()), (MpId2, mp2Guid));
+        // What the last full run wrote stays as it was.
+        Directory.CreateDirectory(OutputDir);
+        var blocked = Path.Combine(OutputDir, SwitchBlockedFile);
+        var switches = Path.Combine(OutputDir, "resolution-switches-test.csv");
+        File.WriteAllText(blocked, "from the full run");
+        File.WriteAllText(switches, "from the full run");
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false,
+            only: [MpId2, "571313100000000099"]));
+
+        Assert.Single(_mp.GetTimeSeriesCalls);
+        Assert.Equal(mp2Guid, _mp.GetTimeSeriesCalls[0]);
+        Assert.NotEmpty(_ts.PostCalls);
+        Assert.Equal("from the full run", File.ReadAllText(blocked));
+        Assert.Equal("from the full run", File.ReadAllText(switches));
+        Assert.Contains(logs, l => l.Contains("Only: MP 571313100000000099 is not among Settl's metering points"));
+    }
+
+    [Fact]
     public async Task RunPostAllAsync_OlderRelationship_IsIgnored_PostedForTheHolder()
     {
         // acct1 held the MP until 2019; acct2 has held it since. Settl delivery starts 2023-06-15.
