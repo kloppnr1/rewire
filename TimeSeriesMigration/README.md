@@ -140,10 +140,10 @@ A metering point whose reading periods (`EXU_TIMEREADINGSPERIOD`) switch resolut
 
 Messages are one line each, several switches are joined by ` | `, and `InstallationLocationAddress` is left out.
 
-The same switches also go to `output/resolution-switches-<env>.csv`, the file for Systemate, written again by every `post --all` without `--allow-switches`. One row per switch: `MeteringPointId;ChangeDate;DataHubOccurrence;SameDate;PreviousDataHubMessage;DataHubMessage`. Like `resolution-changes`: semicolons, no quotes, a BOM and CRLF. A field that holds a semicolon or a line break is quoted, so the columns line up. `ChangeDate` is the switch date, `SameDate` is per switch. `--same-date yes` or `--same-date no` keeps only those rows. The log ends with `Resolution switches for Systemate: <n> row(s) → <file>`. For production:
+The same switches also go to `output/resolution-switches-<env>.csv`, the file for Systemate, written again by every `post --all` without `--allow-switches`. One row per switch: `MeteringPointId;ChangeDate;XellentChangeDate;SameDate;PreviousDataHubMessage;DataHubMessage`. Like `resolution-changes`: semicolons, no quotes, a BOM and CRLF. A field that holds a semicolon or a line break is quoted, so the columns line up. `ChangeDate` is the DataHub message's `Occurrence` (Danish date); without a message it is the reading period's date. `XellentChangeDate` is the reading period's date, and `SameDate` says whether the two agree. Every switch is listed; `--same-date yes` or `--same-date no` keeps only those rows. The log ends with `Resolution switches for Systemate: <n> row(s) → <file>`. For production:
 
 ```powershell
-.\TimeSeries.Cli.exe post --all --env production --dry-run --force --same-date yes
+.\TimeSeries.Cli.exe post --all --env production --dry-run --force
 ``` When Settl has confirmed the series, send them with `--allow-switches`.
 
 The metering point's subtype in Xellent is `EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE` (1 = physical, 2 = virtual, 3 = calculated), read from the delivery point whose agreement starts last, on its meter row that starts last. Blank — no meter row on that agreement, or a value other than 1–3 — is blocked as `subtype blank in Xellent` in `blocked-subtype-blank-in-xellent.csv`, just before the switch block; a metering point with no meter installed is checked first and stays skipped. The detail column names the agreement. Physical, virtual (E18 production) and calculated are migrated like any other.

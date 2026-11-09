@@ -247,8 +247,9 @@ public class TimeSeriesRunner
         if (dataHub != null && _switchesFile is { } switchesFile)
             foreach (var s in dataHub.Switches.Where(s => _switchesSameDate is not { } wanted || s.SameDate == wanted))
             {
-                File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, s.SwitchDate.ToString("yyyy-MM-dd"),
-                    s.Occurrence?.ToString("yyyy-MM-dd") ?? "none", s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
+                // ChangeDate is the DataHub message's date; without a message, the reading period's.
+                File.AppendAllText(switchesFile, SwitchesLine(meteringPoint, (s.Occurrence ?? s.SwitchDate).ToString("yyyy-MM-dd"),
+                    s.SwitchDate.ToString("yyyy-MM-dd"), s.SameDate ? "yes" : "no", s.PreviousMessage, s.Message), CsvEncoding);
                 _switchesRows++;
             }
     }
@@ -262,7 +263,7 @@ public class TimeSeriesRunner
     internal static string SwitchesFileName(string environment) => $"resolution-switches-{environment}.csv";
 
     private static readonly string[] SwitchesColumns =
-        ["MeteringPointId", "ChangeDate", "DataHubOccurrence", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
+        ["MeteringPointId", "ChangeDate", "XellentChangeDate", "SameDate", "PreviousDataHubMessage", "DataHubMessage"];
 
     // Semicolons, no quotes, BOM and CRLF like resolution-changes. A field holding a semicolon or a line break (an
     // XML entity such as &amp; does) is quoted, so the columns still line up; the quotes inside XML stay as they are.

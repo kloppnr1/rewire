@@ -1002,7 +1002,42 @@ public class PostAllRunnerTests : IDisposable
         Assert.DoesNotContain("2023-04-20T10:00:00Z", fields[3]);
     }
 
-    private const string SwitchesHeader = "MeteringPointId;ChangeDate;DataHubOccurrence;SameDate;PreviousDataHubMessage;DataHubMessage";
+    private const string SwitchesHeader = "MeteringPointId;ChangeDate;XellentChangeDate;SameDate;PreviousDataHubMessage;DataHubMessage";
+
+    private string[] SwitchesLines()
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(OutputDir, "resolution-switches-test.csv"));
+        return System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ASwitchWhoseDataHubMessageIsOnAnotherDate_IsListedForSystemateWithTheDataHubDate()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);  // Xellent: 15-minute from 2023-04-26
+        _xellent.SeedDataHubMessage(MpId1, NotifyMasterData(MpId1, "2023-03-01T10:00:00Z", "2023-02-28T23:00:00Z", "PT15M"));
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        var lines = SwitchesLines();
+        Assert.Equal(2, lines.Length);
+        Assert.Equal([MpId1, "2023-03-01", "2023-04-26", "no"], lines[1].Split(';')[..4]);
+    }
+
+    [Fact]
+    public async Task RunPostAllAsync_ASwitchWithNoDataHubMessage_IsListedForSystemateWithXellentsDate()
+    {
+        InDeliveryFrom(new DateTime(2026, 1, 1));
+        SeedHourlyValuesWhereXellentSaysQuarter(MpId1, Account);
+        InSettl((MpId1, Guid.NewGuid()));
+        BothSeriesInSettl();
+
+        Assert.Equal(0, await BuildRunner().RunPostAllAsync("test", dryRun: true, continueOnError: false));
+
+        Assert.Equal($"{MpId1};2023-04-26;2023-04-26;no;;", SwitchesLines()[1]);
+    }
 
     [Theory]
     [InlineData(null, true)]
