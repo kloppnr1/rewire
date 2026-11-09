@@ -29,12 +29,6 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
 
         using var ctx = CreateContext();
         ctx.Database.EnsureCreated();
-        // The DataHub log tables are not in the XellentData model; the runner queries them by hand.
-        ctx.Database.ExecuteSqlRaw("""
-            CREATE TABLE EMS_ZDATAHUBLOG (ID TEXT, MESSAGEDIRECTION INTEGER, METERINGPOINT TEXT, DATAAREAID TEXT);
-            CREATE TABLE EMS_ZDATAHUBLOGMESSAGES (DATAHUBLOGID TEXT, ZEVENTQUEUEREFRECID INTEGER, DATAAREAID TEXT);
-            CREATE TABLE EXU_ZEVENTQUEUEDATATABLE (ZEVENTQUEUEREFRECID INTEGER, XMLDATA TEXT, DATAAREAID TEXT);
-            """);
     }
 
     public XellentDbContext CreateContext() => new(_options);
@@ -47,10 +41,22 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
     {
         using var ctx = CreateContext();
         var recid = _nextRecid++;
-        var logId = recid.ToString();
-        ctx.Database.ExecuteSql($"INSERT INTO EMS_ZDATAHUBLOG (ID, MESSAGEDIRECTION, METERINGPOINT, DATAAREAID) VALUES ({logId}, {direction}, {meteringPoint}, {DataAreaId})");
-        ctx.Database.ExecuteSql($"INSERT INTO EMS_ZDATAHUBLOGMESSAGES (DATAHUBLOGID, ZEVENTQUEUEREFRECID, DATAAREAID) VALUES ({logId}, {recid}, {DataAreaId})");
-        ctx.Database.ExecuteSql($"INSERT INTO EXU_ZEVENTQUEUEDATATABLE (ZEVENTQUEUEREFRECID, XMLDATA, DATAAREAID) VALUES ({recid}, {xml}, {DataAreaId})");
+        var logId = (recid % 10_000_000_000).ToString();  // ID is nvarchar(10)
+        ctx.EmsZdatahublogs.Add(new EmsZdatahublog
+        {
+            Dataareaid = DataAreaId, Recid = recid, Id = logId, Messagedirection = direction, Meteringpoint = meteringPoint,
+            Deliverycategory = DefaultDeliveryCategory, Companyid = "", Createdby = "", Originalbusinessreferenceid = "",
+        });
+        ctx.EmsZdatahublogMessages.Add(new EmsZdatahublogMessages
+        {
+            Dataareaid = DataAreaId, Recid = recid, Datahublogid = logId, Messagedirection = direction, Zeventqueuerefrecid = recid,
+            Dcscenariodetailsid = "", Dcmessageid = "",
+        });
+        ctx.ExuZeventqueueDataTables.Add(new ExuZeventqueueDataTable
+        {
+            Dataareaid = DataAreaId, Recid = recid, Zeventqueuerefrecid = recid, Xmldata = xml,
+        });
+        ctx.SaveChanges();
     }
 
     private const string DefaultCompanyId = "tst";
