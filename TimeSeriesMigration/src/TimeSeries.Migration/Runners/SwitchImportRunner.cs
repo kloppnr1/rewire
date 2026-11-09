@@ -340,11 +340,16 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
 
     private static void WriteMeterRow(IXLWorksheet sheet, int row, string meteringPoint, DateOnly date, Resolution resolution)
     {
-        void Set(string column, string value) => sheet.Cell(row, Array.IndexOf(MetersColumns, column) + 1).Value = value;
+        IXLCell Cell(string column) => sheet.Cell(row, Array.IndexOf(MetersColumns, column) + 1);
+        void Set(string column, string value) => Cell(column).Value = value;
         Set("Action", "Update");
         Set("OverwriteFuture", "False");
         Set("MeteringPointIdentification", meteringPoint);
-        Set("Date", date.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture));
+        // A real Excel date, not text: Settl read the text "09-12-2025" as 12 September (featuretest
+        // 571313175200223668, 2026-11-09), although its template says DD-MM-YYYY.
+        var dateCell = Cell("Date");
+        dateCell.Value = date.ToDateTime(TimeOnly.MinValue);
+        dateCell.Style.DateFormat.Format = "dd-mm-yyyy";
         Set("CountryCode", "DK");
         Set("MeterReadingOccurrence", resolution.Occurrence);
         Set("MeasuredTimeSeriesName", SeriesName(meteringPoint, resolution));

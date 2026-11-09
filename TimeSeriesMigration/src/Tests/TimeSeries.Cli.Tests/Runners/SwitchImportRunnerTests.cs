@@ -84,8 +84,12 @@ public sealed class SwitchImportRunnerTests : IDisposable
         using var book = new XLWorkbook(path);
         var sheet = book.Worksheets.First();
         var header = sheet.Row(2).CellsUsed().ToDictionary(c => c.Address.ColumnNumber, c => c.GetString());
+        // Dates as yyyy-MM-dd, so a day/month mix-up shows.
+        static string Text(IXLCell cell) => cell.DataType == XLDataType.DateTime
+            ? cell.GetDateTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : cell.GetString();
         return sheet.RowsUsed().Where(r => r.RowNumber() > 2)
-            .Select(r => header.ToDictionary(h => h.Value, h => r.Cell(h.Key).GetString()))
+            .Select(r => header.ToDictionary(h => h.Value, h => Text(r.Cell(h.Key))))
             .ToList();
     }
 
@@ -98,11 +102,18 @@ public sealed class SwitchImportRunnerTests : IDisposable
 
         var meters = Rows(MetersPath);
         Assert.Equal(2, meters.Count);
-        Assert.Equal(("Update", "False", Mp1, "01-01-2024", "DK", "Hourly", $"{Mp1}_PT1H"),
+        Assert.Equal(("Update", "False", Mp1, "2024-01-01", "DK", "Hourly", $"{Mp1}_PT1H"),
             (meters[0]["Action"], meters[0]["OverwriteFuture"], meters[0]["MeteringPointIdentification"], meters[0]["Date"],
              meters[0]["CountryCode"], meters[0]["MeterReadingOccurrence"], meters[0]["MeasuredTimeSeriesName"]));
-        Assert.Equal(("09-12-2025", "QuarterHourly", $"{Mp1}_PT15M"),
+        Assert.Equal(("2025-12-09", "QuarterHourly", $"{Mp1}_PT15M"),
             (meters[1]["Date"], meters[1]["MeterReadingOccurrence"], meters[1]["MeasuredTimeSeriesName"]));
+        // A real date shown as Settl's template asks, not text Settl can read as month-day.
+        using (var book = new XLWorkbook(MetersPath))
+        {
+            var date = book.Worksheets.First().Cell(4, Array.IndexOf(SwitchImportRunner.MetersColumns, "Date") + 1);
+            Assert.Equal(XLDataType.DateTime, date.DataType);
+            Assert.Equal("09-12-2025", date.GetFormattedString());
+        }
         Assert.Equal("", meters[0]["MeterIdentification"]);  // only the columns that change are filled
 
         var series = Assert.Single(Rows(SeriesPath));
