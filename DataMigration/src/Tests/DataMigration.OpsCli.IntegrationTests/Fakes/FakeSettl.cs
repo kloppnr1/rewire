@@ -1,3 +1,4 @@
+using DataMigration.OpsCli.Services;
 using DataMigration.SettlApi.Clients;
 using DataMigration.SettlApi.Configuration;
 using DataMigration.SettlApi.Services;
@@ -23,6 +24,8 @@ public sealed class FakeSettl : IDisposable
         MeteringPointClient = new SettlMeteringPointClient(_http, auth, options, NullLogger<SettlMeteringPointClient>.Instance);
         ContractClient = new SettlContractClient(_http, auth, options, NullLogger<SettlContractClient>.Instance);
         SettlementGroupClient = new SettlSettlementGroupClient(_http, auth, options, NullLogger<SettlSettlementGroupClient>.Instance);
+        RawReader = new SettlRawReader(_http, auth, options, NullLogger<SettlRawReader>.Instance);
+        CustomerLinkLookup = new SettlCustomerLinkLookup(_http, auth, options, NullLogger<SettlCustomerLinkLookup>.Instance);
     }
 
     public FakeSettlApi Api { get; }
@@ -32,6 +35,8 @@ public sealed class FakeSettl : IDisposable
     public ISettlMeteringPointClient MeteringPointClient { get; }
     public ISettlContractClient ContractClient { get; }
     public ISettlSettlementGroupClient SettlementGroupClient { get; }
+    public ISettlRawReader RawReader { get; }
+    public ISettlCustomerLinkLookup CustomerLinkLookup { get; }
 
     /// <summary>An electricity metering point as a migration leaves it: created through the v4 create.</summary>
     public async Task<Guid> SeedMeteringPointAsync(string identification, DateOnly deliveryStart, bool inDelivery = true)

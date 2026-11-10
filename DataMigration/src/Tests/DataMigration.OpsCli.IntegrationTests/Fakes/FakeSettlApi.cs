@@ -25,6 +25,8 @@ public sealed class FakeSettlApi : HttpMessageHandler
 
     public Dictionary<Guid, JsonObject> Customers { get; } = [];
     public Dictionary<Guid, List<JsonObject>> CustomerMpLinks { get; } = [];
+    public Dictionary<Guid, List<JsonObject>> CustomerPriceLists { get; } = [];
+    public Dictionary<Guid, List<JsonObject>> ExtraInvoiceLines { get; } = [];
     public Dictionary<Guid, JsonObject> Payers { get; } = [];
     public Dictionary<Guid, List<JsonObject>> PayerMpLinks { get; } = [];
     public Dictionary<Guid, FakeMeteringPoint> MeteringPoints { get; } = [];
@@ -125,9 +127,19 @@ public sealed class FakeSettlApi : HttpMessageHandler
                 hits = hits.Where(c => (string?)c["CustomerNumber"] == number);
             return Ok(Page(hits.Select(CustomerInfo), q));
         }
+        if (r.Length == 1 && r[0] == "CustomerInfosForMeteringPoints" && m == HttpMethod.Post)
+            return Ok(CustomerInfosForMeteringPoints(Obj(body)));
         var id2 = Guid.Parse(r[0]);
         if (!Customers.TryGetValue(id2, out var customer)) return NotFound();
         if (r.Length == 1 && m == HttpMethod.Get) return Ok(customer.DeepClone());
+        if (r.Length == 3 && r[1] == "pricelists" && r[2] == "search" && m == HttpMethod.Post)
+            return Ok(new JsonObject
+            {
+                ["CustomerPriceListAssociations"] = new JsonArray([.. (CustomerPriceLists.GetValueOrDefault(id2) ?? [])
+                    .Select(p => p.DeepClone())]),
+            });
+        if (r.Length == 2 && r[1] == "extraInvoiceLines" && m == HttpMethod.Get)
+            return Ok(Page((ExtraInvoiceLines.GetValueOrDefault(id2) ?? []).Select(l => (JsonObject)l.DeepClone()), q));
         if (r.Length == 2 && r[1] == "meteringPoints")
         {
             var links = CustomerMpLinks.TryGetValue(id2, out var l) ? l : CustomerMpLinks[id2] = [];
@@ -142,6 +154,46 @@ public sealed class FakeSettlApi : HttpMessageHandler
         if (r.Length == 2 && r[1] == "history") return Ok(new JsonObject { ["ChangeDates"] = new JsonArray() });
         if (r.Length == 2 && r[1] == "meteringPointsInOrganisation") return Ok(new JsonArray());
         return (HttpStatusCode.NotFound, null);
+    }
+
+    /// <summary>
+    /// The customers linked to the given metering points on <c>RelationDate</c>, one entry per
+    /// customer with the asked-for metering points it holds. A metering point nobody holds that day is
+    /// left out (assumption — matches what the export's selection expects of the live API).
+    /// </summary>
+    private JsonArray CustomerInfosForMeteringPoints(JsonObject request)
+    {
+        var day = DateTime.Parse((string)request["RelationDate"]!, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal).Date;
+        var wanted = request["MeteringPointIds"]!.AsArray().Select(x => Guid.Parse(x!.GetValue<string>())).ToHashSet();
+        var result = new JsonArray();
+        foreach (var (customerId, links) in CustomerMpLinks)
+        {
+            var held = links
+                .Where(l => Guid.TryParse((string?)l["MeteringPointId"], out var mp) && wanted.Contains(mp)
+                            && OpenOn(l, day))
+                .Select(l => (string)l["MeteringPointId"]!)
+                .Distinct()
+                .ToList();
+            if (held.Count == 0) continue;
+            result.Add(new JsonObject
+            {
+                ["Customer"] = new JsonObject { ["Id"] = customerId },
+                ["MeteringPoints"] = new JsonArray([.. held.Select(mp => (JsonNode)new JsonObject { ["MeteringPointId"] = mp })]),
+            });
+        }
+        return result;
+    }
+
+    private static bool OpenOn(JsonObject link, DateTime day)
+    {
+        static DateTime? Date(JsonNode? n) => n?.GetValue<string>() is { } s
+            ? DateTime.Parse(s, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal)
+            : null;
+        var start = Date(link["Start"]);
+        var end = Date(link["End"]);
+        return (start == null || start <= day) && (end == null || end > day);
     }
 
     private (HttpStatusCode, string?) CustomerV3(HttpMethod m, string[] r, string? body)
@@ -627,6 +679,8 @@ public sealed class FakeSettlApi : HttpMessageHandler
         public JsonObject Billing(DateTimeOffset? at = null) => new()
         {
             ["Id"] = Id,
+            // The export projection reads the identification from billing (CustomerExportProjection).
+            ["MeteringPointIdentification"] = Identification,
             ["BillingConfiguration"] = At(BillingVersions, at)?.DeepClone(),
             ["PaymentConfiguration"] = At(PaymentVersions, at)?.DeepClone(),
             ["Exemptions"] = new JsonArray([.. Exemptions.Select(e => e.DeepClone())]),

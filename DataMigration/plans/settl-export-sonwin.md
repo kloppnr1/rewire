@@ -57,11 +57,14 @@
 
 ## Open
 - Payment agreement source: no Settl API endpoint documented; ask the vendor for one. Until then someone must drop the manual Settl CSV before each run; who and how often is open- Host and UNC path
+- Future-dated links (e.g. a contract or price change starting next month): today's rule drops them; "current state only" may need to mean "open today or later"
 - SonWin: raw or projected JSON, schema, how they pick up runs
 - Settl vendor: modified-since filter or change feed (would replace full scan)
 
 ## Phases
-1. Spike: `export-active-customers` has no tests today; add an integration test in `DataMigration.OpsCli.IntegrationTests` against the in-memory Settl fake (no VPN); check exemptions and annual volume are carried
+1. Spike (done): `ExportActiveCustomersFlowTests` runs the export over a fake tenant filled by real `create`
+   - Exported: customer, in-delivery metering points with market, billing and delivery status, payers and links, open-today contracts, price lists, extra invoice lines
+   - Left out: metering points not in delivery, customers without one, contract links starting after today
 2. Build: JSON Lines, share delivery, manifest, delta, lock; tests for diff, hashing, atomic write against the fake
 3. Featuretest: nightly schedule to a test share; SonWin trial import
 4. Production: after host, share and SonWin format are settled
