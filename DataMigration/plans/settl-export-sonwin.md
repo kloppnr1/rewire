@@ -29,6 +29,10 @@
 - Full contract: order number, category, payment terms, frequencies, contract lines, product setup
 - Metering point: ignore in billing, VAT exempt, settlement schedule, price area, grid area, balance supplier, meter type code, consumer category, electrical heating
 - Customer: segment, settlement schedules, manual invoice approval
+- Payment agreements as in the business example: metering point or joint invoice, external customer no., payment method, last updated
+  - Source: Settl 'Payment Agreement' CSV from a drop folder, read with existing `SettlCsvParser` (add last updated)
+  - Attach to the exported customer by metering point id, else by joint invoice number
+  - CSV missing or older than the run's day: no `_READY`, non-zero exit
 
 ## Approach
 - Extend existing `export-active-customers` (OpsCli); it already selects the right scope and reads the sections above
@@ -52,7 +56,7 @@
 - Alert on non-zero exit or stale `_READY`
 
 ## Open
-- Payment agreements: business example has metering point / joint invoice, external customer no., payment method, last updated; no Settl API endpoint documented (today a manual Settl CSV). Needs SonWin's requirement, then possibly a vendor question- Host and UNC path
+- Payment agreement source: no Settl API endpoint documented; ask the vendor for one. Until then someone must drop the manual Settl CSV before each run; who and how often is open- Host and UNC path
 - SonWin: raw or projected JSON, schema, how they pick up runs
 - Settl vendor: modified-since filter or change feed (would replace full scan)
 
