@@ -210,19 +210,21 @@ Columns: `MeteringPointId;ChangeDate;MissingSeries`. No quotes, semicolons, a BO
 
 ## `switch-import`
 
-Writes Settl's two import workbooks for the resolution switches `post --all` listed in `resolution-switches-<env>.csv`, so Settl holds the resolution from before the switch until the DataHub message's date. Read-only: it reads Settl's market API and changes nothing there. The files are for importing in Settl by hand.
+Writes Settl's `MeteringPointMeters` import workbook for the resolution switches `post --all` listed in `resolution-switches-<env>.csv`, so Settl holds the resolution from before the switch until the DataHub message's date. Read-only: it reads Settl's market API and changes nothing there. The file is for importing in Settl by hand.
 
 ```powershell
 .\TimeSeries.Cli.exe post --all --env production --dry-run --force
 .\TimeSeries.Cli.exe switch-import --env production
 ```
 
-Per metering point with one switch (the old resolution is the other side of the DataHub message's `MeterReadingOccurrence`):
+`MeteringPointMeters_V8_<env>_<date>.xlsx` holds two `Update` rows per metering point with one switch (the old resolution is the other side of the DataHub message's `MeterReadingOccurrence`), `OverwriteFuture` `False`, `CountryCode` `DK`:
 
-- `MeteringPointMeters_V8_<env>_<date>.xlsx`: two `Update` rows, `OverwriteFuture` `False`, `CountryCode` `DK`. The first is dated Settl's earliest MeterCharacteristics entry (Danish date) with the old `MeterReadingOccurrence` and series (`Hourly`, `<MP>_PT1H`). The second is dated `ChangeDate` with the new ones (`QuarterHourly`, `<MP>_PT15M`). Other columns stay empty.
-- `TimeSeries_V1_<env>_<date>.xlsx`: a `Create` row for the old resolution's series when Settl has none: `<MP>_PT1H`, `Measured Time Series - PT1H`, `Active`, `Quantity`, `DKK`, `kWh`, `Hour`, `1`, `False`, `MarketIdentification` = the metering point.
+- the first dated Settl's earliest MeterCharacteristics entry (Danish date), with the old `MeterReadingOccurrence` and series (`Hourly`, `<MP>_PT1H`)
+- the second dated `ChangeDate`, with the new ones (`QuarterHourly`, `<MP>_PT15M`)
 
-Both files start with the two header rows of Settl's templates (`MeteringPointMeter` version 8, `TimeSeries` version 1). Left out, and named in the output: a switch on or before Settl's earliest entry (Settl is right already), an earliest entry that already has the old value (imported before), a metering point with more than one switch (by hand) or not found in Settl. If Settl cannot be read for a metering point, no files are written and the exit code is 1.
+Other columns stay empty. The `Date` cell is a real date shown year first (`2025-10-22`): Settl reads a shown `22-10-2025` month first and rejects it. Settl creates a series the rows name that it does not have yet (`<MP>_PT1H`, with the same settings as `<MP>_PT15M`), so there is no TimeSeries file to import.
+
+The file starts with the two header rows of Settl's template (`MeteringPointMeter` version 8). Left out, and named in the output: a switch on or before Settl's earliest entry (Settl is right already), an earliest entry that already has the old value (imported before), a metering point with more than one switch (by hand) or not found in Settl. If Settl cannot be read for a metering point, no file is written and the exit code is 1.
 
 | Option | Meaning |
 |--------|---------|

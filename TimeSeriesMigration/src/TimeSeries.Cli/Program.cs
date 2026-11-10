@@ -230,9 +230,9 @@ var switchImportParallelOption = new Option<int>("--parallel")
     DefaultValueFactory = _ => 6
 };
 var switchImportCommand = new Command("switch-import",
-    "Write Settl's import workbooks (MeteringPointMeters_V8, TimeSeries_V1) for the resolution switches post --all listed: " +
-    "the old resolution from Settl's earliest meter entry, the new one from the DataHub message's date. " +
-    "Read-only: it changes nothing in Settl.")
+    "Write Settl's MeteringPointMeters_V8 import workbook for the resolution switches post --all listed: " +
+    "the old resolution from Settl's earliest meter entry, the new one from the DataHub message's date. Settl creates " +
+    "the <MP>_PT1H series the rows name. Read-only: it changes nothing in Settl.")
 {
     envOption, switchImportInOption, switchImportParallelOption
 };
@@ -241,8 +241,7 @@ switchImportCommand.SetAction(async (parseResult, cancellationToken) =>
 {
     var outputDir = config["Output:BaseDirectory"] ?? "output";
     await using var provider = BuildSettlServices(config);
-    var reader = new SettlSwitchImportReader(provider.GetRequiredService<ISettlMeteringPointClient>(),
-        provider.GetRequiredService<ISettlTimeSeriesMeteringPointClient>());
+    var reader = new SettlSwitchImportReader(provider.GetRequiredService<ISettlMeteringPointClient>());
     var runner = new SwitchImportRunner(reader, Console.WriteLine);
     return await runner.RunAsync(settlEnv,
         parseResult.GetValue(switchImportInOption) ?? Path.Combine(outputDir, $"resolution-switches-{settlEnv}.csv"),

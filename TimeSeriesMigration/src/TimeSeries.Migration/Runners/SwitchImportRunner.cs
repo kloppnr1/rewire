@@ -1,13 +1,12 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using DataMigration.SettlApi.Clients;
-using DataMigration.SettlApi.Models;
 
 namespace TimeSeries.Cli.Runners;
 
 /// <summary>
 /// What switch-import reads from Settl's market API for one metering point. A narrow seam over
-/// <see cref="ISettlMeteringPointClient"/> and <see cref="ISettlTimeSeriesMeteringPointClient"/>.
+/// <see cref="ISettlMeteringPointClient"/>.
 /// </summary>
 public interface ISwitchImportSettlReader
 {
@@ -19,12 +18,9 @@ public interface ISwitchImportSettlReader
 
     /// <summary>The MeterReadingOccurrence of each meter in the MeterCharacteristics version in force at <paramref name="at"/>.</summary>
     Task<(List<string>? Occurrences, string? Error)> MeterReadingOccurrencesAtAsync(Guid id, DateTime at, CancellationToken cancellationToken);
-
-    /// <summary>The time resolutions of the metering point's time series ("Hour", "Quarter", or as Settl states them).</summary>
-    Task<(List<string>? Resolutions, string? Error)> TimeSeriesResolutionsAsync(Guid id, CancellationToken cancellationToken);
 }
 
-public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPoints, ISettlTimeSeriesMeteringPointClient timeSeries)
+public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPoints)
     : ISwitchImportSettlReader
 {
     public async Task<(Guid? Id, string? Error)> FindAsync(string identification, CancellationToken cancellationToken)
@@ -44,24 +40,16 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
         var (mp, error) = await meteringPoints.GetByIdAsync(id, at, cancellationToken);
         return (mp?.MeterCharacteristics?.Meters.Select(m => m.MeterReadingOccurrence ?? "").ToList(), error);
     }
-
-    public async Task<(List<string>? Resolutions, string? Error)> TimeSeriesResolutionsAsync(Guid id, CancellationToken cancellationToken)
-    {
-        var (series, error) = await timeSeries.GetTimeSeriesAsync(id, cancellationToken);
-        return (series?.Select(s => SwitchImportRunner.ResolutionName(s.TimeResolution)).ToList(), error);
-    }
 }
 
 /// <summary>
-/// switch-import: fills Settl's import workbooks for the metering points in post --all's
+/// switch-import: fills Settl's MeteringPointMeters_V8 import workbook for the metering points in post --all's
 /// resolution-switches-&lt;env&gt;.csv, so Settl holds the resolution from before the switch until the
-/// DataHub message's date (ChangeDate). Read-only towards Settl and Xellent; it writes only the two files.
-/// <list type="bullet">
-/// <item>TimeSeries_V1: a Create row for the series of the old resolution when Settl has none
-/// (<c>&lt;MP&gt;_PT1H</c>, named like the <c>&lt;MP&gt;_PT15M</c> series Settl already has).</item>
-/// <item>MeteringPointMeters_V8: two Update rows — the old MeterReadingOccurrence and series from Settl's earliest
-/// MeterCharacteristics entry, the new ones from ChangeDate. OverwriteFuture stays False.</item>
-/// </list>
+/// DataHub message's date (ChangeDate). Read-only towards Settl and Xellent; it writes only the file.
+/// Two Update rows per metering point — the old MeterReadingOccurrence and series from Settl's earliest
+/// MeterCharacteristics entry, the new ones from ChangeDate. OverwriteFuture stays False. Settl creates a series the
+/// rows name that it lacks (<c>&lt;MP&gt;_PT1H</c>, like the <c>&lt;MP&gt;_PT15M</c> it has): featuretest
+/// 571313115101027361, 2026-11-10.
 /// Left out: a switch on or before Settl's earliest entry (Settl is right already), one whose earliest entry already
 /// has the old value (imported before), and a metering point with more than one switch (by hand).
 /// </summary>
@@ -71,20 +59,19 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Romance Standard Time" : "Europe/Copenhagen");
 
     public const string MetersFilePrefix = "MeteringPointMeters_V8";
-    public const string TimeSeriesFilePrefix = "TimeSeries_V1";
 
     /// <summary>A row of resolution-switches: the metering point, ChangeDate and the switched-to MeterReadingOccurrence.</summary>
     internal sealed record SwitchRow(string MeteringPoint, DateOnly ChangeDate, string NewOccurrence);
 
     /// <summary>Per metering point: what goes in the files, or why nothing does.</summary>
     internal sealed record Outcome(string MeteringPoint, string Result, DateOnly? From = null, DateOnly? ChangeDate = null,
-        Resolution? Old = null, Resolution? New = null, bool CreateSeries = false);
+        Resolution? Old = null, Resolution? New = null);
 
-    /// <summary>Hour or Quarter, as the files name them.</summary>
-    internal sealed record Resolution(string Occurrence, string SeriesSuffix, string Unit, int Length, string Name)
+    /// <summary>Hour or Quarter, as the file names them.</summary>
+    internal sealed record Resolution(string Occurrence, string SeriesSuffix)
     {
-        public static readonly Resolution Hour = new("Hourly", "PT1H", "Hour", 1, "Hour");
-        public static readonly Resolution Quarter = new("QuarterHourly", "PT15M", "Minutes", 15, "Quarter");
+        public static readonly Resolution Hour = new("Hourly", "PT1H");
+        public static readonly Resolution Quarter = new("QuarterHourly", "PT15M");
         public static Resolution FromDataHub(string value) => value == "PT1H" ? Hour : Quarter;
         public Resolution Other => this == Hour ? Quarter : Hour;
     }
@@ -138,16 +125,12 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         Directory.CreateDirectory(outputDirectory);
         var stamp = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var metersPath = Path.Combine(outputDirectory, $"{MetersFilePrefix}_{environment}_{stamp}.xlsx");
-        var seriesPath = Path.Combine(outputDirectory, $"{TimeSeriesFilePrefix}_{environment}_{stamp}.xlsx");
         WriteMeters(metersPath, imports);
-        WriteTimeSeries(seriesPath, imports.Where(o => o.CreateSeries).ToList());
 
         log("");
         foreach (var g in outcomes.GroupBy(o => o.Result).OrderByDescending(g => g.Count()))
             log($"  {g.Count(),5}  {g.Key}");
-        log($"MeteringPointMeters: {imports.Count * 2} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(metersPath)}");
-        log($"TimeSeries: {imports.Count(o => o.CreateSeries)} series to create → {Path.GetFullPath(seriesPath)}");
-        return 0;
+        log($"MeteringPointMeters: {imports.Count * 2} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(metersPath)}");        return 0;
     }
 
     private async Task<Outcome> DecideAsync(List<SwitchRow> switches, CancellationToken cancellationToken)
@@ -182,20 +165,8 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         if (occurrences.Count > 0 && occurrences.All(o => o == oldResolution.Occurrence))
             return new Outcome(mp, $"left out: Settl's earliest meter entry is already {oldResolution.Occurrence}");
 
-        var (resolutions, seriesError) = await settl.TimeSeriesResolutionsAsync(marketId, cancellationToken);
-        if (seriesError != null || resolutions == null)
-            return new Outcome(mp, $"ERROR: time series failed: {seriesError}");
-        var createSeries = !resolutions.Contains(oldResolution.Name, StringComparer.OrdinalIgnoreCase);
-        return new Outcome(mp, "Import", from, row.ChangeDate, oldResolution, newResolution, createSeries);
+        return new Outcome(mp, "Import", from, row.ChangeDate, oldResolution, newResolution);
     }
-
-    internal static string ResolutionName(TimeResolutionInfoDto? resolution) => resolution switch
-    {
-        { Length: 1 } when string.Equals(resolution.Unit, "Hour", StringComparison.OrdinalIgnoreCase) => "Hour",
-        { Length: 15 } when string.Equals(resolution.Unit, "Minutes", StringComparison.OrdinalIgnoreCase) => "Quarter",
-        null => "unknown",
-        _ => $"{resolution.Length} {resolution.Unit}",
-    };
 
     private static DateTime ToUtc(DateTime value) => value.Kind switch
     {
@@ -311,13 +282,6 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         "MeasuredTimeSeriesName", "ProductionType",
     ];
 
-    // Settl's TimeSeries import, version 1.
-    internal static readonly string[] TimeSeriesColumns =
-    [
-        "Action", "Name", "CountryCode", "Description", "MeasurementType", "Type", "Currency", "QuantityUnit",
-        "QuantityKind", "TimeResolutionUnit", "TimeResolutionLength", "InvertSignOnMarketUpdates", "MarketIdentification",
-    ];
-
     private static void WriteMeters(string path, List<Outcome> imports)
     {
         using var book = new XLWorkbook();
@@ -356,43 +320,12 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         Set("MeasuredTimeSeriesName", SeriesName(meteringPoint, resolution));
     }
 
-    private static void WriteTimeSeries(string path, List<Outcome> creates)
-    {
-        using var book = new XLWorkbook();
-        var sheet = book.AddWorksheet("TimeSeries");
-        sheet.Cell(1, 1).Value = "Type";
-        sheet.Cell(1, 2).Value = "TimeSeries";
-        sheet.Cell(1, 3).Value = "Version";
-        sheet.Cell(1, 4).Value = 1;
-        WriteHeader(sheet, TimeSeriesColumns);
-        var r = 3;
-        foreach (var o in creates)
-        {
-            var row = r++;
-            void Set(string column, XLCellValue value) => sheet.Cell(row, Array.IndexOf(TimeSeriesColumns, column) + 1).Value = value;
-            Set("Action", "Create");
-            Set("Name", SeriesName(o.MeteringPoint, o.Old!));
-            Set("CountryCode", "DK");
-            Set("Description", $"Measured Time Series - {o.Old!.SeriesSuffix}");
-            Set("MeasurementType", "Active");
-            Set("Type", "Quantity");
-            Set("Currency", "DKK");
-            Set("QuantityUnit", "kWh");
-            Set("TimeResolutionUnit", o.Old.Unit);
-            Set("TimeResolutionLength", o.Old.Length);
-            Set("InvertSignOnMarketUpdates", "False");
-            Set("MarketIdentification", o.MeteringPoint);
-        }
-        book.SaveAs(path);
-    }
-
     private static void WriteHeader(IXLWorksheet sheet, string[] columns)
     {
         for (var c = 0; c < columns.Length; c++)
             sheet.Cell(2, c + 1).Value = columns[c];
         // Identifications are 18 digits: kept as text so Excel shows them whole.
-        sheet.Column(Array.IndexOf(columns, columns.Contains("MeteringPointIdentification") ? "MeteringPointIdentification" : "MarketIdentification") + 1)
-            .Style.NumberFormat.Format = "@";
+        sheet.Column(Array.IndexOf(columns, "MeteringPointIdentification") + 1).Style.NumberFormat.Format = "@";
     }
 
     // Settl names a metering point's measured series <identification>_<resolution>, e.g. 571313104200130218_PT15M.

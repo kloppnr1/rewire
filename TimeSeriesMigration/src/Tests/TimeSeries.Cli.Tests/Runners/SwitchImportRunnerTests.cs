@@ -23,7 +23,6 @@ public sealed class SwitchImportRunnerTests : IDisposable
         public Dictionary<string, Guid> Ids { get; } = new();
         public Dictionary<Guid, List<DateTime>> Starts { get; } = new();
         public Dictionary<Guid, List<string>> Occurrences { get; } = new();
-        public Dictionary<Guid, List<string>> Series { get; } = new();
         public string? HistoryError { get; set; }
         public List<(Guid Id, DateTime At)> VersionReads { get; } = [];
 
@@ -39,20 +38,16 @@ public sealed class SwitchImportRunnerTests : IDisposable
                 VersionReads.Add((id, at));
             return Task.FromResult<(List<string>?, string?)>((Occurrences[id], null));
         }
-
-        public Task<(List<string>? Resolutions, string? Error)> TimeSeriesResolutionsAsync(Guid id, CancellationToken cancellationToken) =>
-            Task.FromResult<(List<string>?, string?)>((Series[id], null));
     }
 
     // A metering point in Settl as migrated: meter entries from create (2024-01-01 Danish) and DataHub
-    // (2026-09-01), all QuarterHourly, and only the 15-minute series.
-    private Guid InSettl(string mp, string[]? series = null, string occurrence = "QuarterHourly")
+    // (2026-09-01), all QuarterHourly.
+    private Guid InSettl(string mp, string occurrence = "QuarterHourly")
     {
         var id = Guid.NewGuid();
         _settl.Ids[mp] = id;
         _settl.Starts[id] = [new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), new DateTime(2023, 12, 31, 23, 0, 0, DateTimeKind.Utc)];
         _settl.Occurrences[id] = [occurrence];
-        _settl.Series[id] = [.. series ?? ["Quarter"]];
         return id;
     }
 
@@ -77,7 +72,10 @@ public sealed class SwitchImportRunnerTests : IDisposable
         new SwitchImportRunner(_settl, _logs.Add).RunAsync("test", input, _dir, parallel: 4, Today);
 
     private string MetersPath => Path.Combine(_dir, "MeteringPointMeters_V8_test_2026-11-10.xlsx");
-    private string SeriesPath => Path.Combine(_dir, "TimeSeries_V1_test_2026-11-10.xlsx");
+
+    // Settl creates the series the meter rows name; no TimeSeries workbook is written.
+    private void OnlyTheMetersFile() =>
+        Assert.Equal([Path.GetFileName(MetersPath)], Directory.GetFiles(_dir, "*.xlsx").Select(Path.GetFileName));
 
     private static List<Dictionary<string, string>> Rows(string path)
     {
@@ -94,9 +92,9 @@ public sealed class SwitchImportRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task AnHourToQuarterSwitch_GetsHourlyFromSettlsEarliestEntry_QuarterFromChangeDate_AndAPt1hSeries()
+    public async Task AnHourToQuarterSwitch_GetsHourlyFromSettlsEarliestEntry_AndQuarterFromChangeDate()
     {
-        var id = InSettl(Mp1);
+        InSettl(Mp1);
 
         Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
 
@@ -115,60 +113,37 @@ public sealed class SwitchImportRunnerTests : IDisposable
             Assert.Equal("2025-12-09", date.GetFormattedString());
         }
         Assert.Equal("", meters[0]["MeterIdentification"]);  // only the columns that change are filled
-
-        var series = Assert.Single(Rows(SeriesPath));
-        Assert.Equal(("Create", $"{Mp1}_PT1H", "DK", "Measured Time Series - PT1H", "Active", "Quantity", "DKK", "kWh", "Hour", "1", "False", Mp1),
-            (series["Action"], series["Name"], series["CountryCode"], series["Description"], series["MeasurementType"], series["Type"],
-             series["Currency"], series["QuantityUnit"], series["TimeResolutionUnit"], series["TimeResolutionLength"],
-             series["InvertSignOnMarketUpdates"], series["MarketIdentification"]));
+        OnlyTheMetersFile();
+        Assert.DoesNotContain(_logs, l => l.StartsWith("TimeSeries", StringComparison.Ordinal));
         // The earliest entry is read an hour into it.
         Assert.Equal(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Assert.Single(_settl.VersionReads).At);
     }
 
     [Fact]
-    public async Task TheFilesKeepSettlsTemplateHeader()
+    public async Task TheFileKeepsSettlsTemplateHeader()
     {
         InSettl(Mp1);
 
         await Run(Switches((Mp1, "2025-12-09", "PT15M")));
 
-        using (var meters = new XLWorkbook(MetersPath))
-        {
-            var sheet = meters.Worksheet("MeteringPointMeters");
-            Assert.Equal(["Type", "MeteringPointMeter", "Version", "8", "Identification", "MeteringPointIdentification"],
-                Enumerable.Range(1, 6).Select(c => sheet.Cell(1, c).GetString()));
-            Assert.Equal(SwitchImportRunner.MetersColumns, sheet.Row(2).CellsUsed().Select(c => c.GetString()));
-        }
-        using var series = new XLWorkbook(SeriesPath);
-        var tsSheet = series.Worksheet("TimeSeries");
-        Assert.Equal(["Type", "TimeSeries", "Version", "1"], Enumerable.Range(1, 4).Select(c => tsSheet.Cell(1, c).GetString()));
-        Assert.Equal(SwitchImportRunner.TimeSeriesColumns, tsSheet.Row(2).CellsUsed().Select(c => c.GetString()));
+        using var meters = new XLWorkbook(MetersPath);
+        var sheet = meters.Worksheet("MeteringPointMeters");
+        Assert.Equal(["Type", "MeteringPointMeter", "Version", "8", "Identification", "MeteringPointIdentification"],
+            Enumerable.Range(1, 6).Select(c => sheet.Cell(1, c).GetString()));
+        Assert.Equal(SwitchImportRunner.MetersColumns, sheet.Row(2).CellsUsed().Select(c => c.GetString()));
     }
 
     [Fact]
     public async Task AQuarterToHourSwitch_IsTheOtherWayRound()
     {
-        InSettl(Mp1, series: ["Hour"], occurrence: "Hourly");
+        InSettl(Mp1, occurrence: "Hourly");
 
         Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT1H"))));
 
         var meters = Rows(MetersPath);
         Assert.Equal(("QuarterHourly", $"{Mp1}_PT15M"), (meters[0]["MeterReadingOccurrence"], meters[0]["MeasuredTimeSeriesName"]));
         Assert.Equal(("Hourly", $"{Mp1}_PT1H"), (meters[1]["MeterReadingOccurrence"], meters[1]["MeasuredTimeSeriesName"]));
-        var series = Assert.Single(Rows(SeriesPath));
-        Assert.Equal(($"{Mp1}_PT15M", "Measured Time Series - PT15M", "Minutes", "15"),
-            (series["Name"], series["Description"], series["TimeResolutionUnit"], series["TimeResolutionLength"]));
-    }
-
-    [Fact]
-    public async Task ASeriesSettlHasAlready_IsNotCreated()
-    {
-        InSettl(Mp1, series: ["Hour", "Quarter"]);
-
-        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
-
-        Assert.Equal(2, Rows(MetersPath).Count);
-        Assert.Empty(Rows(SeriesPath));
+        OnlyTheMetersFile();
     }
 
     [Theory]
@@ -181,14 +156,13 @@ public sealed class SwitchImportRunnerTests : IDisposable
         Assert.Equal(0, await Run(Switches((Mp1, changeDate, "PT15M"))));
 
         Assert.Empty(Rows(MetersPath));
-        Assert.Empty(Rows(SeriesPath));
         Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: switch on or before Settl's earliest meter entry"));
     }
 
     [Fact]
     public async Task AnEarliestEntryThatIsAlreadyHourly_IsLeftOut()
     {
-        InSettl(Mp1, series: ["Hour", "Quarter"], occurrence: "Hourly");
+        InSettl(Mp1, occurrence: "Hourly");
 
         Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
 
@@ -209,7 +183,7 @@ public sealed class SwitchImportRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task ASettlFailure_WritesNoFiles()
+    public async Task ASettlFailure_WritesNoFile()
     {
         InSettl(Mp1);
         _settl.HistoryError = "503";
@@ -217,7 +191,6 @@ public sealed class SwitchImportRunnerTests : IDisposable
         Assert.Equal(1, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
 
         Assert.False(File.Exists(MetersPath));
-        Assert.False(File.Exists(SeriesPath));
     }
 
     [Fact]
