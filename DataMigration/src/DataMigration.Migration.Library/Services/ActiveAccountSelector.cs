@@ -65,7 +65,7 @@ public static class ActiveAccountSelector
         var window = ResolveWindow(restorePartsChangedFrom, restorePartsChangedBefore);
 
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);

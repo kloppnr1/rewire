@@ -30,6 +30,7 @@
   <Folder Name="/DataMigration/Tests/">
     <Project Path="DataMigration/src/Tests/DataMigration.Migration.Tests/DataMigration.Migration.Tests.csproj" />
     <Project Path="DataMigration/src/Tests/DataMigration.OpsCli.Tests/DataMigration.OpsCli.Tests.csproj" />
+    <Project Path="DataMigration/src/Tests/DataMigration.OpsCli.IntegrationTests/DataMigration.OpsCli.IntegrationTests.csproj" />
   </Folder>
   <Folder Name="/TimeSeriesMigration/">
     <Project Path="TimeSeriesMigration/src/TimeSeries.Core/TimeSeries.Core.csproj" />
@@ -39,5 +40,6 @@
   <Folder Name="/TimeSeriesMigration/Tests/">
     <Project Path="TimeSeriesMigration/src/Tests/TimeSeries.Core.Tests/TimeSeries.Core.Tests.csproj" />
     <Project Path="TimeSeriesMigration/src/Tests/TimeSeries.Cli.Tests/TimeSeries.Cli.Tests.csproj" />
+    <Project Path="TimeSeriesMigration/src/Tests/TimeSeries.Xellent.IntegrationTests/TimeSeries.Xellent.IntegrationTests.csproj" />
   </Folder>
 </Solution>

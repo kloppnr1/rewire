@@ -35,7 +35,7 @@ public static class XellentDomainLoader
         CancellationToken cancellationToken = default)
     {
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);

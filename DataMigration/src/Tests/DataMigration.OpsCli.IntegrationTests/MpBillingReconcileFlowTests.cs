@@ -1,4 +1,5 @@
 using DataMigration.Migration.Configuration;
+using DataMigration.OpsCli.IntegrationTests.Fakes;
 using DataMigration.OpsCli.IntegrationTests.Fixtures;
 using DataMigration.OpsCli.Runners;
 using DataMigration.OpsCli.Services.Reconcile;
@@ -44,7 +45,7 @@ public class MpBillingReconcileFlowTests(ProvisioningFixture fixture, ITestOutpu
     public async Task MpBilling_FieldDiff_JointInvoice_RestoredByApply()
     {
         var settl   = fixture.Settl;
-        var connStr = settl.XellentConnectionString;
+        var connStr = fixture.XellentConnectionString;
         var runner  = BuildRunner(settl, connStr);
         var applier = BuildApplier(settl, connStr);
 
@@ -52,7 +53,7 @@ public class MpBillingReconcileFlowTests(ProvisioningFixture fixture, ITestOutpu
 
         var (customer, custErr) = await settl.CustomerClient.SearchByCustomerNumberAsync(FixTestAccounts.HappyPath);
         Assert.True(customer != null,
-            $"HappyPath customer 448928 not in featuretest: {custErr}. Run ProvisioningFixture first.");
+            $"HappyPath customer 448928 not in the fake tenant: {custErr}. Run ProvisioningFixture first.");
 
         var (customerContracts, _) = await settl.ContractClient.GetCustomerMeteringPointContractsAsync(customer!.Id);
         var elContract = customerContracts!.FirstOrDefault(c =>
@@ -150,7 +151,7 @@ public class MpBillingReconcileFlowTests(ProvisioningFixture fixture, ITestOutpu
         }
         catch
         {
-            // Safety net: restore the original value so featuretest is left clean even if the test fails
+            // Safety net from the live version: restore the original value if the test fails
             // mid-flow. Swallow any error here — the primary failure already surfaced above.
             await settl.MeteringPointClient.UpdateBillingAsync(
                 targetMp.MeteringPointId,
@@ -183,13 +184,13 @@ public class MpBillingReconcileFlowTests(ProvisioningFixture fixture, ITestOutpu
             r.EntityKey == mpNatId &&
             r.Field == "BillingConfiguration.JointInvoice")];
 
-    private static ReconcileRunner BuildRunner(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileRunner BuildRunner(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,
         connStr, NoExemption);
 
-    private static ReconcileApplier BuildApplier(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileApplier BuildApplier(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,

@@ -18,7 +18,7 @@ namespace DataMigration.OpsCli.IntegrationTests;
 public class PayerBillingContractTests(ContractTestProvisioningFixture fixture, ITestOutputHelper output)
     : IClassFixture<ContractTestProvisioningFixture>, IAsyncLifetime
 {
-    // Synthetic CVR so the test value is identifiable in featuretest audit logs.
+    // Synthetic CVR so the test value is identifiable in a request log.
     private const string TestCvr = "99887766";
 
     private string? _originalCvr;

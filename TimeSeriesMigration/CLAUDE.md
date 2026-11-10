@@ -40,7 +40,7 @@ In this order; the exact commands are in `docs/ai/start.md`.
 
 1. Build `NewSettlement.TimeSeriesMigration.slnx`.
 2. Test `TimeSeries.Core.Tests` and `TimeSeries.Cli.Tests`.
-3. Test `TimeSeries.Xellent.IntegrationTests` when the change touches extraction, Settl mapping or `post`. The project is outside the solution, so neither a solution-level `dotnet test` nor CI runs it. It needs the VPN and a `testsettings.json` pointing at `AXDB50_TEST`. Do not accept a changed golden baseline without reviewing why it changed.
+3. Test `TimeSeries.Xellent.IntegrationTests` when the change touches extraction, Settl mapping or `post`. In rewire it is in `rewire.slnx` and runs on a seeded SQLite copy of Xellent: no VPN, no settings. Do not accept a changed golden baseline without reviewing why it changed.
 4. CLI smoke test: `dotnet run --project src/TimeSeries.Cli -- post --help --env featuretest`, then `post --dry-run`. Config loads before `--help` is parsed, so even help needs a valid environment.
 
 ## Investigation

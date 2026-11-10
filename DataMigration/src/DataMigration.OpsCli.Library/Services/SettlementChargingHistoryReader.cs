@@ -14,7 +14,7 @@ public static class SettlementChargingHistoryReader
         IReadOnlyCollection<(string Account,DateOnly Date)> requests,string dataAreaId,CancellationToken ct = default)
     {
         if (requests.Count == 0) return new(new Dictionary<(string,DateOnly),IReadOnlyList<string>>(),[]);
-        var options = new DbContextOptionsBuilder<XellentDbContext>().UseSqlServer(connectionString,
+        var options = new DbContextOptionsBuilder<XellentDbContext>().UseXellent(connectionString,
             sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); }).Options;
         await using var context = new XellentDbContext(options);
         return await ReadAsync(context,requests,dataAreaId,ct);

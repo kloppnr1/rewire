@@ -8,7 +8,7 @@ namespace DataMigration.OpsCli.IntegrationTests;
 /// Contract tests for Find*/List* pagination APIs across all entity types.
 ///
 /// <para>Report runners and reconcile scanners rely on these to iterate all entities
-/// in featuretest/production. Breaking changes here (renamed TotalCount field, changed
+/// in a Settl environment. Breaking changes here (renamed TotalCount field, changed
 /// pagination parameters, empty Items on first page) cause runners to silently process
 /// zero records — no error, no output, undetected.</para>
 /// </summary>
@@ -179,7 +179,7 @@ public class SettlPaginationContractTests(ContractTestProvisioningFixture fixtur
         Assert.True(contracts?.Count > 0, $"FindContractsAsync returned 0 contracts: {err}");
 
         var types = contracts!.Select(c => c.CommodityType).Distinct().OrderBy(t => t).ToList();
-        output.WriteLine($"CommodityTypes in featuretest: {string.Join(", ", types)}");
+        output.WriteLine($"CommodityTypes in the fake tenant: {string.Join(", ", types)}");
         // We expect at least Electricity (migration created electricity contracts).
         Assert.Contains(types, t => string.Equals(t, "Electricity", StringComparison.OrdinalIgnoreCase));
     }
@@ -212,7 +212,7 @@ public class SettlPaginationContractTests(ContractTestProvisioningFixture fixtur
         output.WriteLine($"SettlementGroups ListAll: {groups?.Count ?? 0} groups. Error: {err}");
 
         Assert.True(groups != null, $"ListAllAsync failed: {err}");
-        Assert.True(groups!.Count > 0, "No settlement groups in featuretest — fix-settlement-groups would process nothing");
+        Assert.True(groups!.Count > 0, "No settlement groups in the fake tenant — fix-settlement-groups would process nothing");
     }
 
     [Fact]

@@ -55,7 +55,7 @@ public static class XellentDeliveryOnDate
         CancellationToken ct = default)
     {
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);
@@ -82,7 +82,7 @@ public static class XellentDeliveryOnDate
         CancellationToken ct)
     {
         var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);

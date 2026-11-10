@@ -97,7 +97,7 @@ public static class XellentMobilePayContractReader
         bool includeTerminated = false)
     {
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); })
+            .UseXellent(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); })
             .Options;
 
         await using var db = new XellentDbContext(dbOptions);

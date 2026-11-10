@@ -22,7 +22,7 @@ public static class XellentChargeSubscriptionReader
         if (requests.Count == 0) return result;
 
         var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); })
+            .UseXellent(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); })
             .Options;
         await using var context = new XellentDbContext(options);
 

@@ -32,7 +32,7 @@ public sealed class PullContractSourcesRunner
         {
             using var xellentTimer = new CaptureStage("Xellent contract parts, logs and charger mapping");
             var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-                .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+                .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
                 .Options;
             await using var context = new XellentDbContext(dbOptions);
             await GenerateStateFromSettlRunner.PullXellentContractSourcesAsync(context, store,

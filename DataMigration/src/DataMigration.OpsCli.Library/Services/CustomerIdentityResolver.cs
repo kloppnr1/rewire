@@ -53,7 +53,7 @@ public static class CustomerIdentityResolver
         if (distinct.Count == 0) return result;
 
         var contextOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
             .Options;
         await using var context = new XellentDbContext(contextOptions);
 

@@ -101,6 +101,21 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
             DataMigration.Domain.TimeSeries.TimeResolution.Hour, TimeSpan.FromHours(1),
             1.0m, DefaultDeliveryCategory, companyId, null, null, seedAgreement: false);
 
+    /// <summary>
+    /// Seed one series with exactly the given points (UTC time, value), for tests that need real-shaped
+    /// data rather than a constant value. The agreement rules are the same as for the other seed methods.
+    /// </summary>
+    public void SeedTimeSeriesPoints(
+        string meteringPoint,
+        DataMigration.Domain.TimeSeries.TimeResolution resolution,
+        IEnumerable<(DateTime Utc, decimal Value)> points,
+        string companyId = DefaultCompanyId,
+        DateTime? agreementStart = null,
+        DateTime? agreementEnd = null,
+        string deliveryCategory = DefaultDeliveryCategory)
+        => SeedSeries(meteringPoint, resolution, points.ToList(), deliveryCategory, companyId,
+            agreementStart, agreementEnd, seedAgreement: true);
+
     private void SeedTimeSeries(
         string meteringPoint,
         DateTime startUtc,
@@ -113,6 +128,19 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
         DateTime? agreementStart,
         DateTime? agreementEnd,
         bool seedAgreement = true)
+        => SeedSeries(meteringPoint, resolution,
+            Enumerable.Range(0, pointCount).Select(i => (startUtc + step * i, value)).ToList(),
+            deliveryCategory, companyId, agreementStart, agreementEnd, seedAgreement);
+
+    private void SeedSeries(
+        string meteringPoint,
+        DataMigration.Domain.TimeSeries.TimeResolution resolution,
+        IReadOnlyList<(DateTime Utc, decimal Value)> points,
+        string deliveryCategory,
+        string companyId,
+        DateTime? agreementStart,
+        DateTime? agreementEnd,
+        bool seedAgreement)
     {
         using var ctx = CreateContext();
 
@@ -134,7 +162,7 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
         ctx.EmsTimeseries.Add(ts);
         ctx.SaveChanges();
 
-        for (var i = 0; i < pointCount; i++)
+        foreach (var (utc, value) in points)
         {
             ctx.EmsTimeseriesValues.Add(new EmsTimeseriesValues
             {
@@ -142,7 +170,7 @@ public sealed class XellentTimeSeriesSeeder : IDisposable
                 Dataareaid = DataAreaId,
                 Timeseriesrefrecid = ts.Recid,
                 Versiontoexcl = VersionToExcl,
-                Timeofvalue = startUtc + step * i,
+                Timeofvalue = utc,
                 Value = value,
                 Qualityofvalue = (int)DataMigration.Domain.TimeSeries.QualityOfValue.MachineApprovedReading,
             });

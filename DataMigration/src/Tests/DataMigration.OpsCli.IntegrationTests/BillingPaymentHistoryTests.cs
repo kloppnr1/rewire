@@ -4,21 +4,19 @@ using Xunit.Abstractions;
 namespace DataMigration.OpsCli.IntegrationTests;
 
 /// <summary>
-/// Read-only live checks that the multi-version reconcile scan's data source works end-to-end against
-/// featuretest: the <c>/history</c> endpoint now exposes <c>PaymentConfigurationDates</c> (the field
-/// added in SettlClient) alongside <c>BillingConfigurationDates</c>, and each version's effective GET
-/// resolves to that entry's own Start. No mutations.
+/// The multi-version reconcile scan's data source through the real client: the <c>/history</c>
+/// endpoint exposes <c>PaymentConfigurationDates</c> alongside <c>BillingConfigurationDates</c>, and
+/// each version's effective GET resolves to that entry's own Start. Runs on the fake tenant in
+/// <see cref="ContractTestProvisioningFixture"/>, so it pins the shape rather than checking live Settl.
 /// </summary>
-public class BillingPaymentHistoryTests(SettlFeaturetestFixture fixture, ITestOutputHelper output)
-    : IClassFixture<SettlFeaturetestFixture>
+public class BillingPaymentHistoryTests(ContractTestProvisioningFixture fixture, ITestOutputHelper output)
+    : IClassFixture<ContractTestProvisioningFixture>
 {
-    // Known featuretest MP with 3 BillingConfiguration versions (from the PUT-semantics probe).
-    private static readonly Guid MultiVersionMp = new("e9e91761-395d-4b46-9ed8-0e09b52a366f");
-
     [Fact]
     public async Task History_exposes_billing_and_payment_dates_and_versions_resolve()
     {
-        var mp = fixture.MeteringPointClient;
+        var MultiVersionMp = fixture.MpId; // seeded with two BillingConfiguration versions
+        var mp = fixture.Settl.MeteringPointClient;
 
         var (hist, err) = await mp.GetBillingHistoryAsync(MultiVersionMp);
         Assert.Null(err);

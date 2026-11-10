@@ -1,4 +1,5 @@
 using DataMigration.Migration.Configuration;
+using DataMigration.OpsCli.IntegrationTests.Fakes;
 using DataMigration.OpsCli.IntegrationTests.Fixtures;
 using DataMigration.OpsCli.Runners;
 using DataMigration.OpsCli.Services.Reconcile;
@@ -12,8 +13,8 @@ namespace DataMigration.OpsCli.IntegrationTests;
 ///   Verify present → Delete → Reconcile (detect MissingInSettl)
 ///   → Reconcile-apply (restore) → Reconcile (verify restored)
 ///
-/// Uses FixTestAccounts.HappyPath (448928, Fiktiv Personm) — single always-active
-/// El-ekstern contract 10483451, 5 MPs. Requires VPN (AXDB50_TEST + Settl featuretest).
+/// Uses FixTestAccounts.HappyPath (448928) — single active
+/// El-ekstern contract, 5 MPs, migrated into the fake Settl tenant by ProvisioningFixture.
 ///
 /// The "create" step is performed by ProvisioningFixture (idempotent CreateRunner run).
 /// The test picks the last MP link on the account's electricity contract.
@@ -47,7 +48,7 @@ public class ContractLinkReconcileFlowTests(ProvisioningFixture fixture, ITestOu
     public async Task ContractLink_DeleteThenApply_RestoredAndDetectedCorrectly()
     {
         var settl   = fixture.Settl;
-        var connStr = settl.XellentConnectionString;
+        var connStr = fixture.XellentConnectionString;
         var runner  = BuildRunner(settl, connStr);
         var applier = BuildApplier(settl, connStr);
 
@@ -55,7 +56,7 @@ public class ContractLinkReconcileFlowTests(ProvisioningFixture fixture, ITestOu
 
         var (customer, custErr) = await settl.CustomerClient.SearchByCustomerNumberAsync(FixTestAccounts.HappyPath);
         Assert.True(customer != null,
-            $"HappyPath customer 448928 not in featuretest: {custErr}. Run ProvisioningFixture first.");
+            $"HappyPath customer 448928 not in the fake tenant: {custErr}. Run ProvisioningFixture first.");
 
         var (customerContracts, _) = await settl.ContractClient.GetCustomerMeteringPointContractsAsync(customer!.Id);
         Assert.True(customerContracts?.Count > 0, "No contracts for customer 448928");
@@ -161,13 +162,13 @@ public class ContractLinkReconcileFlowTests(ProvisioningFixture fixture, ITestOu
 
     // ---- helpers ----
 
-    private static ReconcileRunner BuildRunner(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileRunner BuildRunner(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,
         connStr, NoExemption);
 
-    private static ReconcileApplier BuildApplier(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileApplier BuildApplier(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,

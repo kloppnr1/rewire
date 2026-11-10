@@ -1,71 +1,40 @@
+using System.Globalization;
+using System.Text.Json.Nodes;
 using DataMigration.XellentData;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using TimeSeries.Cli.Tests.Fixtures;
 
 namespace TimeSeries.Xellent.IntegrationTests;
 
 /// <summary>
-/// Base class for Xellent live-DB integration tests. Builds a real SQL Server
-/// <see cref="XellentDbContext"/> using the connection string in <c>testsettings.json</c>
-/// (AXDB50_TEST on xel2012 via Integrated Security).
+/// Base class for the end-to-end extraction tests. Xellent is a SQLite in-memory copy seeded by
+/// <see cref="XellentTimeSeriesSeeder"/>, so the tests run anywhere: no VPN, no testsettings.json.
 ///
-/// <para><b>Never runs in CI</b> — this project is intentionally not in
-/// <c>NewSettlement.TimeSeriesMigration.slnx</c>, since the CI agent has no network path
-/// to xel2012.</para>
+/// <para>The seed points come from the committed goldens, which were recorded from AXDB50_TEST.
+/// Each test also seeds points just outside its window, so a wrong window bound shows up as
+/// golden drift.</para>
 /// </summary>
 public abstract class IntegrationTestBase : IDisposable
 {
-    protected readonly XellentDbContext Context;
-    protected readonly string ConnectionString;
+    protected readonly XellentTimeSeriesSeeder Seeder = new();
+    private XellentDbContext? _context;
 
-    protected IntegrationTestBase()
-    {
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("testsettings.json", optional: false)
-            .Build();
+    /// <summary>The seeded Xellent copy. Created on first use, after the test has seeded it.</summary>
+    protected XellentDbContext Context => _context ??= Seeder.CreateContext();
 
-        ConnectionString = configuration.GetConnectionString("TestConnection")
-            ?? throw new InvalidOperationException("TestConnection not found in testsettings.json");
-
-        var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(ConnectionString, sqlOptions =>
-            {
-                sqlOptions.UseCompatibilityLevel(110);
-                sqlOptions.CommandTimeout(120);
-            })
-            .Options;
-
-        Context = new XellentDbContext(options);
-
-        try
-        {
-            Context.Database.OpenConnection();
-            Context.Database.CloseConnection();
-        }
-        catch (Exception ex) when (LooksLikeNetworkFailure(ex))
-        {
-            throw new InvalidOperationException(
-                "Could not reach Xellent SQL Server (xel2012). The error pattern matches a missing VPN " +
-                "connection — please connect to the corporate VPN and retry.\n\n" +
-                $"Underlying error: {ex.GetBaseException().Message}", ex);
-        }
-    }
-
-    private static bool LooksLikeNetworkFailure(Exception ex)
-    {
-        var msg = (ex.GetBaseException().Message ?? string.Empty).ToLowerInvariant();
-        return msg.Contains("named pipe")
-            || msg.Contains("network-related")
-            || msg.Contains("netværksstien")
-            || msg.Contains("network path")
-            || msg.Contains("could not open a connection")
-            || msg.Contains("not found or was not accessible");
-    }
+    /// <summary>The (UTC time, quantity) points of a golden payload, as Xellent stores them.</summary>
+    protected static List<(DateTime Utc, decimal Value)> GoldenPoints(string goldenPath) =>
+        JsonNode.Parse(File.ReadAllText(goldenPath))!["points"]!.AsArray()
+            .Select(p => (
+                DateTime.Parse(p!["time"]!.GetValue<string>(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal),
+                decimal.Parse(p["quantity"]!.ToJsonString(), CultureInfo.InvariantCulture)))
+            .OrderBy(p => p.Item1)
+            .ToList();
 
     public virtual void Dispose()
     {
-        Context?.Dispose();
+        _context?.Dispose();
+        Seeder.Dispose();
         GC.SuppressFinalize(this);
     }
 }

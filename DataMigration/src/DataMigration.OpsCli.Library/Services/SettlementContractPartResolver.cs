@@ -32,7 +32,7 @@ public static class SettlementContractPartResolver
     {
         if (dates.Count == 0) return Fold(dates, [], new HashSet<string>());
         var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); }).Options;
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); }).Options;
         await using var context = new XellentDbContext(options);
         return await ResolveAsync(context, dates, dataAreaId, ct);
     }

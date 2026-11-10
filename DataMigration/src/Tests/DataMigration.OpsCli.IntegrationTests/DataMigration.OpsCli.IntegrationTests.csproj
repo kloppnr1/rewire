@@ -5,8 +5,6 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <!-- Share OpsCli's user-secret store so SettlApi:Environments:featuretest:* credentials are reused. -->
-    <UserSecretsId>a1f3e2d7-4b85-4c91-9e6f-2d0c8b7a5e13</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,33 +14,18 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+    <!-- Xellent is an in-memory SQLite database here; see Fakes/FakeXellent.cs. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="testsettings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="xunit.runner.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="testsettings.example.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Goldens\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Goldens\**\*.csv">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <!-- Production profiles consumed by CreateRunner during test arrange. Single source of truth in src/profiles/. -->
-    <None Include="..\..\profiles\match.json" Link="Profiles\match.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="..\..\profiles\ppa-customers.json" Link="Profiles\ppa-customers.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
@@ -60,5 +43,7 @@
     <!-- CsvGoldenAsserter lives with the unit tests, which need it too and run in CI. Referenced
          rather than copied so the two suites cannot drift on what a golden diff looks like. -->
     <ProjectReference Include="..\DataMigration.OpsCli.Tests\DataMigration.OpsCli.Tests.csproj" />
+    <!-- The anonymised Xellent seed snapshots and the seeder that reads them. -->
+    <ProjectReference Include="..\DataMigration.Migration.Tests\DataMigration.Migration.Tests.csproj" />
   </ItemGroup>
 </Project>

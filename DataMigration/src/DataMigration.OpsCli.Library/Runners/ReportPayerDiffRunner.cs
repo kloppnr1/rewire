@@ -63,7 +63,7 @@ public class ReportPayerDiffRunner
         }
 
         var contextOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(_connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .UseXellent(_connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
             .Options;
         await using var context = new XellentDbContext(contextOptions);
 

@@ -27,7 +27,7 @@ public sealed class XellentDomainLoader : IXellentDomainLoader
     private XellentDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(_connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .UseXellent(_connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
             .Options;
         return new XellentDbContext(options);
     }

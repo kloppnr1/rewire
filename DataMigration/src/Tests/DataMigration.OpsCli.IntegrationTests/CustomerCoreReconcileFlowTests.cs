@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using DataMigration.Migration.Configuration;
+using DataMigration.OpsCli.IntegrationTests.Fakes;
 using DataMigration.OpsCli.IntegrationTests.Fixtures;
 using DataMigration.OpsCli.Runners;
 using DataMigration.OpsCli.Services.Reconcile;
@@ -41,7 +42,7 @@ public class CustomerCoreReconcileFlowTests(ProvisioningFixture fixture, ITestOu
     public async Task CustomerCore_FieldDiff_FullName_RestoredByApply()
     {
         var settl   = fixture.Settl;
-        var connStr = settl.XellentConnectionString;
+        var connStr = fixture.XellentConnectionString;
         var runner  = BuildRunner(settl, connStr);
         var applier = BuildApplier(settl, connStr);
 
@@ -49,7 +50,7 @@ public class CustomerCoreReconcileFlowTests(ProvisioningFixture fixture, ITestOu
 
         var (custInfo, custErr) = await settl.CustomerClient.SearchByCustomerNumberAsync(FixTestAccounts.HappyPath);
         Assert.True(custInfo != null,
-            $"Customer 448928 not found in featuretest: {custErr}. Run ProvisioningFixture first.");
+            $"Customer 448928 not found in the fake tenant: {custErr}. Run ProvisioningFixture first.");
 
         var custId = custInfo!.Id;
         output.WriteLine($"Customer: {custId}");
@@ -143,7 +144,7 @@ public class CustomerCoreReconcileFlowTests(ProvisioningFixture fixture, ITestOu
         }
         catch
         {
-            // Safety net: restore original FullName so featuretest is left clean even on test failure.
+            // Safety net from the live version: restore the original value if the flow fails midway.
             var objRestore = JsonNode.Parse(rawBefore!)!.AsObject();
             objRestore.Remove("Uri");
             objRestore.Remove("Links");
@@ -162,13 +163,13 @@ public class CustomerCoreReconcileFlowTests(ProvisioningFixture fixture, ITestOu
             r.Kind == DriftKind.FieldDiff &&
             r.Field == TargetField)];
 
-    private static ReconcileRunner BuildRunner(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileRunner BuildRunner(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,
         connStr, NoExemption);
 
-    private static ReconcileApplier BuildApplier(SettlFeaturetestFixture settl, string connStr) => new(
+    private static ReconcileApplier BuildApplier(FakeSettl settl, string connStr) => new(
         settl.ApiOptions,
         settl.CustomerClient, settl.PayerClient, settl.MeteringPointClient,
         settl.ContractClient, settl.SettlementGroupClient,

@@ -1,64 +1,32 @@
 # TimeSeries.Xellent.IntegrationTests
 
-Live-DB regressions-suite for `TimeSeriesExtractionService` + `TimeZoneNormalizationService`.
-Kører mod **AXDB50_TEST** på `xel2012` og låser den Settl-POST-payload der ville lande på
-`/v1/time-series/{guid}/points` bit-identisk via committede JSON-golden-files.
+End-to-end tests of `TimeSeriesExtractionService`: extract from Xellent, build the Settl POST payload for
+`/v1/time-series/{guid}/points`, and compare the wire JSON with a committed golden.
 
-## Hvorfor et separat projekt?
-
-- CI-agenten har ingen netværksadgang til `xel2012` → projektet er bevidst **ikke i
-  `NewSettlement.TimeSeriesMigration.slnx`** og ignoreres dermed af `dotnet build` /
-  `dotnet test` i Azure-pipelinen.
-- Skal kun køres lokalt af udviklere på VPN.
-
-## Forudsætninger
-
-- Windows-maskine med Kerberos/Integrated Security-adgang til `xel2012`
-- `testsettings.json` i denne folder (er gitignored). Format:
-  ```json
-  {
-    "ConnectionStrings": {
-      "TestConnection": "Server=xel2012;Database=AXDB50_TEST;Integrated Security=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-    }
-  }
-  ```
-  Se `testsettings.example.json`.
-
-## Kørsel
+Runs anywhere. Xellent is a SQLite in-memory copy, seeded by `XellentTimeSeriesSeeder` from
+`TimeSeries.Cli.Tests`. No VPN, no `testsettings.json`.
 
 ```powershell
-dotnet test src/Tests/TimeSeries.Xellent.IntegrationTests/
+dotnet test TimeSeriesMigration/src/Tests/TimeSeries.Xellent.IntegrationTests
 ```
 
-Første kørsel: ingen golden-files — tests fejler og skriver proposed baselines til
-`Goldens/dst/<scenario>/new/`. Review dem, flyt til `Goldens/dst/<scenario>/`, committ,
-kør igen.
+## What is tested
 
-## Workflow
+- **DST** (`DstPostPayloadTests`): metering point `571313115242231955`, El-ekstern. Spring forward
+  2024-03-31 (23 hours) and fall back 2024-10-27 (25 hours). Points are sent in UTC as stored.
+- **Resolution switch** (`ResolutionSegmentPayloadTests`): metering point `571313103103321037`. An Hour
+  series under one company until 31 Dec 2023 and a Quarter series under another from 1 Jan 2024. One
+  segment per resolution, each with its own payload; counts from `CountTimeSeriesAsync` agree with the
+  extraction; the five-decimal split check agrees with the database's own remainder.
 
-### Normal regression-kørsel
-Alle tests skal passere uden baseline-ændringer. Fejl betyder enten:
-1. Live Xellent-data er ændret (sjældent på TEST-DB, men muligt)
-2. Extraction- eller normalisering-koden har fået en utilsigtet adfærdsændring (ofte)
+The seed is the golden's own points, which were recorded from AXDB50_TEST, plus one point just outside the
+window on each side. A wrong window bound shows up as golden drift. `TransactionId`, `RegistrationTime`
+and `Revision` are fixed in the tests.
 
-Ved fejl: `git status` i `Goldens/` — fejl-beskeden har lagt en `new/` fil du kan diff'e
-mod den committede version.
+Numbers compare by value: the goldens keep SQL Server's twelve decimals (`0.120000000000`), SQLite
+returns `0.12`, and Settl reads both as the same number.
 
-### Bevidst ændring i extraction / normalisering
-1. Ret koden i `TimeSeries.Migration`
-2. Kør testen lokalt → fejler med baseline-mismatch
-3. Review `Goldens/dst/<scenario>/new/*.json` mod den committede version — sikre dig at
-   delta KUN er det du forventede
-4. Promote: flyt `Goldens/dst/<scenario>/new/*.json` til `Goldens/dst/<scenario>/`
-5. Commit kode + opdaterede goldens sammen
+## When a golden drifts
 
-## Hvad bliver der testet?
-
-- MP `571313115242231955` (kunde `405013` i `HOL`), `El-ekstern`
-- Spring forward: `2024-03-31` (02:00 CET er ugyldig → carry-over til 03:00 CEST)
-- Fall back: `2024-10-27` (02:00 forekommer to gange → første forekomst tolkes som CEST)
-
-Hver test bygger den eksakte `SettlTimeSeriesRequestDto` som `TimeSeriesRunner.BuildTimeSeriesRequest`
-ville bygge, serialiserer til wire-JSON, og sammenligner mod committed golden via
-`JsonGoldenAsserter`. `TransactionId`, `RegistrationTime` og `Revision` er fastlåste i testen
-så goldens er deterministiske.
+The failing test writes the new output to a `new/` folder next to the golden. Diff it against the
+committed file. If the change is intended, copy it over the golden and commit code and golden together.

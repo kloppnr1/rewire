@@ -140,7 +140,7 @@ internal static class SettlementCheck
                     AND cp.COMPANYID IN {companies}
                     AND d.METERINGPOINT IN ({pointList}) AND cp.CONTRACTNUM IN ({contractList})
                 """;
-            parts.AddRange(await context.Database.SqlQueryRaw<PartRow>(partSql, Parameters(chunk, contracts))
+            parts.AddRange(await context.Database.SqlQueryRaw<PartRow>(partSql, Parameters(context, chunk, contracts))
                 .ToListAsync(ct));
 
             // One billing-dates row per billing run, keyed by contract and agreement (ATTACHMENTNUM).
@@ -156,19 +156,31 @@ internal static class SettlementCheck
                 GROUP BY d.METERINGPOINT, lb.CONTRACTNUM
                 """;
             statements.AddRange(await context.Database.SqlQueryRaw<StatementRow>(statementSql,
-                Parameters(chunk, contracts)).ToListAsync(ct));
+                Parameters(context, chunk, contracts)).ToListAsync(ct));
         }
         return new XellentRows(parts, statements);
     }
 
-    /// <summary>Fresh parameter objects per query: SqlClient refuses one already used by another command.</summary>
-    private static object[] Parameters(IReadOnlyList<string> points, IReadOnlyList<string> contracts) =>
+    /// <summary>Fresh parameter objects per query: SqlClient refuses one already used by another command.
+    /// Created by the context's own provider (SqlParameter on SQL Server), so the queries also run
+    /// against the in-memory database the integration tests use.</summary>
+    private static object[] Parameters(XellentDbContext context, IReadOnlyList<string> points, IReadOnlyList<string> contracts) =>
     [
-        new SqlParameter("@area", MigrationConstants.DataAreaId),
-        new SqlParameter("@category", MigrationConstants.DeliveryCategoryElectricity),
-        .. points.Select((p, i) => new SqlParameter($"@m{i}", p)),
-        .. contracts.Select((c, i) => new SqlParameter($"@c{i}", c)),
+        Parameter(context, "@area", MigrationConstants.DataAreaId),
+        Parameter(context, "@category", MigrationConstants.DeliveryCategoryElectricity),
+        .. points.Select((p, i) => Parameter(context, $"@m{i}", p)),
+        .. contracts.Select((c, i) => Parameter(context, $"@c{i}", c)),
     ];
+
+    private static System.Data.Common.DbParameter Parameter(XellentDbContext context, string name, string value)
+    {
+        if (context.Database.IsSqlServer()) return new SqlParameter(name, value);
+        using var command = context.Database.GetDbConnection().CreateCommand();
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        return parameter;
+    }
 
     internal static string BuildCsv(IEnumerable<Row> rows)
     {

@@ -263,7 +263,7 @@ public class GenerateStateFromSettlRunner
             .Order(StringComparer.Ordinal).ToArray(), ct);
 
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
             .Options;
         await using var context = new XellentDbContext(dbOptions);
         var mehIds = await LoadMehMeteringPointIdsAsync(context, cosByMp.Keys, ct);
@@ -828,7 +828,7 @@ public class GenerateStateFromSettlRunner
         Log($"  Settlement check: reading latest statement dates for {subjects.Count} metering point(s) " +
             $"in chunks of {SettlementCheck.MeteringPointChunkSize}...");
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+            .UseXellent(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
             .Options;
         await using var context = new XellentDbContext(dbOptions);
         var xellent = await SettlementCheck.ReadAsync(context, subjects, ct);
@@ -1061,7 +1061,7 @@ public class GenerateStateFromSettlRunner
         if (_sourceSnapshot is null)
         {
             var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-                .UseSqlServer(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+                .UseXellent(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
                 .Options;
             context = new XellentDbContext(dbOptions);
             Log("  Testing database connection...");
@@ -1680,7 +1680,7 @@ public class GenerateStateFromSettlRunner
                     .ToDictionary(g => g.Key, g => g.Select(s => s.Customer).Distinct(StringComparer.Ordinal).ToArray(),
                         StringComparer.Ordinal);
                 var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-                    .UseSqlServer(context.Database.GetConnectionString(),
+                    .UseXellent(context.Database.GetConnectionString(),
                         o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); }).Options;
                 await using var sliceContext = new XellentDbContext(dbOptions);
                 foreach (var portion in portions)
@@ -2223,7 +2223,7 @@ public class GenerateStateFromSettlRunner
         CancellationToken ct)
     {
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+            .UseXellent(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
             .Options;
         await using var context = new XellentDbContext(dbOptions);
 

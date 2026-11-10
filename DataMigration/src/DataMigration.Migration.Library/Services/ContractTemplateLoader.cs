@@ -34,7 +34,7 @@ public static class ContractTemplateLoader
         CancellationToken cancellationToken = default)
     {
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);

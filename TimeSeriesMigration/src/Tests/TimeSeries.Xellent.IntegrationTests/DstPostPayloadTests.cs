@@ -7,9 +7,10 @@ using TimeSeries.Core.Models;
 namespace TimeSeries.Xellent.IntegrationTests;
 
 /// <summary>
-/// End-to-end DST regression: extract a known MP from AXDB50_TEST across a DST-transition day,
-/// build the exact <c>SettlTimeSeriesRequestDto</c> that would be POST'ed to Settl, and
-/// snapshot the wire JSON against a committed golden.
+/// End-to-end DST regression: extract an MP across a DST-transition day from a seeded Xellent
+/// copy, build the exact <c>SettlTimeSeriesRequestDto</c> that would be POST'ed to Settl, and
+/// snapshot the wire JSON against a committed golden. The seed is the golden's own points (recorded
+/// from AXDB50_TEST) plus one point just outside the day on each side.
 /// <para>Proves that the full pipeline (Xellent → normalisation → wire payload) produces
 /// the correct UTC timestamps and carry-over values for spring-forward and fall-back days.</para>
 /// </summary>
@@ -34,16 +35,25 @@ public class DstPostPayloadTests : IntegrationTestBase
         WriteIndented = false
     };
 
+    // The UTC hours just outside each Danish day (00:00 local = 23:00Z in winter, 22:00Z in summer).
+    // Seeded with a value no golden point has, so a window that takes one in shows up as drift.
     [Fact]
     public Task SpringForward_PostPayloadMatchesGolden()
-        => RunDstDayAsync(new DateTime(2024, 3, 31), "spring-forward");
+        => RunDstDayAsync(new DateTime(2024, 3, 31), "spring-forward",
+            new DateTime(2024, 3, 30, 22, 0, 0), new DateTime(2024, 3, 31, 22, 0, 0));
 
     [Fact]
     public Task FallBack_PostPayloadMatchesGolden()
-        => RunDstDayAsync(new DateTime(2024, 10, 27), "fall-back");
+        => RunDstDayAsync(new DateTime(2024, 10, 27), "fall-back",
+            new DateTime(2024, 10, 26, 21, 0, 0), new DateTime(2024, 10, 27, 23, 0, 0));
 
-    private async Task RunDstDayAsync(DateTime localDay, string scenario)
+    private async Task RunDstDayAsync(DateTime localDay, string scenario, DateTime beforeUtc, DateTime afterUtc)
     {
+        var points = GoldenPoints(GoldenPath(scenario, "settl-post-payload.json"));
+        Assert.Equal(scenario == "spring-forward" ? 23 : 25, points.Count);
+        Seeder.SeedTimeSeriesPoints(MeteringPoint, DataMigration.Domain.TimeSeries.TimeResolution.Hour,
+            [(beforeUtc, 9.99m), .. points, (afterUtc, 9.99m)]);
+
         var fromLocal = DateTime.SpecifyKind(localDay, DateTimeKind.Unspecified);
         var toLocal = fromLocal.AddDays(1).AddTicks(-1);
 

@@ -48,7 +48,7 @@ public static class OwnerClusterSelector
         if (accounts.Count == 0) return [];
 
         var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql =>
+            .UseXellent(connectionString, sql =>
             {
                 sql.UseCompatibilityLevel(SqlCompatibilityLevel);
                 sql.CommandTimeout(CommandTimeoutSeconds);

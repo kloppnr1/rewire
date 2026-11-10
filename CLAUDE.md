@@ -17,12 +17,12 @@ Read the folder's own guide before changing it. The folder files still describe 
 
 ```powershell
 dotnet build rewire.slnx
-dotnet test XellentDomain/src/Tests/DataMigration.Core.Tests          # and each other unit test project
+dotnet test rewire.slnx
 ```
 
-Unit test projects: `DataMigration.Core.Tests`, `DataMigration.Domain.Tests`, `DataMigration.Domain.Engros.Tests`, `DataMigration.Domain.Xellent.Tests`, `DataMigration.SettlClient.Tests`, `DataMigration.Migration.Tests`, `DataMigration.OpsCli.Tests`, `TimeSeries.Core.Tests`, `TimeSeries.Cli.Tests`.
+Every test project is in `rewire.slnx` and runs on a clean clone: no VPN, no `testsettings.json`, no user-secrets. Unit test projects: `DataMigration.Core.Tests`, `DataMigration.Domain.Tests`, `DataMigration.Domain.Engros.Tests`, `DataMigration.Domain.Xellent.Tests`, `DataMigration.SettlClient.Tests`, `DataMigration.Migration.Tests`, `DataMigration.OpsCli.Tests`, `TimeSeries.Core.Tests`, `TimeSeries.Cli.Tests`.
 
-The three `*IntegrationTests` projects are not in `rewire.slnx`. They read Xellent and Settl, need the VPN and a `testsettings.json`, and have no skip without config. Run them one by one, never through `dotnet test rewire.slnx`.
+The two integration test projects, `DataMigration.OpsCli.IntegrationTests` and `TimeSeries.Xellent.IntegrationTests`, run whole flows against fakes: Xellent is SQLite in memory, Settl is an in-memory fake behind the real typed clients. They no longer touch the real Xellent or Settl. Some Settl tests pin what the code assumes about the API; see each project's README.
 
 CLI smoke: `dotnet run --project DataMigration/src/DataMigration.Migration -- --help`, the same for `DataMigration/src/DataMigration.OpsCli`, and `dotnet run --project TimeSeriesMigration/src/TimeSeries.Cli -- post --help --env featuretest` (TimeSeries.Cli loads config before it parses `--help`).
 

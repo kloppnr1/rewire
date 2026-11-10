@@ -111,7 +111,7 @@ public static class MeteringPointAccountResolver
                 new Dictionary<string, OwnerContract>(StringComparer.Ordinal));
 
         var contextOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
             .Options;
         await using var context = new XellentDbContext(contextOptions);
 
@@ -347,7 +347,7 @@ public static class MeteringPointAccountResolver
         var distinctInstNums = instNumByMpId.Values.Distinct(StringComparer.Ordinal).ToList();
 
         var contextOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
             .Options;
         await using var context = new XellentDbContext(contextOptions);
 

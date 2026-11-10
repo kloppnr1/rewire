@@ -29,7 +29,7 @@ internal static class RepairRawXellent
         DateOnly reference, IReadOnlyList<string> ignoredGroups, DateTime? restoreFrom, DateTime? restoreBefore,
         CancellationToken ct, MappingOptions? mappings = null)
     {
-        var options = new DbContextOptionsBuilder<XellentDbContext>().UseSqlServer(connection,
+        var options = new DbContextOptionsBuilder<XellentDbContext>().UseXellent(connection,
             sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(300); }).Options;
         await using var db = new XellentDbContext(options);
         await CaptureRowsAsync(store, db, new(1, dataArea, reference, ignoredGroups.ToArray(), restoreFrom, restoreBefore, mappings), ct);

@@ -27,7 +27,7 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
     {
         // GetMeteringPointsAsync is the discovery path in SettlApiContractTests.InitializeAsync
         // and in CreateRunner's link verification. Fails if Settl removes or paginates the endpoint.
-        if (fixture.MpCustomerId == Guid.Empty) { output.WriteLine("Skipping: MpCustomerId not discovered — no migrated MPs in featuretest"); return; }
+        if (fixture.MpCustomerId == Guid.Empty) { output.WriteLine("Skipping: MpCustomerId not discovered — no migrated MPs in the fake tenant"); return; }
 
         var (links, err) = await fixture.Settl.CustomerClient.GetMeteringPointsAsync(fixture.MpCustomerId);
         output.WriteLine($"Customer {fixture.MpCustomerId}: {links?.Count ?? 0} MP links. Error: {err}");
@@ -188,18 +188,18 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
         // GetContractMeteringPointsAsync maps Xellent contract → Settl contract GUID
         // and then verifies the link exists (idempotency check in create). If this endpoint
         // changes shape, contract-link step silently re-links already-linked MPs.
-        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in featuretest"); return; }
+        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in the fake tenant"); return; }
 
         var (mps, err) = await fixture.Settl.ContractClient.GetContractMeteringPointsAsync(fixture.FirstContractId);
         output.WriteLine($"Contract {fixture.FirstContractId}: {mps?.Count ?? 0} MP links. Error: {err}");
         Assert.True(mps != null, $"GetContractMeteringPointsAsync failed: {err}");
-        Assert.True(mps!.Count > 0, "First electricity contract has no MP links in featuretest");
+        Assert.True(mps!.Count > 0, "First electricity contract has no MP links in the fake tenant");
     }
 
     [Fact]
     public async Task ContractLinks_ContractMeteringPointInfoDto_HasMeteringPointId()
     {
-        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in featuretest"); return; }
+        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in the fake tenant"); return; }
 
         var (mps, _) = await fixture.Settl.ContractClient.GetContractMeteringPointsAsync(fixture.FirstContractId);
         Assert.True(mps?.Count > 0, "No MP links for first contract");
@@ -215,7 +215,7 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
         // MeteringPointIdentification in the contract link is used to cross-reference with
         // the Xellent metering point identification. If Settl drops this field, the cross-check
         // in generate-state falls back to pure GUID matching (misses unlinked MPs).
-        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in featuretest"); return; }
+        if (fixture.FirstContractId == Guid.Empty) { output.WriteLine("Skipping: No electricity contracts in the fake tenant"); return; }
 
         var (mps, _) = await fixture.Settl.ContractClient.GetContractMeteringPointsAsync(fixture.FirstContractId);
         Assert.True(mps?.Count > 0, "No MP links for first contract");
@@ -233,12 +233,12 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
     [Fact]
     public async Task WaterContractLinks_GetContractMeteringPoints_ReturnsItems()
     {
-        if (fixture.FirstWaterContractId == Guid.Empty) { output.WriteLine("Skipping: No water contracts in featuretest"); return; }
+        if (fixture.FirstWaterContractId == Guid.Empty) { output.WriteLine("Skipping: No water contracts in the fake tenant"); return; }
 
         var (mps, err) = await fixture.Settl.ContractClient.GetContractMeteringPointsAsync(fixture.FirstWaterContractId);
         output.WriteLine($"Water contract {fixture.FirstWaterContractId}: {mps?.Count ?? 0} MP links. Error: {err}");
         Assert.True(mps != null, $"GetContractMeteringPointsAsync failed: {err}");
-        Assert.True(mps!.Count > 0, "First water contract has no MP links in featuretest");
+        Assert.True(mps!.Count > 0, "First water contract has no MP links in the fake tenant");
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
         // EndDate=9999-12-31 (the open-ended sentinel) — NOT the Xellent contract part's
         // concrete end date. BuildContractLinkDto must honour link.OpenEnded regardless of
         // ContractPartEnddate. Bug: link.OpenEnded was ignored → Settl received e.g. 31.03.2026.
-        if (fixture.FirstWaterContractId == Guid.Empty) { output.WriteLine("Skipping: No water contracts in featuretest"); return; }
+        if (fixture.FirstWaterContractId == Guid.Empty) { output.WriteLine("Skipping: No water contracts in the fake tenant"); return; }
 
         var (mps, _) = await fixture.Settl.ContractClient.GetContractMeteringPointsAsync(fixture.FirstWaterContractId);
         Assert.True(mps?.Count > 0, "No MP links for first water contract — cannot verify end date");
@@ -261,7 +261,7 @@ public class SettlLinkContractTests(ContractTestProvisioningFixture fixture, ITe
             {
                 // Pre-fix link: created before BuildContractLinkDto honoured OpenEnded=true.
                 // The link has already ended in Settl — it's known drift, not a code regression.
-                output.WriteLine($"  (skipping: ended link from before OpenEnded fix — known featuretest drift)");
+                output.WriteLine($"  (skipping: ended link from before OpenEnded fix — known drift)");
                 continue;
             }
             Assert.True(mp.End.Year >= 9999,

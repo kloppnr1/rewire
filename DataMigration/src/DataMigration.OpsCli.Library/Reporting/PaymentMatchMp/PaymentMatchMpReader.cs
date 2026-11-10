@@ -21,7 +21,7 @@ public sealed class PaymentMatchMpReader(string connectionString) : IPaymentMatc
     public async Task<PaymentMpSnapshot> PaymentsAsync(IReadOnlySet<string> accounts, DateTime on, CancellationToken ct)
     {
         var options = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseSqlServer(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); }).Options;
+            .UseXellent(connectionString, sql => { sql.UseCompatibilityLevel(110); sql.CommandTimeout(120); }).Options;
         await using var db = new XellentDbContext(options);
         return await ReadSnapshotAsync(db, accounts, on, ct);
     }

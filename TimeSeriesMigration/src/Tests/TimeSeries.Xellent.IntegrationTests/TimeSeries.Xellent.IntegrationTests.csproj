@@ -14,14 +14,9 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="testsettings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -36,5 +31,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\TimeSeries.Migration\TimeSeries.Migration.csproj" />
+    <!-- The SQLite Xellent seeder lives with the unit tests. Referenced, not copied, so the two
+         suites seed Xellent the same way. -->
+    <ProjectReference Include="..\TimeSeries.Cli.Tests\TimeSeries.Cli.Tests.csproj" />
   </ItemGroup>
 </Project>

@@ -8,7 +8,8 @@ using TimeSeries.Core.Models;
 namespace TimeSeries.Xellent.IntegrationTests;
 
 /// <summary>
-/// End-to-end multi-resolution regression: extract a known MP from AXDB50_TEST across the
+/// End-to-end multi-resolution regression, on a seeded Xellent copy built from the goldens (recorded
+/// from AXDB50_TEST): extract an MP across the
 /// COMPANYID/resolution switch at the 2023→2024 year boundary, where Xellent holds the same MP
 /// as TWO EMS_TIMESERIES rows — an Hour-resolution row (ends 2023-12-31 22:00 UTC) and a
 /// Quarter-resolution row (starts 2023-12-31 23:00 UTC = 2024-01-01 00:00 CET).
@@ -43,9 +44,25 @@ public class ResolutionSegmentPayloadTests : IntegrationTestBase
         WriteIndented = false
     };
 
+    // The switch as Xellent holds it: the Hour series under one company, whose agreement ends on
+    // 31 Dec 2023, and the Quarter series under another, from 1 Jan 2024. Plus one point just before
+    // the window (Hour) and one just after it (Quarter), which must not be extracted.
+    private void SeedSwitch()
+    {
+        var hour = GoldenPoints(GoldenPath("hour", "settl-post-payload.json"));
+        var quarter = GoldenPoints(GoldenPath("quarter", "settl-post-payload.json"));
+        Seeder.SeedTimeSeriesPoints(MeteringPoint, DataMigration.Domain.TimeSeries.TimeResolution.Hour,
+            [(new DateTime(2023, 12, 30, 22, 0, 0), 9.99m), .. hour], companyId: "old",
+            agreementEnd: new DateTime(2023, 12, 31));
+        Seeder.SeedTimeSeriesPoints(MeteringPoint, DataMigration.Domain.TimeSeries.TimeResolution.Quarter,
+            [.. quarter, (new DateTime(2024, 1, 1, 23, 0, 0), 9.99m)], companyId: "new",
+            agreementStart: new DateTime(2024, 1, 1));
+    }
+
     [Fact]
     public async Task CountedSegments_MatchExtractedOutgoingCounts_AndSqlPrecisionCheck()
     {
+        SeedSwitch();
         var service = new TimeSeriesExtractionService(Context, DeliveryCategory, [MeteringPoint]);
         var extracted = (await service.ExtractTimeSeriesAsync([], FromLocal, ToLocal)).Single();
         var counted = await service.CountTimeSeriesAsync(MeteringPoint, FromLocal, ToLocal, null);
@@ -65,6 +82,7 @@ public class ResolutionSegmentPayloadTests : IntegrationTestBase
     [Fact]
     public async Task TwoResolutionSegments_EachPayloadMatchesGolden()
     {
+        SeedSwitch();
         var service = new TimeSeriesExtractionService(Context, DeliveryCategory, new[] { MeteringPoint });
         var extracted = await service.ExtractTimeSeriesAsync(Array.Empty<string>(), FromLocal, ToLocal);
         var mpTs = extracted.Single();

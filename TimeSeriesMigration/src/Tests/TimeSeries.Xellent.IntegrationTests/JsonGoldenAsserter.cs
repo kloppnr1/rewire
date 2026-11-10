@@ -82,6 +82,13 @@ public static class JsonGoldenAsserter
             && propertyName != null && IsRuntimeRandomProperty(propertyName)
             && (Guid.TryParse(s, out _) || DateTime.TryParse(s, out _)))
             return JsonValue.Create("<guid>");
+        // Numbers compare by value, not by how many trailing zeros the source kept: the goldens were
+        // recorded from SQL Server, whose numeric(28,12) column writes 0.120000000000; the SQLite
+        // copy writes 0.12. Settl reads both as the same number.
+        if (node is JsonValue number && number.GetValueKind() == JsonValueKind.Number
+            && decimal.TryParse(number.ToJsonString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            return JsonValue.Create(d / 1.0000000000000000000000000000m);
         return node;
     }
 

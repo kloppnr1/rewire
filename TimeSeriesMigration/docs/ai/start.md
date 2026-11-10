@@ -53,7 +53,7 @@ dotnet test src/Tests/TimeSeries.Core.Tests/TimeSeries.Core.Tests.csproj
 dotnet test src/Tests/TimeSeries.Cli.Tests/TimeSeries.Cli.Tests.csproj
 ```
 
-For extraction or Settl mapping changes, also run `dotnet test TimeSeries.Xellent.IntegrationTests.csproj` from `src/Tests/TimeSeries.Xellent.IntegrationTests/`. That project is deliberately outside the solution and requires corporate VPN plus local `testsettings.json` with `ConnectionStrings:TestConnection`; confirm it targets the test database before running. Inspect [integration setup](../../src/Tests/TimeSeries.Xellent.IntegrationTests/IntegrationTestBase.cs) and the [payload assertions](../../src/Tests/TimeSeries.Xellent.IntegrationTests/ResolutionSegmentPayloadTests.cs). Do not promote changed golden baselines without reviewing the behaviour change.
+For extraction or Settl mapping changes, also run `dotnet test TimeSeries.Xellent.IntegrationTests.csproj` from `src/Tests/TimeSeries.Xellent.IntegrationTests/`. It is in `rewire.slnx` and runs on a seeded SQLite copy of Xellent, so it needs no VPN or settings. Inspect [integration setup](../../src/Tests/TimeSeries.Xellent.IntegrationTests/IntegrationTestBase.cs) and the [payload assertions](../../src/Tests/TimeSeries.Xellent.IntegrationTests/ResolutionSegmentPayloadTests.cs). Do not promote changed golden baselines without reviewing the behaviour change.
 
 Then use the actual host for a parsing/configuration smoke check:
 

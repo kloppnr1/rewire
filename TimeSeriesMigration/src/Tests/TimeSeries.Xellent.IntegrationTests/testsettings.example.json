@@ -1,5 +1,0 @@
-{
-  "ConnectionStrings": {
-    "TestConnection": "Server=xel2012;Database=AXDB50_TEST;Integrated Security=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-  }
-}

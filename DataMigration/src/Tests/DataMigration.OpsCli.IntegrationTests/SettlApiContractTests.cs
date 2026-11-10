@@ -16,8 +16,8 @@ namespace DataMigration.OpsCli.IntegrationTests;
 /// or restructured a field our code relies on.</para>
 ///
 /// <para>Tests are purely read-only. Uses <see cref="ContractTestProvisioningFixture"/> which
-/// creates a dedicated customer + payer in featuretest on first run (no Xellent DB required)
-/// and discovers an existing electricity MP from featuretest migration runs.</para>
+/// creates a dedicated customer + payer in the fake Settl tenant (no Xellent DB required)
+/// and discovers the "migrated" electricity MP seeded there. Pins the shapes; does not check live Settl.</para>
 /// </summary>
 public class SettlApiContractTests(ContractTestProvisioningFixture fixture, ITestOutputHelper output)
     : IClassFixture<ContractTestProvisioningFixture>, IAsyncLifetime
@@ -334,7 +334,7 @@ public class SettlApiContractTests(ContractTestProvisioningFixture fixture, ITes
         var (contracts, err) = await fixture.Settl.ContractClient.FindContractsAsync(commodityType: "Electricity");
         Assert.True(contracts != null, $"FindContractsAsync failed: {err}");
         output.WriteLine($"Found {contracts!.Count} electricity contracts");
-        Assert.True(contracts.Count >= 1, "No electricity contracts found in featuretest — ContractNameResolver would fail");
+        Assert.True(contracts.Count >= 1, "No electricity contracts found in the fake tenant — ContractNameResolver would fail");
 
         var first = contracts[0];
         output.WriteLine($"First contract: {first.ContractName} ({first.CommodityType}) period start: {first.ContractPeriod?.Start}");
