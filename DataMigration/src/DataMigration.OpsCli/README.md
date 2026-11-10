@@ -4,7 +4,7 @@ Read-only ops CLI for migration reports, comparisons, and seed/state-data genera
 
 ## Payment-match rules
 
-For reports supplied with a list of MP IDs, see the [complete MobilePay and PBS rules](https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.MigrationDashboard?path=/README.md&version=GBmaster&_a=preview) under **MP-list payment reports: current rules**. They cover private and business agreement selection, cross-commodity searches, the water/heat business error, matching to Settl E-numbers and report fields.
+For reports supplied with a list of MP IDs (`payment-match-mp`), see the [complete MobilePay and PBS rules](../../docs/payment-match-mp.md). They cover private and business agreement selection, cross-commodity searches, the water/heat business error, matching to Settl E-numbers and report fields.
 
 ## Commands
 
@@ -16,7 +16,8 @@ For reports supplied with a list of MP IDs, see the [complete MobilePay and PBS 
 | `report-meter-info <profile>\|--accounts\|--scan` | Read-only TSV report af EstimatedAnnualVolume, type, meters og MeterReadingOccurrence — Settl vs Xellent. El-ekstern only. `--scan` bruger samme in-delivery-udvælgelse som `report-meteringpoints`. |
 | `report-delivery-start` | Read-only TSV report: MeteringPointIdentification + DeliveryStatus.Start for alle MPs i Settl |
 | `compare <profile>` | Compare extracted Xellent customers against Settl API |
-| `payment-match <profile> <csv> --type pbs\|mb` | Match Xellent agreements to the Settl payment export by metering point or joint invoice. PBS produces HTML, CSV and Excel; MobilePay produces handover Excel. In this CLI, PBS can inherit only from the explicitly referenced main contract on the same account when the owning contract has code 0; the main contract may belong to another commodity. The MP-list report has separate private/business selection rules in MigrationDashboard; those rules do not change this CLI. |
+| `payment-match <profile> <csv> --type pbs\|mb` | Match Xellent agreements to the Settl payment export by metering point or joint invoice. PBS produces HTML, CSV and Excel; MobilePay produces handover Excel. In this CLI, PBS can inherit only from the explicitly referenced main contract on the same account when the owning contract has code 0; the main contract may belong to another commodity. The MP-list report (`payment-match-mp`) has separate private/business selection rules; those rules do not change this command. |
+| `payment-match-mp <mp-list> <csv> --type pbs\|mb --cutover <yyyy-MM-dd>` | Match an explicit list of 18-digit metering point IDs against the Settl payment export. Ownership and agreements are read in Xellent on the day before cutover. Writes report, coverage and agreements CSVs (Excel BOM) to `--output` (default `./output`). Read-only; never calls Settl. `PaymentMatch:PbsWaterHeatRuleExcludedMeteringPoints` in appsettings lists the MPs allowed a PBS agreement from water/heat. [Rules](../../docs/payment-match-mp.md). |
 | `generate-seed <accounts>` | Generate seed data for regression tests fra Xellent DB og Settl API |
 | `generate-state <profiles> --profiles-dir <dir> --reference-date <date>` | Generate `migration-state.json` (tracking + invoices) for én eller flere profiler |
 | `pull-state-sources --env <environment> [--only all|invoices|contracts|xellent|settl] [--reference-date <yyyy-MM-dd>] [--output-dir <dir>]` | Save invoice and contract sources in one offline snapshot. `--reference-date` is required whenever Xellent contract data is pulled (`all`, `contracts`, or `xellent`). `--only xellent` or `--only settl` refreshes just that contract source without invoices. |

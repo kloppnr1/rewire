@@ -2380,6 +2380,53 @@ pbsMatchCommand.SetAction(async (parseResult, cancellationToken) =>
 
 rootCommand.Subcommands.Add(pbsMatchCommand);
 
+// === payment-match-mp command ===
+// The dashboard's "payment match by metering point list" (US 46004). Read-only: Xellent + two files in,
+// three CSVs out. Never calls Settl; --env only picks the Xellent database and labels the files.
+var paymentMpListArgument = new Argument<string>("mp-list") { Description = "File with 18-digit metering point IDs (one per line, or separated by comma/semicolon)" };
+var paymentMpCsvArgument = new Argument<string>("settl-csv") { Description = "Path to Settl 'Payment Agreement' CSV export" };
+var paymentMpTypeOption = new Option<string>("--type") { Description = "Payment method type: pbs or mb (MobilePay). Required.", Required = true };
+var paymentMpCutoverOption = new Option<DateOnly>("--cutover") { Description = "Cutover date (yyyy-MM-dd). Ownership and agreements are read on the day before. Required.", Required = true };
+var paymentMpOutputOption = new Option<string?>("--output", "-o") { Description = "Output directory for the CSVs (default: ./output)" };
+var paymentMpEnvOption = new Option<string>("--env") { Description = "Target environment (picks the Xellent database)" };
+
+var paymentMatchMpCommand = new Command("payment-match-mp", "Match an explicit metering point list against a Settl payment-agreement export (--type pbs|mb). Read-only.")
+{
+    paymentMpListArgument,
+    paymentMpCsvArgument,
+    paymentMpTypeOption,
+    paymentMpCutoverOption,
+    paymentMpOutputOption,
+    paymentMpEnvOption
+};
+
+paymentMatchMpCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    try
+    {
+        var runner = new DataMigration.OpsCli.Reporting.PaymentMatchMp.PaymentMatchMpRunner(
+            new DataMigration.OpsCli.Reporting.PaymentMatchMp.PaymentMatchMpReader(connectionString), config,
+            Console.WriteLine);
+        return await runner.RunAsync(
+            parseResult.GetValue(paymentMpListArgument)!,
+            parseResult.GetValue(paymentMpCsvArgument)!,
+            parseResult.GetValue(paymentMpTypeOption)!,
+            parseResult.GetValue(paymentMpCutoverOption),
+            settlEnv,
+            parseResult.GetValue(paymentMpOutputOption) ?? "output",
+            cancellationToken);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"ERROR: {ex.Message}");
+        Console.ResetColor();
+        return 1;
+    }
+});
+
+rootCommand.Subcommands.Add(paymentMatchMpCommand);
+
 // === report-delivery-start command ===
 var reportDeliveryStartEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production)" };
 var reportDeliveryStartIncludeChildrenOption = new Option<bool>("--include-children") { Description = "Inkluder child-målepunkter (springer normalt over)" };
