@@ -1,0 +1,458 @@
+{
+  "CustTables": [
+    {
+      "Accountnum": "446967",
+      "Dataareaid": "hol",
+      "Name": "Navnbw Navnh A/S",
+      "Address": "Fiktivvejbzm   3\n4900  Nakskov",
+      "Street": "Fiktivvejbzm   3",
+      "City": "Nakskov",
+      "Zipcode": "4900",
+      "Countryregionid": "DK",
+      "Phone": "",
+      "Cellularphone": "",
+      "Telefax": "",
+      "Email": "uk@df.example.dk",
+      "Companyregnum": "",
+      "Identificationnumber": "",
+      "Partytype": 2,
+      "Namealias": "Navnbw Navnh A/S",
+      "ExuCprDisponent1": "",
+      "Exualternativecustomernumber": "40944977",
+      "ExuAdditionalname": "",
+      "ExuCprDisponent2": "",
+      "ExuCvrDisponent1": "40944977",
+      "ExuCvrDisponent2": "40944977",
+      "Recid": 25637680926,
+      "Partyid": "696557",
+      "ExuTechnicgroup4": "LollandsBa"
+    }
+  ],
+  "ExuContractTables": [
+    {
+      "Contractnum": "10480399",
+      "Dataareaid": "hol",
+      "Custaccount": "446967",
+      "Name": "",
+      "Contractstartdate": "2023-01-01T00:00:00",
+      "Contractenddate": "2025-12-31T00:00:00",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 989999866,
+      "Pbstransactioncode": 3,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "5790002834875",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "Måned.",
+      "Billingbasis": 1,
+      "Contracttemplatenum": "V_Erhverv",
+      "Custcontactpersonid": "020668_003",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637960506
+    }
+  ],
+  "ExuContractPartTables": [
+    {
+      "Contractnum": "10480399",
+      "Instagreenum": "3083664",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2023-12-31T00:00:00",
+      "Amrcode": "10480399",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638260824
+    },
+    {
+      "Contractnum": "10480399",
+      "Instagreenum": "3083664",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-12-31T00:00:00",
+      "Amrcode": "10480399_4",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638372897
+    },
+    {
+      "Contractnum": "10480399",
+      "Instagreenum": "3083664",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2025-01-01T00:00:00",
+      "Enddate": "2025-12-31T00:00:00",
+      "Amrcode": "10480399_5",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638449392
+    }
+  ],
+  "DirPartyAddressRelationships": [
+    {
+      "Recid": 25638097810,
+      "Dataareaid": "hol",
+      "Partyid": "696557",
+      "Isprimary": 1,
+      "Validtodatetime": "2154-12-30T23:00:00"
+    }
+  ],
+  "DirPartyAddressRelationshi1066s": [
+    {
+      "Recid": 25638097810,
+      "Dataareaid": "hol",
+      "Addressrecid": 25638185867,
+      "Partyaddressrelationshiprecid": 25638097810
+    }
+  ],
+  "Addresses": [
+    {
+      "Recid": 25638185867,
+      "Dataareaid": "hol",
+      "Street": "Fiktivvejbzm   3",
+      "Zipcode": "4900",
+      "City": "Nakskov",
+      "Countryregionid": "DK",
+      "State": "",
+      "County": "",
+      "Addrtableid": 2303,
+      "ExuAddressid": "0a3f50b0-0ed6-32b8-e044-0003ba298018",
+      "FullAddress": "Fiktivvejbzm   3 4900 Nakskov"
+    }
+  ],
+  "ExuAgreementTables": [
+    {
+      "Agreementnum": "3083664",
+      "Dataareaid": "hol",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2025-12-31T00:00:00",
+      "Instbillingname": "",
+      "Street": "Fiktivvejif 3",
+      "Streetnum": "1932",
+      "Housenumstart": 3,
+      "Houseletterstart": "",
+      "Floor": "",
+      "Apartment": "",
+      "Zipcodeid": "4930",
+      "City": "Maribo",
+      "Addrlocation": "",
+      "Countycode": "",
+      "Country": "DK",
+      "Recid": 5637497659
+    }
+  ],
+  "ExuDelpoints": [
+    {
+      "Num": "1",
+      "DelParentdelpointnum": "",
+      "Extnum": "           2111254",
+      "Name": "E17",
+      "Deliverycategory": "El-Ekstern",
+      "Attachmentnum": "3083664",
+      "Companyid": "for",
+      "Custaccount": "",
+      "Streetnum": "1932",
+      "Countynum": "360",
+      "Zipcodeid": "4930",
+      "Meteringpoint": "571313185521112541",
+      "Addressstreet": "",
+      "Gsrn": "",
+      "Housenumstart": 3,
+      "Houseletterstart": "",
+      "Apartment": "",
+      "Floor": "",
+      "Addrlocation": "",
+      "Addressid": "767e08e6-8d69-456c-a4d5-04898891b5c8",
+      "EmsNetarea": "740",
+      "Powerexchangearea": "DK Øst",
+      "Dataareaid": "hol",
+      "Recid": 25637715281
+    }
+  ],
+  "ExuDelpointContactInfoTables": [
+    {
+      "Meteringpoint": "571313185521112541",
+      "Contacttype": 1,
+      "Startdate": "2023-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-12-31T00:00:00",
+      "Streetname": "Fiktivvejbzm",
+      "Housenumber": "3",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "4900",
+      "Addressid": "0a3f50b0-0ed6-32b8-e044-0003ba298018",
+      "Name1": "NAVNBW NAVNH A/S",
+      "Name2": "",
+      "Recid": 1747490
+    },
+    {
+      "Meteringpoint": "571313185521112541",
+      "Contacttype": 4,
+      "Startdate": "2023-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2023-05-25T00:00:00",
+      "Streetname": "Fiktivvejbzm",
+      "Housenumber": "3",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "4900",
+      "Addressid": "0a3f50b0-0ed6-32b8-e044-0003ba298018",
+      "Name1": "Navnbw Navnh A/S",
+      "Name2": "",
+      "Recid": 1747489
+    },
+    {
+      "Meteringpoint": "571313185521112541",
+      "Contacttype": 4,
+      "Startdate": "2023-05-26T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-02-13T00:00:00",
+      "Streetname": "Fiktivvejbzm",
+      "Housenumber": "3",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "4900",
+      "Addressid": "0a3f50b0-0ed6-32b8-e044-0003ba298018",
+      "Name1": "Navnbw Navnh A/S",
+      "Name2": "",
+      "Recid": 1819094
+    },
+    {
+      "Meteringpoint": "571313185521112541",
+      "Contacttype": 4,
+      "Startdate": "2025-02-14T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-12-31T00:00:00",
+      "Streetname": "Fiktivvejbzm",
+      "Housenumber": "3",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "4900",
+      "Addressid": "0a3f50b0-0ed6-32b8-e044-0003ba298018",
+      "Name1": "Navnbw Navnh A/S",
+      "Name2": "",
+      "Recid": 2116508
+    }
+  ],
+  "AddressZipCodes": [
+    {
+      "Zipcode": "4900",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Nakskov",
+      "Recid": 904
+    }
+  ],
+  "DirPartyECommunicationRela2608s": [
+    {
+      "Partyid": "696557",
+      "Status": 0,
+      "Priority": 1,
+      "Valuesrecid": 25637643591,
+      "Dataareaid": "hol",
+      "Recid": 25638343301
+    }
+  ],
+  "DirECommunicationAddresses": [
+    {
+      "Ecommunicationtypeid": "Email",
+      "Url": "",
+      "Email": "uk@df.example.dk",
+      "Phone": "",
+      "Dataareaid": "hol",
+      "Recid": 25637643591
+    }
+  ],
+  "EgsMeterpointTypecodeperiods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3083664",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meterpointtypecode": "FORB",
+      "Recid": 25637560696
+    }
+  ],
+  "ExuBillingMethodPeriods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3083664",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2154-12-31T00:00:00",
+      "Billingmethod": 3,
+      "Recid": 25637796759
+    }
+  ],
+  "ExuDelpoint2delpointrela25505s": [],
+  "ExuStreets": [
+    {
+      "Streetnum": "1932",
+      "Countynum": "846",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbs",
+      "Recid": 514188
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "791",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbt",
+      "Recid": 5637151148
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "101",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbu",
+      "Recid": 30021035486
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "270",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbv",
+      "Recid": 30021054910
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "306",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbw",
+      "Recid": 30021057653
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "360",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejif",
+      "Recid": 30021067812
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "376",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejbty",
+      "Recid": 30021071138
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "390",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejbhk",
+      "Recid": 30021072689
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "400",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbx",
+      "Recid": 30021073894
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "540",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcby",
+      "Recid": 30021088242
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "550",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcbz",
+      "Recid": 30021090828
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "580",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcca",
+      "Recid": 30021095850
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "630",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccb",
+      "Recid": 30021102818
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "706",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejwm",
+      "Recid": 30021108614
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "740",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccc",
+      "Recid": 30021115503
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "860",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccd",
+      "Recid": 30021144203
+    },
+    {
+      "Streetnum": "1932",
+      "Countynum": "665",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcce",
+      "Recid": 360255349737
+    }
+  ],
+  "ExuMeterTableTrades": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Agreementnum": "3083664",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meternum": "229430",
+      "Recid": 5637844256
+    }
+  ],
+  "ExuGroupTables": [
+    {
+      "Groupnum": "LollandsBa",
+      "Dataareaid": "hol"
+    }
+  ],
+  "ExuInstallations": [],
+  "ExuMeterJournalTrans": []
+}

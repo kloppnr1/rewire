@@ -1,0 +1,34 @@
+{
+  "Customer": {
+    "Id": "d2336c0d-cd29-4fc3-80f3-217d3a7a0adf",
+    "CustomerNumber": "448928",
+    "CountryCode": "DK",
+    "CustomerType": "Person",
+    "VatIdentificationNumber": null,
+    "NationalIdentificationNumber": "2001421442",
+    "FullName": "Navncw Navncx Navncy",
+    "Email": "ur@da.example.dk",
+    "PostalCode": "8960",
+    "City": "Randers S\u00D8"
+  },
+  "Payers": [],
+  "MeteringPoints": [
+    {
+      "Id": "ad706508-eb06-4787-a80f-82a6bdd78451",
+      "MeteringPointIdentification": "571313114900385351"
+    },
+    {
+      "Id": "2e62aaf9-d275-44e0-9393-3ad13a715668",
+      "MeteringPointIdentification": "571313113162716149"
+    },
+    {
+      "Id": "7335b653-3c0a-478c-b10c-24ed017a580b",
+      "MeteringPointIdentification": "571313114900838864"
+    },
+    {
+      "Id": "32f0656c-0b6d-417e-b33f-932bae209177",
+      "MeteringPointIdentification": "571313114900838871"
+    }
+  ],
+  "Contracts": []
+}

@@ -1,0 +1,15 @@
+{
+  "Name": "pilot-water-run1",
+  "Description": "Pilot water supply migration - first account",
+  "Accounts": ["104804"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": [
+      "104804"
+    ]
+  },
+  "Extraction": {
+    "DeliveryCategory": "Vand"
+  }
+}

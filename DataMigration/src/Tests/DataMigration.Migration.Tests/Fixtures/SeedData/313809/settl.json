@@ -1,0 +1,26 @@
+{
+  "Customer": {
+    "Id": "b49a2e6c-1f7c-459e-8af0-ce850f97d0ed",
+    "CustomerNumber": "313809",
+    "CountryCode": "DK",
+    "CustomerType": "Person",
+    "VatIdentificationNumber": null,
+    "NationalIdentificationNumber": "2605423084",
+    "FullName": "Navna Navnb Navnc",
+    "Email": "ua@da.example.dk",
+    "PostalCode": "8960",
+    "City": "Randers S\u00D8"
+  },
+  "Payers": [],
+  "MeteringPoints": [
+    {
+      "Id": "3edbd385-034f-453a-95e2-691da039b85e",
+      "MeteringPointIdentification": "571313114900358805"
+    },
+    {
+      "Id": "96b3acd8-033d-41ba-a457-e2662b02c703",
+      "MeteringPointIdentification": "571313114900948570"
+    }
+  ],
+  "Contracts": []
+}

@@ -1,0 +1,23 @@
+{
+  "Name": "test-run1",
+  "Description": "Test profile with explicit account list",
+  "StartingPayerId": 10254,
+
+  "Accounts": ["124797","403269"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["124797","403269"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {
+      "Verdo A/S": "E_FinansielPulje_Spot10_VerdoHoldingA/S"
+    },
+    "ProductNum": {}
+  }
+}

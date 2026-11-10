@@ -1,0 +1,17 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Base version. Pakke-version = VersionPrefix-VersionSuffix.
+         Default VersionSuffix=dev så lokal pack giver 0.7.8-dev (prerelease).
+         CI overrider med /p:VersionSuffix=preview.{BuildId} → 0.7.8-preview.{BuildId}.
+         Stable release (0.7.8) kræver explicit /p:VersionSuffix= (tom). -->
+    <VersionPrefix>0.8.62</VersionPrefix>
+    <VersionSuffix>dev</VersionSuffix>
+    <Authors>Verdo</Authors>
+    <Company>Verdo</Company>
+    <RepositoryUrl>https://verdo365.visualstudio.com/Verdo%20Agile%20Development/_git/NewSettlement.XellentDomain</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

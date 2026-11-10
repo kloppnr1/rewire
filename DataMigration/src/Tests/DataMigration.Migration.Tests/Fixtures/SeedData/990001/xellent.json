@@ -1,0 +1,283 @@
+{
+  "_comment": "Synthetic seed group. Every other group under SeedData is captured from live Xellent with 'generate-seed <account>'; this one is hand-written because no production metering point (EGS_METERPOINTTYPECODEPERIOD.METERPOINTTYPECODE = 'PROD') exists in any captured group, and picking a real PROD account requires a live lookup. Shape follows group 512812 one-for-one — one organisation, one El-Ekstern contract, one delivery point — with the type code set to PROD and METERINGPOINTDHSUBTYPE set to 1 (Physical) so both meter-characteristics fields are exercised end to end. Account number 990001 is not in any profile, so nothing else picks this group up.",
+  "CustTables": [
+    {
+      "Accountnum": "990001",
+      "Dataareaid": "hol",
+      "Name": "Navndj Navndk A/S",
+      "Address": "Fiktivvejewj  1\n8000  Aarhus C",
+      "Street": "Fiktivvejewj  1",
+      "City": "Aarhus C",
+      "Zipcode": "8000",
+      "Countryregionid": "DK",
+      "Phone": "",
+      "Cellularphone": "",
+      "Telefax": "",
+      "Email": "uy@dl.example.dk",
+      "Companyregnum": "",
+      "Identificationnumber": "",
+      "Partytype": 2,
+      "Namealias": "Navndj Navndk A/S",
+      "ExuCprDisponent1": "",
+      "Exualternativecustomernumber": "36665030",
+      "ExuAdditionalname": "",
+      "ExuCprDisponent2": "",
+      "ExuCvrDisponent1": "36665030",
+      "ExuCvrDisponent2": "36665030",
+      "Recid": 99000000001,
+      "Partyid": "990001",
+      "ExuTechnicgroup4": "TestProdGr"
+    }
+  ],
+  "ExuContractTables": [
+    {
+      "Contractnum": "99000001",
+      "Dataareaid": "hol",
+      "Custaccount": "990001",
+      "Name": "",
+      "Contractstartdate": "2020-01-01T00:00:00",
+      "Contractenddate": "1900-01-01T00:00:00",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 0,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "Måned.",
+      "Billingbasis": 1,
+      "Contracttemplatenum": "V_Erhverv",
+      "Custcontactpersonid": "",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 99000000002
+    }
+  ],
+  "ExuContractPartTables": [
+    {
+      "Contractnum": "99000001",
+      "Instagreenum": "9900001",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGSpot0",
+      "Startdate": "2020-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Amrcode": "ST 0055",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 99000000003
+    }
+  ],
+  "DirPartyAddressRelationships": [
+    {
+      "Recid": 99000000004,
+      "Dataareaid": "hol",
+      "Partyid": "990001",
+      "Isprimary": 1,
+      "Validtodatetime": "2154-12-30T23:00:00"
+    }
+  ],
+  "DirPartyAddressRelationshi1066s": [
+    {
+      "Recid": 99000000004,
+      "Dataareaid": "hol",
+      "Addressrecid": 99000000005,
+      "Partyaddressrelationshiprecid": 99000000004
+    }
+  ],
+  "Addresses": [
+    {
+      "Recid": 99000000005,
+      "Dataareaid": "hol",
+      "Street": "Fiktivvejewj  1",
+      "Zipcode": "8000",
+      "City": "Aarhus C",
+      "Countryregionid": "DK",
+      "State": "",
+      "County": "",
+      "Addrtableid": 2303,
+      "ExuAddressid": "11111111-2222-3333-4444-555555555555",
+      "FullAddress": "Fiktivvejewj  1 8000 Aarhus C"
+    }
+  ],
+  "ExuAgreementTables": [
+    {
+      "Agreementnum": "9900001",
+      "Dataareaid": "hol",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Startdate": "2020-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Instbillingname": "",
+      "Street": "Fiktivvejewj",
+      "Streetnum": "9001",
+      "Housenumstart": 1,
+      "Houseletterstart": "",
+      "Floor": "",
+      "Apartment": "",
+      "Zipcodeid": "8000",
+      "City": "Aarhus C",
+      "Addrlocation": "",
+      "Countycode": "",
+      "Country": "DK",
+      "Recid": 99000000006
+    }
+  ],
+  "ExuDelpoints": [
+    {
+      "Num": "1",
+      "DelParentdelpointnum": "",
+      "Extnum": "           9900001",
+      "Name": "E18",
+      "Deliverycategory": "El-Ekstern",
+      "Attachmentnum": "9900001",
+      "Companyid": "for",
+      "Custaccount": "",
+      "Streetnum": "9001",
+      "Countynum": "751",
+      "Zipcodeid": "8000",
+      "Meteringpoint": "571313199000000017",
+      "Addressstreet": "",
+      "Gsrn": "",
+      "Housenumstart": 1,
+      "Houseletterstart": "",
+      "Apartment": "",
+      "Floor": "",
+      "Addrlocation": "",
+      "Addressid": "66666666-7777-8888-9999-aaaaaaaaaaaa",
+      "EmsNetarea": "131",
+      "Powerexchangearea": "DK Vest",
+      "Dataareaid": "hol",
+      "Recid": 99000000007
+    }
+  ],
+  "ExuDelpointContactInfoTables": [
+    {
+      "Meteringpoint": "571313199000000017",
+      "Contacttype": 1,
+      "Startdate": "2020-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejewj",
+      "Housenumber": "1",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8000",
+      "Addressid": "11111111-2222-3333-4444-555555555555",
+      "Name1": "Navndj Navndk A/S",
+      "Name2": "Navndj Navndk A/S",
+      "Recid": 99000000008
+    },
+    {
+      "Meteringpoint": "571313199000000017",
+      "Contacttype": 4,
+      "Startdate": "2020-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejewj",
+      "Housenumber": "1",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "8000",
+      "Addressid": "11111111-2222-3333-4444-555555555555",
+      "Name1": "Navndj Navndk A/S",
+      "Name2": "Navndj Navndk A/S",
+      "Recid": 99000000009
+    }
+  ],
+  "AddressZipCodes": [
+    {
+      "Zipcode": "8000",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Aarhus C",
+      "Recid": 99000000010
+    }
+  ],
+  "DirPartyECommunicationRela2608s": [
+    {
+      "Partyid": "990001",
+      "Status": 0,
+      "Priority": 1,
+      "Valuesrecid": 99000000011,
+      "Dataareaid": "hol",
+      "Recid": 99000000012
+    }
+  ],
+  "DirECommunicationAddresses": [
+    {
+      "Ecommunicationtypeid": "Email",
+      "Url": "",
+      "Email": "uy@dl.example.dk",
+      "Phone": "",
+      "Dataareaid": "hol",
+      "Recid": 99000000011
+    }
+  ],
+  "EgsMeterpointTypecodeperiods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "9900001",
+      "Delpointnum": "1",
+      "Startdate": "2020-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meterpointtypecode": "PROD",
+      "Recid": 99000000013
+    }
+  ],
+  "ExuBillingMethodPeriods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "9900001",
+      "Delpointnum": "1",
+      "Startdate": "2020-01-01T00:00:00",
+      "Enddate": "2154-12-31T00:00:00",
+      "Billingmethod": 3,
+      "Recid": 99000000014
+    }
+  ],
+  "ExuDelpoint2delpointrela25505s": [],
+  "ExuStreets": [
+    {
+      "Streetnum": "9001",
+      "Countynum": "751",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejewj",
+      "Recid": 99000000015
+    }
+  ],
+  "ExuMeterTableTrades": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Agreementnum": "9900001",
+      "Delpointnum": "1",
+      "Startdate": "2020-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meternum": "99001234",
+      "MeteringPointDhSubType": 1,
+      "Recid": 99000000016
+    }
+  ],
+  "ExuGroupTables": [
+    {
+      "Groupnum": "TestProdGr",
+      "Dataareaid": "hol"
+    }
+  ],
+  "ExuInstallations": [],
+  "ExuMeterJournalTrans": []
+}

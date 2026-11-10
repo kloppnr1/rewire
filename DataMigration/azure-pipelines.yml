@@ -1,0 +1,351 @@
+# Service deployment pipeline for DataMigration source repo
+# Push til master: build, test, deploy Migration + OpsCli til Staging og Production
+# Manuel kørsel: build, test, deploy selected services til Staging og Production
+#
+# Library NuGets pakkes af azure-pipelines-libs.yml (separat pipeline).
+#
+# NOTE: MigrationDashboard (Windows Service) er flyttet til NewSettlement.MigrationDashboard
+# (projekt Dashboard.Api). Den deploys herfra er fjernet 2026-05-13 efter cutover.
+# PDF/Tracking/Notes services har flyttet til NewSettlement.MigrationOps.
+
+trigger:
+  branches:
+    include:
+      - master
+
+pr: none
+
+parameters:
+  - name: deployMigration
+    displayName: 'Deploy Migration'
+    type: boolean
+    default: true
+
+  # OpsCli ported from NewSettlement.MigrationOps (Plan A, 2026-04-15).
+  # This repo is now the single owner of C:\Services\DataMigration\OpsCli\.
+  # MO's pipeline has the matching deployOpsCli parameter pinned to false.
+  - name: deployOpsCli
+    displayName: 'Deploy OpsCli'
+    type: boolean
+    default: true
+
+
+stages:
+  # Stage 1: Build, Test, and Publish artifacts
+  - stage: Build
+    displayName: 'Build & Test'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'Build & Test'
+        pool:
+          vmImage: 'windows-latest'
+        timeoutInMinutes: 30
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Install .NET 9.0'
+            inputs:
+              version: '9.0.x'
+              includePreviewVersions: false
+
+          - task: NuGetAuthenticate@1
+            displayName: 'Authenticate to Azure Artifacts'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: 'DataMigration.sln'
+              feedsToUse: 'config'
+              nugetConfigPath: 'nuget.config'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build solution'
+            inputs:
+              command: 'build'
+              projects: 'DataMigration.sln'
+              arguments: '--configuration Release --no-restore'
+
+          # Runs ALL test projects in the solution — no separate list to maintain.
+          # To add a test project to CI: add it to DataMigration.sln.
+          # To exclude a test project from CI: keep it out of the sln (e.g. XellentData.Tests).
+          - task: DotNetCoreCLI@2
+            displayName: 'Run tests'
+            inputs:
+              command: 'test'
+              projects: 'DataMigration.sln'
+              arguments: '--configuration Release --no-build'
+              publishTestResults: true
+
+          # Library NuGets pakkes og pushes af azure-pipelines-libs.yml — IKKE her.
+
+          # Publish CLI artifacts for deployment
+          - powershell: |
+              $artifact = "$(Build.ArtifactStagingDirectory)"
+              # VersionSuffix så de deployede CLI'ers AssemblyInformationalVersion bliver
+              # preview.{BuildId} i stedet for default 'dev' (samme grund som i libs-pipelinen).
+              dotnet publish src/DataMigration.Migration -c Release -r win-x64 --self-contained true -o "$artifact/Migration" /p:VersionSuffix=preview.$(Build.BuildId)
+              dotnet publish src/DataMigration.OpsCli -c Release -r win-x64 --self-contained true -o "$artifact/OpsCli" /p:VersionSuffix=preview.$(Build.BuildId)
+
+              # Reconcile general mappings travel in the artifact — deploy runs on the server with
+              # no repo checkout, so they must ride along to reach the persistent profiles dir.
+              New-Item -Path "$artifact/profiles" -ItemType Directory -Force | Out-Null
+              Copy-Item src/profiles/reconcile "$artifact/profiles/" -Recurse -Force
+            displayName: 'Publish CLIs'
+
+          - publish: $(Build.ArtifactStagingDirectory)
+            artifact: cli-publish
+            displayName: 'Upload CLI artifacts'
+
+  # Stage 2: Deploy to Staging
+  - stage: Deploy_Staging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: succeeded()
+    variables:
+      - group: DataMigration-Staging
+    jobs:
+      - deployment: DeployToStaging
+        displayName: 'Deploy to svdkra1vudv03'
+        environment: 'Bifrost-Staging'
+        pool:
+          name: 'LocalServers'
+          demands:
+            - Agent.ComputerName -equals svdkra1vudv03
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: cli-publish
+
+                # --- Migration ---
+                - ${{ if eq(parameters.deployMigration, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/Migration"
+                      $dataDir = "C:\Services\DataMigration\data"
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+                      $settings.ConnectionStrings.XellentDatabase = "Server=xel2012;Database=AXDB50_TEST;Integrated Security=True;TrustServerCertificate=True;"
+
+                      # Inject Settl secrets — STAGING: only featuretest
+                      # Secrets must be read from env: mapping; inline $(...) macro does not expand secret variables.
+                      $settings.SettlApi.Environments.featuretest.SubscriptionKey = $env:SETTL_FT_SUBKEY
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientId = $env:SETTL_FT_CLIENTID
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientSecret = $env:SETTL_FT_CLIENTSECRET
+                      $settings.SettlApi.Environments.featuretest.Credentials.Username = $env:SETTL_FT_USERNAME
+                      $settings.SettlApi.Environments.featuretest.Credentials.Password = $env:SETTL_FT_PASSWORD
+
+                      # Patch ProfilesDirectory to absolute path (shared with Dashboard)
+                      if (-not $settings.Infrastructure) { $settings | Add-Member -NotePropertyName Infrastructure -NotePropertyValue (New-Object PSObject) }
+                      $settings.Infrastructure | Add-Member -NotePropertyName ProfilesDirectory -NotePropertyValue "$dataDir\profiles" -Force
+
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path "$dataDir\profiles" -ItemType Directory -Force | Out-Null
+                      $target = "C:\Services\DataMigration\Migration"
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "Migration deployed to $target"
+                    displayName: 'Migration: Deploy'
+                    env:
+                      SETTL_FT_SUBKEY: $(Settl_featuretest_SubscriptionKey)
+                      SETTL_FT_CLIENTID: $(Settl_featuretest_ClientId)
+                      SETTL_FT_CLIENTSECRET: $(Settl_featuretest_ClientSecret)
+                      SETTL_FT_USERNAME: $(Settl_featuretest_Username)
+                      SETTL_FT_PASSWORD: $(Settl_featuretest_Password)
+
+                # --- OpsCli ---
+                - ${{ if eq(parameters.deployOpsCli, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/OpsCli"
+                      $target = "C:\Services\DataMigration\OpsCli"
+                      $dataDir = "C:\Services\DataMigration\data"
+
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+                      $settings.ConnectionStrings.XellentDatabase = "Server=xel2012;Database=AXDB50_TEST;Integrated Security=True;TrustServerCertificate=True;"
+
+                      # Inject Settl secrets — STAGING: only featuretest
+                      # Secrets must be read from env: mapping; inline $(...) macro does not expand secret variables.
+                      $settings.SettlApi.Environments.featuretest.SubscriptionKey = $env:SETTL_FT_SUBKEY
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientId = $env:SETTL_FT_CLIENTID
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientSecret = $env:SETTL_FT_CLIENTSECRET
+                      $settings.SettlApi.Environments.featuretest.Credentials.Username = $env:SETTL_FT_USERNAME
+                      $settings.SettlApi.Environments.featuretest.Credentials.Password = $env:SETTL_FT_PASSWORD
+
+                      if (-not $settings.Infrastructure) { $settings | Add-Member -NotePropertyName Infrastructure -NotePropertyValue (New-Object PSObject) }
+                      $settings.Infrastructure | Add-Member -NotePropertyName ProfilesDirectory -NotePropertyValue "$dataDir\profiles" -Force
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path "$dataDir\profiles" -ItemType Directory -Force | Out-Null
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "OpsCli deployed to $target"
+
+                      # Reconcile general mappings (per dataarea) — repo-owned, deployed into the
+                      # persistent profiles dir. Only the reconcile\ subdir is touched; the
+                      # manually-managed account profiles are left untouched.
+                      $reconcileSrc = "$(Pipeline.Workspace)/cli-publish/profiles/reconcile"
+                      if (Test-Path $reconcileSrc) {
+                        New-Item -Path "$dataDir\profiles\reconcile" -ItemType Directory -Force | Out-Null
+                        Copy-Item "$reconcileSrc\*" "$dataDir\profiles\reconcile" -Recurse -Force
+                        Write-Host "Reconcile mappings deployed to $dataDir\profiles\reconcile"
+                      }
+                    displayName: 'OpsCli: Deploy'
+                    env:
+                      SETTL_FT_SUBKEY: $(Settl_featuretest_SubscriptionKey)
+                      SETTL_FT_CLIENTID: $(Settl_featuretest_ClientId)
+                      SETTL_FT_CLIENTSECRET: $(Settl_featuretest_ClientSecret)
+                      SETTL_FT_USERNAME: $(Settl_featuretest_Username)
+                      SETTL_FT_PASSWORD: $(Settl_featuretest_Password)
+
+                # MigrationDashboard deploy fjernet 2026-05-13 — Dashboard.Api lever nu i
+                # NewSettlement.MigrationDashboard repo'et og deploys derfra.
+
+
+  # Stage 3: Deploy to Production after Staging succeeds
+  - stage: Deploy_Production
+    displayName: 'Deploy to Production'
+    dependsOn: Deploy_Staging
+    condition: succeeded()
+    variables:
+      - group: DataMigration-Production
+    jobs:
+      - deployment: DeployToProduction
+        displayName: 'Deploy to SVDKRA1VBIFROST'
+        environment: 'Bifrost-Production'
+        pool:
+          name: 'LocalServers'
+          demands:
+            - Agent.ComputerName -equals SVDKRA1VBIFROST
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: cli-publish
+
+                # --- Migration ---
+                - ${{ if eq(parameters.deployMigration, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/Migration"
+                      $dataDir = "C:\Services\DataMigration\data"
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+                      $settings.ConnectionStrings.XellentDatabase = "Server=xel2012;Database=AXDB50;Integrated Security=True;TrustServerCertificate=True;"
+
+                      # Inject Settl secrets — PRODUCTION
+                      # Secrets must be read from env: mapping; inline $(...) macro does not expand secret variables.
+                      $settings.SettlApi.Environments.production.SubscriptionKey = $env:SETTL_PROD_SUBKEY
+                      $settings.SettlApi.Environments.production.Credentials.ClientId = $env:SETTL_PROD_CLIENTID
+                      $settings.SettlApi.Environments.production.Credentials.ClientSecret = $env:SETTL_PROD_CLIENTSECRET
+                      $settings.SettlApi.Environments.production.Credentials.Username = $env:SETTL_PROD_USERNAME
+                      $settings.SettlApi.Environments.production.Credentials.Password = $env:SETTL_PROD_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-vhel'.SubscriptionKey = $env:SETTL_VHEL_SUBKEY
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientId = $env:SETTL_VHEL_CLIENTID
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientSecret = $env:SETTL_VHEL_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Username = $env:SETTL_VHEL_USERNAME
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Password = $env:SETTL_VHEL_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-hev'.SubscriptionKey = $env:SETTL_HEV_SUBKEY
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientId = $env:SETTL_HEV_CLIENTID
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientSecret = $env:SETTL_HEV_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Username = $env:SETTL_HEV_USERNAME
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Password = $env:SETTL_HEV_PASSWORD
+
+                      # Patch ProfilesDirectory to absolute path (shared with Dashboard)
+                      if (-not $settings.Infrastructure) { $settings | Add-Member -NotePropertyName Infrastructure -NotePropertyValue (New-Object PSObject) }
+                      $settings.Infrastructure | Add-Member -NotePropertyName ProfilesDirectory -NotePropertyValue "$dataDir\profiles" -Force
+
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path "$dataDir\profiles" -ItemType Directory -Force | Out-Null
+                      $target = "C:\Services\DataMigration\Migration"
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "Migration deployed to $target"
+                    displayName: 'Migration: Deploy'
+                    env:
+                      SETTL_PROD_SUBKEY: $(Settl_production_SubscriptionKey)
+                      SETTL_PROD_CLIENTID: $(Settl_production_ClientId)
+                      SETTL_PROD_CLIENTSECRET: $(Settl_production_ClientSecret)
+                      SETTL_PROD_USERNAME: $(Settl_production_Username)
+                      SETTL_PROD_PASSWORD: $(Settl_production_Password)
+                      SETTL_VHEL_SUBKEY: $(Settl_production_vhel_SubscriptionKey)
+                      SETTL_VHEL_CLIENTID: $(Settl_production_vhel_ClientId)
+                      SETTL_VHEL_CLIENTSECRET: $(Settl_production_vhel_ClientSecret)
+                      SETTL_VHEL_USERNAME: $(Settl_production_vhel_Username)
+                      SETTL_VHEL_PASSWORD: $(Settl_production_vhel_Password)
+                      SETTL_HEV_SUBKEY: $(Settl_production_hev_SubscriptionKey)
+                      SETTL_HEV_CLIENTID: $(Settl_production_hev_ClientId)
+                      SETTL_HEV_CLIENTSECRET: $(Settl_production_hev_ClientSecret)
+                      SETTL_HEV_USERNAME: $(Settl_production_hev_Username)
+                      SETTL_HEV_PASSWORD: $(Settl_production_hev_Password)
+
+                # --- OpsCli ---
+                - ${{ if eq(parameters.deployOpsCli, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/OpsCli"
+                      $target = "C:\Services\DataMigration\OpsCli"
+                      $dataDir = "C:\Services\DataMigration\data"
+
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+                      $settings.ConnectionStrings.XellentDatabase = "Server=xel2012;Database=AXDB50;Integrated Security=True;TrustServerCertificate=True;"
+
+                      # Inject Settl secrets — PRODUCTION
+                      # Secrets must be read from env: mapping; inline $(...) macro does not expand secret variables.
+                      $settings.SettlApi.Environments.production.SubscriptionKey = $env:SETTL_PROD_SUBKEY
+                      $settings.SettlApi.Environments.production.Credentials.ClientId = $env:SETTL_PROD_CLIENTID
+                      $settings.SettlApi.Environments.production.Credentials.ClientSecret = $env:SETTL_PROD_CLIENTSECRET
+                      $settings.SettlApi.Environments.production.Credentials.Username = $env:SETTL_PROD_USERNAME
+                      $settings.SettlApi.Environments.production.Credentials.Password = $env:SETTL_PROD_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-vhel'.SubscriptionKey = $env:SETTL_VHEL_SUBKEY
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientId = $env:SETTL_VHEL_CLIENTID
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientSecret = $env:SETTL_VHEL_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Username = $env:SETTL_VHEL_USERNAME
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Password = $env:SETTL_VHEL_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-hev'.SubscriptionKey = $env:SETTL_HEV_SUBKEY
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientId = $env:SETTL_HEV_CLIENTID
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientSecret = $env:SETTL_HEV_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Username = $env:SETTL_HEV_USERNAME
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Password = $env:SETTL_HEV_PASSWORD
+
+                      if (-not $settings.Infrastructure) { $settings | Add-Member -NotePropertyName Infrastructure -NotePropertyValue (New-Object PSObject) }
+                      $settings.Infrastructure | Add-Member -NotePropertyName ProfilesDirectory -NotePropertyValue "$dataDir\profiles" -Force
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path "$dataDir\profiles" -ItemType Directory -Force | Out-Null
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "OpsCli deployed to $target"
+
+                      # Reconcile general mappings (per dataarea) — repo-owned, deployed into the
+                      # persistent profiles dir. Only the reconcile\ subdir is touched; the
+                      # manually-managed account profiles are left untouched.
+                      $reconcileSrc = "$(Pipeline.Workspace)/cli-publish/profiles/reconcile"
+                      if (Test-Path $reconcileSrc) {
+                        New-Item -Path "$dataDir\profiles\reconcile" -ItemType Directory -Force | Out-Null
+                        Copy-Item "$reconcileSrc\*" "$dataDir\profiles\reconcile" -Recurse -Force
+                        Write-Host "Reconcile mappings deployed to $dataDir\profiles\reconcile"
+                      }
+                    displayName: 'OpsCli: Deploy'
+                    env:
+                      SETTL_PROD_SUBKEY: $(Settl_production_SubscriptionKey)
+                      SETTL_PROD_CLIENTID: $(Settl_production_ClientId)
+                      SETTL_PROD_CLIENTSECRET: $(Settl_production_ClientSecret)
+                      SETTL_PROD_USERNAME: $(Settl_production_Username)
+                      SETTL_PROD_PASSWORD: $(Settl_production_Password)
+                      SETTL_VHEL_SUBKEY: $(Settl_production_vhel_SubscriptionKey)
+                      SETTL_VHEL_CLIENTID: $(Settl_production_vhel_ClientId)
+                      SETTL_VHEL_CLIENTSECRET: $(Settl_production_vhel_ClientSecret)
+                      SETTL_VHEL_USERNAME: $(Settl_production_vhel_Username)
+                      SETTL_VHEL_PASSWORD: $(Settl_production_vhel_Password)
+                      SETTL_HEV_SUBKEY: $(Settl_production_hev_SubscriptionKey)
+                      SETTL_HEV_CLIENTID: $(Settl_production_hev_ClientId)
+                      SETTL_HEV_CLIENTSECRET: $(Settl_production_hev_ClientSecret)
+                      SETTL_HEV_USERNAME: $(Settl_production_hev_Username)
+                      SETTL_HEV_PASSWORD: $(Settl_production_hev_Password)
+
+                # MigrationDashboard deploy fjernet 2026-05-13 — Dashboard.Api lever nu i
+                # NewSettlement.MigrationDashboard repo'et og deploys derfra.
+

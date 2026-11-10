@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DataMigration.Migration</RootNamespace>
+    <AssemblyName>DataMigration.Migration.Library</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.DataMigration.Migration</PackageId>
+    <Description>Reusable migration runner library extracted from NewSettlement.DataMigration. Contains CreateRunner, SettlMappingService, and supporting domain/profile services for hosting the migration pipeline in-process (e.g., from MigrationDashboard).</Description>
+    <PackageProjectUrl>https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.DataMigration</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataMigration.Migration" />
+    <InternalsVisibleTo Include="DataMigration.OpsCli" />
+    <InternalsVisibleTo Include="DataMigration.Api" />
+    <InternalsVisibleTo Include="DataMigration.Migration.Tests" />
+    <InternalsVisibleTo Include="DataMigration.Xellent.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Core\DataMigration.Core.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain.Xellent\DataMigration.Domain.Xellent.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlClient\DataMigration.SettlClient.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

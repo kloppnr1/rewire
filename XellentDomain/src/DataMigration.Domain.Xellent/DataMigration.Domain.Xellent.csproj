@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.XellentDomain.Domain.Xellent</PackageId>
+    <Description>Xellent (Dynamics AX 2009) loader that maps Xellent entities into the source-agnostic domain model.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataMigration.Domain.Xellent.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataMigration.Core\DataMigration.Core.csproj" />
+    <ProjectReference Include="..\DataMigration.Domain\DataMigration.Domain.csproj" />
+    <ProjectReference Include="..\DataMigration.Domain.Engros\DataMigration.Domain.Engros.csproj" />
+    <ProjectReference Include="..\DataMigration.Domain.TimeSeries\DataMigration.Domain.TimeSeries.csproj" />
+    <ProjectReference Include="..\DataMigration.XellentData\DataMigration.XellentData.csproj" />
+  </ItemGroup>
+
+</Project>

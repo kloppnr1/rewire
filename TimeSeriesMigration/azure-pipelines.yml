@@ -1,0 +1,232 @@
+# Unified deployment pipeline for NewSettlement.TimeSeriesMigration
+# Push to develop: build + pack TimeSeries NuGets (Migration + Core) + deploy TimeSeriesCli to Staging (svdkra1vudv03)
+# Push to master:  build + pack NuGets + deploy CLI to Production (SVDKRA1VBIFROST)
+# Manual run:      build + deploy CLI to chosen environment
+#
+# Deploy target:
+#   C:\Services\DataMigration\TimeSeriesCli\               (CLI)
+#
+# Dashboard.Api (Windows Service) er flyttet til NewSettlement.MigrationDashboard repo
+# og deploys derfra. Denne pipeline pakker stadig TimeSeries.Migration + TimeSeries.Core
+# som NuGets, så Dashboard.Api kan referere dem.
+
+trigger:
+  - master
+  - develop
+
+pr: none
+
+parameters:
+  - name: environment
+    displayName: 'Deploy to'
+    type: string
+    default: 'Staging'
+    values:
+      - Staging
+      - Production
+
+  - name: deployTimeSeriesCli
+    displayName: 'Deploy TimeSeriesCli'
+    type: boolean
+    default: true
+
+
+stages:
+  # Stage 1: Build, pack NuGet, publish artifacts
+  - stage: Build
+    displayName: 'Build'
+    jobs:
+      - job: BuildAndPublish
+        displayName: 'Build & Publish'
+        pool:
+          vmImage: 'windows-latest'
+        timeoutInMinutes: 20
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Install .NET 9.0'
+            inputs:
+              version: '9.0.x'
+              includePreviewVersions: false
+
+          - task: NuGetAuthenticate@1
+            displayName: 'Authenticate to Azure Artifacts'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              feedsToUse: 'config'
+              nugetConfigPath: 'nuget.config'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build solution'
+            inputs:
+              command: 'build'
+              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              arguments: '--configuration Release --no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Run tests'
+            inputs:
+              command: 'test'
+              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              arguments: '--configuration Release --no-build'
+              publishTestResults: true
+
+          # Pack + push NuGets (Core + Migration) til NewSettlement-feed.
+          # VersionPrefix lever i Directory.Build.props (0.1.0); CI tilfojer
+          # VersionSuffix=preview.{BuildId} -> 0.1.0-preview.{BuildId} (unik per commit).
+          - powershell: |
+              $artifact = "$(Build.ArtifactStagingDirectory)"
+              dotnet pack src/TimeSeries.Core/TimeSeries.Core.csproj `
+                -c Release --no-build -o "$artifact/nuget" `
+                /p:VersionSuffix=preview.$(Build.BuildId)
+              dotnet pack src/TimeSeries.Migration/TimeSeries.Migration.csproj `
+                -c Release --no-build -o "$artifact/nuget" `
+                /p:VersionSuffix=preview.$(Build.BuildId)
+            displayName: 'Pack TimeSeries NuGets'
+
+          - task: NuGetCommand@2
+            displayName: 'Push TimeSeries NuGets'
+            condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), eq(variables['Build.SourceBranch'], 'refs/heads/master')))
+            inputs:
+              command: 'push'
+              packagesToPush: '$(Build.ArtifactStagingDirectory)/nuget/*.nupkg'
+              nuGetFeedType: 'internal'
+              publishVstsFeed: 'Verdo Agile Development/NewSettlement'
+              # BuildId garanterer unik version per commit; konflikt = reelt bug.
+              allowPackageConflicts: false
+
+          - powershell: |
+              $artifact = "$(Build.ArtifactStagingDirectory)"
+              dotnet publish src/TimeSeries.Cli -c Release -r win-x64 --self-contained true -o "$artifact/TimeSeriesCli"
+            displayName: 'Publish TimeSeriesCli'
+
+          - publish: $(Build.ArtifactStagingDirectory)
+            artifact: cli-publish
+            displayName: 'Upload artifact'
+
+  # Stage 2: Deploy to Staging
+  - stage: Deploy_Staging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), and(eq(variables['Build.Reason'], 'Manual'), eq('${{ parameters.environment }}', 'Staging'))))
+    variables:
+      - group: DataMigration-Staging
+    jobs:
+      - deployment: DeployToStaging
+        displayName: 'Deploy to svdkra1vudv03'
+        environment: 'Bifrost-Staging'
+        pool:
+          name: 'LocalServers'
+          demands:
+            - Agent.ComputerName -equals svdkra1vudv03
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: cli-publish
+
+                - ${{ if eq(parameters.deployTimeSeriesCli, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/TimeSeriesCli"
+                      $target = "C:\Services\DataMigration\TimeSeriesCli"
+
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+
+                      # Inject Settl secrets — STAGING: featuretest only
+                      $settings.SettlApi.Environments.featuretest.SubscriptionKey = $env:SETTL_FT_SUBKEY
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientId = $env:SETTL_FT_CLIENTID
+                      $settings.SettlApi.Environments.featuretest.Credentials.ClientSecret = $env:SETTL_FT_CLIENTSECRET
+                      $settings.SettlApi.Environments.featuretest.Credentials.Username = $env:SETTL_FT_USERNAME
+                      $settings.SettlApi.Environments.featuretest.Credentials.Password = $env:SETTL_FT_PASSWORD
+
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "TimeSeriesCli deployed to $target"
+                    displayName: 'TimeSeriesCli: Deploy'
+                    env:
+                      SETTL_FT_SUBKEY: $(Settl_featuretest_SubscriptionKey)
+                      SETTL_FT_CLIENTID: $(Settl_featuretest_ClientId)
+                      SETTL_FT_CLIENTSECRET: $(Settl_featuretest_ClientSecret)
+                      SETTL_FT_USERNAME: $(Settl_featuretest_Username)
+                      SETTL_FT_PASSWORD: $(Settl_featuretest_Password)
+
+                # Dashboard.Api deploy fjernet — flyttet til NewSettlement.MigrationDashboard repo
+
+  # Stage 3: Deploy to Production
+  - stage: Deploy_Production
+    displayName: 'Deploy to Production'
+    dependsOn: Build
+    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/master'), and(eq(variables['Build.Reason'], 'Manual'), eq('${{ parameters.environment }}', 'Production'))))
+    variables:
+      - group: DataMigration-Production
+    jobs:
+      - deployment: DeployToProduction
+        displayName: 'Deploy to SVDKRA1VBIFROST'
+        environment: 'Bifrost-Production'
+        pool:
+          name: 'LocalServers'
+          demands:
+            - Agent.ComputerName -equals SVDKRA1VBIFROST
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: cli-publish
+
+                - ${{ if eq(parameters.deployTimeSeriesCli, true) }}:
+                  - powershell: |
+                      $source = "$(Pipeline.Workspace)/cli-publish/TimeSeriesCli"
+                      $target = "C:\Services\DataMigration\TimeSeriesCli"
+
+                      $settings = Get-Content "$source/appsettings.json" | ConvertFrom-Json
+
+                      # Inject Settl secrets — PRODUCTION tenants
+                      $settings.SettlApi.Environments.production.SubscriptionKey = $env:SETTL_PROD_SUBKEY
+                      $settings.SettlApi.Environments.production.Credentials.ClientId = $env:SETTL_PROD_CLIENTID
+                      $settings.SettlApi.Environments.production.Credentials.ClientSecret = $env:SETTL_PROD_CLIENTSECRET
+                      $settings.SettlApi.Environments.production.Credentials.Username = $env:SETTL_PROD_USERNAME
+                      $settings.SettlApi.Environments.production.Credentials.Password = $env:SETTL_PROD_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-vhel'.SubscriptionKey = $env:SETTL_VHEL_SUBKEY
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientId = $env:SETTL_VHEL_CLIENTID
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.ClientSecret = $env:SETTL_VHEL_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Username = $env:SETTL_VHEL_USERNAME
+                      $settings.SettlApi.Environments.'production-vhel'.Credentials.Password = $env:SETTL_VHEL_PASSWORD
+
+                      $settings.SettlApi.Environments.'production-hev'.SubscriptionKey = $env:SETTL_HEV_SUBKEY
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientId = $env:SETTL_HEV_CLIENTID
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.ClientSecret = $env:SETTL_HEV_CLIENTSECRET
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Username = $env:SETTL_HEV_USERNAME
+                      $settings.SettlApi.Environments.'production-hev'.Credentials.Password = $env:SETTL_HEV_PASSWORD
+
+                      $settings | ConvertTo-Json -Depth 10 | Set-Content "$source/appsettings.json"
+
+                      New-Item -Path $target -ItemType Directory -Force | Out-Null
+                      Copy-Item "$source\*" $target -Recurse -Force
+                      Write-Host "TimeSeriesCli deployed to $target"
+                    displayName: 'TimeSeriesCli: Deploy'
+                    env:
+                      SETTL_PROD_SUBKEY: $(Settl_production_SubscriptionKey)
+                      SETTL_PROD_CLIENTID: $(Settl_production_ClientId)
+                      SETTL_PROD_CLIENTSECRET: $(Settl_production_ClientSecret)
+                      SETTL_PROD_USERNAME: $(Settl_production_Username)
+                      SETTL_PROD_PASSWORD: $(Settl_production_Password)
+                      SETTL_VHEL_SUBKEY: $(Settl_production_vhel_SubscriptionKey)
+                      SETTL_VHEL_CLIENTID: $(Settl_production_vhel_ClientId)
+                      SETTL_VHEL_CLIENTSECRET: $(Settl_production_vhel_ClientSecret)
+                      SETTL_VHEL_USERNAME: $(Settl_production_vhel_Username)
+                      SETTL_VHEL_PASSWORD: $(Settl_production_vhel_Password)
+                      SETTL_HEV_SUBKEY: $(Settl_production_hev_SubscriptionKey)
+                      SETTL_HEV_CLIENTID: $(Settl_production_hev_ClientId)
+                      SETTL_HEV_CLIENTSECRET: $(Settl_production_hev_ClientSecret)
+                      SETTL_HEV_USERNAME: $(Settl_production_hev_Username)
+                      SETTL_HEV_PASSWORD: $(Settl_production_hev_Password)
+
+                # Dashboard.Api deploy fjernet — flyttet til NewSettlement.MigrationDashboard repo

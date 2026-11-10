@@ -1,0 +1,1386 @@
+// Nykredit: 1 Xellent-konto → 1 Settl-kunde, 76 parent målepunkter (30 child MPs ignoreres)
+// Settl: søg kunde 429517 — Company, CVR 21114052, Fiktivvejgr 25, 2150 Nordhavn
+// Payer: 10012, OioUbl/OIOUBL_FIK
+// Contract: E_PPA_Nykredit
+using DataMigration.Migration.Runners;
+using DataMigration.Migration.Tests.Fixtures;
+
+namespace DataMigration.Migration.Tests.ProfileRuns.Ppa;
+
+public class Group429517_NykreditTests(PpaProfileFixture fixture) : IClassFixture<PpaProfileFixture>
+{
+    private readonly MigrationReport _report = fixture.Runner.Report;
+
+    private static readonly GroupTestCase _testCase = new(
+        RepresentativeAccount: "429517",
+        GroupName: "Nykredit",
+        MemberAccounts: ["429517"],
+        ExpectedCustomerName: "Navnt Navnu A/S",
+        ExpectedCustomerType: "Company",
+        ExpectedCvr: "21114052",
+        ExpectedStreet: "Fiktivvejif",
+        ExpectedBuildingNumber: "72",
+        ExpectedPostalCode: "8990",
+        ExpectedCity: "Fårup",
+        ExpectedEmail: "ug@de.example.dk",
+        ExpectedPayerId: "429517",
+        ExpectedPayerName: "Navnt Navnu A/S",
+        ExpectedPayerStreet: "Fiktivvejif",
+        ExpectedPayerBuilding: "72",
+        ExpectedPayerPostalCode: "8990",
+        ExpectedPayerCity: "Fårup",
+        ExpectedPayerType: "Company",
+        ExpectedPayerEmail: "ug@de.example.dk",
+        ExpectedInvoiceChannel: "OioUbl",
+        ExpectedPaymentChannel: "OIOUBL_FIK",
+        ExpectedElectronicNumber: "5790001687175",
+        ExpectedContractName: "E_PPA_Nykredit",
+        ExpectedMeteringPoints: [
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313104200234145",
+                InstallationNumber: "4200234145",
+                Street: "Fiktivvejgu",
+                BuildingNumber: "8",
+                PostalCode: "7700",
+                City: "Thisted",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "36548747",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313105100160114",
+                InstallationNumber: "5100160114",
+                Street: "Fiktivvejgv",
+                BuildingNumber: "9",
+                PostalCode: "9900",
+                City: "Frederikshavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "20534472",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313113162311337",
+                InstallationNumber: "3162311337",
+                Street: "Fiktivvejhe",
+                BuildingNumber: "25",
+                PostalCode: "9000",
+                City: "Aalborg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313113162349156",
+                InstallationNumber: "3162349156",
+                Street: "Fiktivvejhe",
+                BuildingNumber: "25",
+                PostalCode: "9000",
+                City: "Aalborg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "30841928",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313114400604334",
+                InstallationNumber: "4400604334",
+                Street: "Fiktivvejgw",
+                BuildingNumber: "29",
+                PostalCode: "8260",
+                City: "Viby J",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313115130052914",
+                InstallationNumber: "5130052914",
+                Street: "Fiktivvejhy",
+                BuildingNumber: "8B",
+                PostalCode: "8000",
+                City: "Aarhus C",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "10158354",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313115130052921",
+                InstallationNumber: "5130052921",
+                Street: "Fiktivvejhy",
+                BuildingNumber: "8B",
+                PostalCode: "8000",
+                City: "Aarhus C",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "10136477",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313115130052945",
+                InstallationNumber: "5130052945",
+                Street: "Fiktivvejhy",
+                BuildingNumber: "8B",
+                PostalCode: "8000",
+                City: "Aarhus C",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "10086671",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313115130052969",
+                InstallationNumber: "5130052969",
+                Street: "Fiktivvejhy",
+                BuildingNumber: "8B",
+                PostalCode: "8000",
+                City: "Aarhus C",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "10119355",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313115410070096",
+                InstallationNumber: "5410070096",
+                Street: "Fiktivvejgx",
+                BuildingNumber: "2",
+                PostalCode: "8800",
+                City: "Viborg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313124400133123",
+                InstallationNumber: "4400133123",
+                Street: "Fiktivvejgy",
+                BuildingNumber: "20",
+                PostalCode: "7100",
+                City: "Vejle",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "11172598",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313124412000635",
+                InstallationNumber: "4412000635",
+                Street: "Fiktivvejgz",
+                BuildingNumber: "9",
+                PostalCode: "5500",
+                City: "Middelfart",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "11481100",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313124490210698",
+                InstallationNumber: "4490210698",
+                Street: "Fiktivvejhf",
+                BuildingNumber: "11",
+                PostalCode: "6000",
+                City: "Kolding",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "53892361",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313124501192388",
+                InstallationNumber: "4501192388",
+                Street: "Fiktivvejha",
+                BuildingNumber: "4",
+                PostalCode: "8700",
+                City: "Horsens",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "10354772",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313134401014291",
+                InstallationNumber: "4401014291",
+                Street: "Fiktivvejhb",
+                BuildingNumber: "38",
+                PostalCode: "6700",
+                City: "Esbjerg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "56306911",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313144500491350",
+                InstallationNumber: "4500491350",
+                Street: "Fiktivvejhc",
+                BuildingNumber: "15",
+                PostalCode: "6200",
+                City: "Aabenraa",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "49070908",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313144500504586",
+                InstallationNumber: "4500504586",
+                Street: "Fiktivvejhc",
+                BuildingNumber: "15",
+                PostalCode: "6200",
+                City: "Aabenraa",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "49122534",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313144500600905",
+                InstallationNumber: "4500600905",
+                Street: "Fiktivvejhd",
+                BuildingNumber: "1",
+                PostalCode: "6400",
+                City: "Sønderborg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313144501036604",
+                InstallationNumber: "4501036604",
+                Street: "Fiktivvejgu",
+                BuildingNumber: "21",
+                PostalCode: "6100",
+                City: "Haderslev",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "49040643",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313153300179702",
+                InstallationNumber: "3300179702",
+                Street: "Fiktivvejhx",
+                BuildingNumber: "3B",
+                PostalCode: "5700",
+                City: "Svendborg",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "90753",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313155490460431",
+                InstallationNumber: "5490460431",
+                Street: "Fiktivvejhg",
+                BuildingNumber: "1",
+                PostalCode: "5230",
+                City: "Odense M",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "43228988",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313155490460448",
+                InstallationNumber: "5490460448",
+                Street: "Fiktivvejhg",
+                BuildingNumber: "1",
+                PostalCode: "5230",
+                City: "Odense M",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "43228058",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103255547",
+                InstallationNumber: "1103255547",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22359832",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585767",
+                InstallationNumber: "1103585767",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21574731",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585828",
+                InstallationNumber: "1103585828",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609520",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585835",
+                InstallationNumber: "1103585835",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21762853",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585842",
+                InstallationNumber: "1103585842",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609503",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585859",
+                InstallationNumber: "1103585859",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21763376",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585866",
+                InstallationNumber: "1103585866",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21566243",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585873",
+                InstallationNumber: "1103585873",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21515519",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585880",
+                InstallationNumber: "1103585880",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609522",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585903",
+                InstallationNumber: "1103585903",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609505",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585910",
+                InstallationNumber: "1103585910",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609506",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585927",
+                InstallationNumber: "1103585927",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609521",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161103585934",
+                InstallationNumber: "1103585934",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21609519",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161104021004",
+                InstallationNumber: "1104021004",
+                Street: "Fiktivvejht",
+                BuildingNumber: "49",
+                PostalCode: "1165",
+                City: "København K",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21763250",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161104415568",
+                InstallationNumber: "1104415568",
+                Street: "Fiktivvejhh",
+                BuildingNumber: "376",
+                PostalCode: "2770",
+                City: "Kastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161104955064",
+                InstallationNumber: "1104955064",
+                Street: "Fiktivvejia",
+                BuildingNumber: "13",
+                PostalCode: "2100",
+                City: "København Ø",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22049491",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313161170203939",
+                InstallationNumber: "1170203939",
+                Street: "Fiktivvejhi",
+                BuildingNumber: "12",
+                PostalCode: "2300",
+                City: "København S",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21472974",
+                MeterType: "D02",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174004842945",
+                InstallationNumber: "4004842945",
+                Street: "Fiktivvejhx",
+                BuildingNumber: "6",
+                PostalCode: "4300",
+                City: "Holbæk",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "704669",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174110862295",
+                InstallationNumber: "4110862295",
+                Street: "Fiktivvejhj",
+                BuildingNumber: "12",
+                PostalCode: "2600",
+                City: "Glostrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112045276",
+                InstallationNumber: "4112045276",
+                Street: "Fiktivvejhk",
+                BuildingNumber: "2",
+                PostalCode: "2800",
+                City: "Kongens Lyngby",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22048474",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112109015",
+                InstallationNumber: "4112109015",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "66",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112109022",
+                InstallationNumber: "4112109022",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "64",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21322778",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112109039",
+                InstallationNumber: "4112109039",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "64",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21322777",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112277745",
+                InstallationNumber: "4112277745",
+                Street: "Fiktivvejhm",
+                BuildingNumber: "53B",
+                PostalCode: "2800",
+                City: "Kongens Lyngby",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22135786",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112543901",
+                InstallationNumber: "4112543901",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "35",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21919304",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112560694",
+                InstallationNumber: "4112560694",
+                Street: "Fiktivvejhn",
+                BuildingNumber: "36",
+                PostalCode: "2920",
+                City: "Charlottenlund",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22008519",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112560731",
+                InstallationNumber: "4112560731",
+                Street: "Fiktivvejho",
+                BuildingNumber: "1B",
+                PostalCode: "3600",
+                City: "Frederikssund",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21506025",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112578309",
+                InstallationNumber: "4112578309",
+                Street: "Fiktivvejhp",
+                BuildingNumber: "55A",
+                PostalCode: "2970",
+                City: "Hørsholm",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21373481",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174112604756",
+                InstallationNumber: "4112604756",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "37",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21323120",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174113215432",
+                InstallationNumber: "4113215432",
+                Street: "Fiktivvejhn",
+                BuildingNumber: "34B",
+                PostalCode: "2920",
+                City: "Charlottenlund",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22008516",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174113388181",
+                InstallationNumber: "4113388181",
+                Street: "Fiktivvejhp",
+                BuildingNumber: "55A",
+                PostalCode: "2970",
+                City: "Hørsholm",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21373500",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174113591697",
+                InstallationNumber: "4113591697",
+                Street: "Fiktivvejhn",
+                BuildingNumber: "38",
+                PostalCode: "2920",
+                City: "Charlottenlund",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22008517",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174113836286",
+                InstallationNumber: "4113836286",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "35",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21281206",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174114269069",
+                InstallationNumber: "4114269069",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "3",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174114637790",
+                InstallationNumber: "4114637790",
+                Street: "Fiktivvejhq",
+                BuildingNumber: "3",
+                PostalCode: "2670",
+                City: "Greve",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174114705017",
+                InstallationNumber: "4114705017",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "64",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21322776",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313174115286140",
+                InstallationNumber: "4115286140",
+                Street: "Fiktivvejhl",
+                BuildingNumber: "35",
+                PostalCode: "2630",
+                City: "Taastrup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "21271368",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175200517965",
+                InstallationNumber: "5200517965",
+                Street: "Fiktivvejhr",
+                BuildingNumber: "45",
+                PostalCode: "4000",
+                City: "Roskilde",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175500146438",
+                InstallationNumber: "5500146438",
+                Street: "Fiktivvejgt",
+                BuildingNumber: "37",
+                PostalCode: "3400",
+                City: "Hillerød",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22332391",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175500146445",
+                InstallationNumber: "5500146445",
+                Street: "Fiktivvejgt",
+                BuildingNumber: "37",
+                PostalCode: "3400",
+                City: "Hillerød",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22332430",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175500146476",
+                InstallationNumber: "5500146476",
+                Street: "Fiktivvejgt",
+                BuildingNumber: "37",
+                PostalCode: "3400",
+                City: "Hillerød",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22331287",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175500146483",
+                InstallationNumber: "5500146483",
+                Street: "Fiktivvejgt",
+                BuildingNumber: "37",
+                PostalCode: "3400",
+                City: "Hillerød",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22332375",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313175711256308",
+                InstallationNumber: "5711256308",
+                Street: "Fiktivvejhs",
+                BuildingNumber: "63",
+                PostalCode: "3000",
+                City: "Helsingør",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "19861529",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179103911868",
+                InstallationNumber: "9103911868",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22405154",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179103911875",
+                InstallationNumber: "9103911875",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179103911882",
+                InstallationNumber: "9103911882",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: null,
+                MeterType: null,
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179104316808",
+                InstallationNumber: "9104316808",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22408476",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179104317584",
+                InstallationNumber: "9104317584",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22408478",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179104317638",
+                InstallationNumber: "9104317638",
+                Street: "Fiktivvejgr",
+                BuildingNumber: "25",
+                PostalCode: "2150",
+                City: "Nordhavn",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22408690",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313179104468453",
+                InstallationNumber: "9104468453",
+                Street: "Fiktivvejhz",
+                BuildingNumber: "112",
+                PostalCode: "2900",
+                City: "Hellerup",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "22408422",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313181101705066",
+                InstallationNumber: "1101705066",
+                Street: "Fiktivvejht",
+                BuildingNumber: "9",
+                PostalCode: "4100",
+                City: "Ringsted",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "503479",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313185220016300",
+                InstallationNumber: "5220016300",
+                Street: "Fiktivvejhu",
+                BuildingNumber: "10",
+                PostalCode: "4800",
+                City: "Nykøbing F",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "652768",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313185400743095",
+                InstallationNumber: "5400743095",
+                Street: "Fiktivvejhw",
+                BuildingNumber: "9",
+                PostalCode: "4700",
+                City: "Næstved",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "657516",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "NonProfiled",
+                ConnectionStatus: "Connected"),
+            new ExpectedMeteringPoint(
+                MeteringPointIdentification: "571313186120421409",
+                InstallationNumber: "6120421409",
+                Street: "Fiktivvejhv",
+                BuildingNumber: "21",
+                PostalCode: "4600",
+                City: "Køge",
+                ConsumerType: "Company",
+                ConsumerName: "Navnt Navnu A/S",
+                ConsumerCvr: "21114052",
+                MeterIdentifier: "504442",
+                MeterType: "D01",
+                GridArea: null,
+                SettlementMethod: "Flex",
+                ConnectionStatus: "Connected"),
+        ],
+        KnownDiffs: [
+            // Legal contact (Fiktivvejif 72, 8990 Fårup) er sandhed for customer-adresse;
+            // Settl prod blev migreret med primary CustTable-adresse (Fiktivvejgr 25,
+            // 2150 Nordhavn) før reglen blev indført. Skal opdateres med fix-runner.
+            new ExpectedDiff("StreetName", "Fiktivvejgr"),
+            new ExpectedDiff("BuildingNumber", "25"),
+            new ExpectedDiff("PostalCode", "2150"),
+            new ExpectedDiff("City", "Nordhavn"),
+        ]);
+
+    // ===== Account grouping =====
+
+    [Fact]
+    public void AccountGrouping()
+    {
+        var group = _report.AccountGroupings
+            .SingleOrDefault(g => g.RepresentativeAccount == _testCase.RepresentativeAccount);
+        Assert.NotNull(group);
+        Assert.Equal(_testCase.MemberAccounts.Order(), group.MemberAccounts.Order());
+    }
+
+    // ===== Customer fields =====
+
+    [Fact]
+    public void Customer()
+    {
+        var c = _report.Customers
+            .SingleOrDefault(c => c.CustomerNumber == _testCase.RepresentativeAccount);
+        Assert.NotNull(c);
+
+        // ExpectedCustomerType
+        Assert.Equal(_testCase.ExpectedCustomerType, c.CustomerType);
+        // ExpectedCvr
+        Assert.Equal(_testCase.ExpectedCvr, c.VatIdentificationNumber);
+        // ExpectedCustomerName
+        Assert.Equal(_testCase.ExpectedCustomerName, c.Address?.PostalAddress?.Name1?.FullName);
+        // ExpectedStreet
+        Assert.Equal(_testCase.ExpectedStreet, c.Address?.PostalAddress?.PhysicalAddress?.StreetName);
+        // ExpectedBuildingNumber
+        Assert.Equal(_testCase.ExpectedBuildingNumber, c.Address?.PostalAddress?.PhysicalAddress?.BuildingNumber);
+        // ExpectedPostalCode
+        Assert.Equal(_testCase.ExpectedPostalCode, c.Address?.PostalAddress?.PhysicalAddress?.PostalCode);
+        // ExpectedCity
+        Assert.Equal(_testCase.ExpectedCity, c.Address?.PostalAddress?.PhysicalAddress?.City);
+        // ExpectedEmail
+        if (_testCase.KnownDiffs?.Any(d => d.Field == "Email") != true)
+            Assert.Equal(_testCase.ExpectedEmail, c.Address?.Email);
+    }
+
+    [Fact]
+    public void Customer_MatchesSettlProduction()
+    {
+        var customer = _report.Customers.Single(c => c.CustomerNumber == _testCase.RepresentativeAccount);
+        var settlData = LoadSettl(_testCase.RepresentativeAccount);
+        if (settlData?.CustomerFull == null) return;
+
+        var diffs = SettlComparer.CompareCustomers(
+            [customer], LoadSettl,
+            _testCase.KnownDiffs != null ? new() { [_testCase.RepresentativeAccount] = _testCase.KnownDiffs } : null);
+        Assert.True(diffs.Count == 0,
+            $"Customer diffs vs Settl:\n  " +
+            string.Join("\n  ", diffs.Select(d => $"{d.Field}: extracted={d.Extracted ?? "(null)"} settl={d.Settl ?? "(null)"}")));
+    }
+
+    // ===== Payer fields =====
+
+    [Fact]
+    public void Payer()
+    {
+        var customerIdToNumber = _report.Customers
+            .Where(c => c.CustomerNumber != null)
+            .ToDictionary(c => c.Id, c => c.CustomerNumber!);
+
+        var payer = _report.Payers
+            .SingleOrDefault(p => customerIdToNumber.TryGetValue(p.CustomerId, out var cn) && cn == _testCase.RepresentativeAccount);
+        Assert.NotNull(payer);
+
+        Assert.NotNull(payer.PayerInformation);
+        // ExpectedPayerId
+        Assert.Equal(_testCase.ExpectedPayerId, payer.PayerInformation.PayerIdentifier);
+        Assert.NotNull(payer.PayerInformation.PostalAddress);
+        // ExpectedPayerName
+        Assert.Equal(_testCase.ExpectedPayerName, payer.PayerInformation.PostalAddress.Name1?.FullName);
+        // ExpectedPayerStreet
+        Assert.Equal(_testCase.ExpectedPayerStreet, payer.PayerInformation.PostalAddress.PhysicalAddress?.StreetName);
+        // ExpectedPayerBuilding
+        Assert.Equal(_testCase.ExpectedPayerBuilding, payer.PayerInformation.PostalAddress.PhysicalAddress?.BuildingNumber);
+        // ExpectedPayerPostalCode
+        Assert.Equal(_testCase.ExpectedPayerPostalCode, payer.PayerInformation.PostalAddress.PhysicalAddress?.PostalCode);
+        // ExpectedPayerCity
+        Assert.Equal(_testCase.ExpectedPayerCity, payer.PayerInformation.PostalAddress.PhysicalAddress?.City);
+        // ExpectedPayerType
+        Assert.Equal(_testCase.ExpectedPayerType, payer.PayerBilling.PayerType);
+        // ExpectedPayerEmail
+        if (_testCase.KnownDiffs?.Any(d => d.Field == "Email") != true)
+            Assert.Equal(_testCase.ExpectedPayerEmail, payer.PayerBilling.Email);
+        // ExpectedInvoiceChannel
+        // Settl API converts "OioXml" to "OioUbl" internally — normalize for comparison
+        var expectedChannel = _testCase.ExpectedInvoiceChannel;
+        var actualChannel = payer.PayerBilling.InvoiceChannel;
+        if (expectedChannel == "OioUbl" && actualChannel == "OioXml") actualChannel = "OioUbl";
+        Assert.Equal(expectedChannel, actualChannel);
+        // ExpectedPaymentChannel
+        Assert.Equal(_testCase.ExpectedPaymentChannel, payer.PayerBilling.PaymentChannel);
+        // ExpectedElectronicNumber
+        Assert.Equal(_testCase.ExpectedElectronicNumber, payer.PayerBilling.ElectronicNumber);
+    }
+
+    // ===== Metering points =====
+
+    [Fact]
+    public void MeteringPoints()
+    {
+        if (_testCase.ExpectedMeteringPoints.Length == 0) return;
+
+        var extractedByMpId = _report.MeteringPoints
+            .Where(m => m.Identification?.MeteringPointIdentification != null)
+            .ToDictionary(m => m.Identification!.MeteringPointIdentification!);
+
+        var errors = new List<string>();
+
+        foreach (var expected in _testCase.ExpectedMeteringPoints)
+        {
+            var mpId = expected.MeteringPointIdentification;
+
+            if (!extractedByMpId.TryGetValue(mpId, out var mp))
+            {
+                errors.Add($"{mpId}: not found in extraction");
+                continue;
+            }
+
+            // Identification
+            if (mp.Identification?.InstallationNumber != expected.InstallationNumber)
+                errors.Add($"{mpId}.InstallationNumber: expected={expected.InstallationNumber} actual={mp.Identification?.InstallationNumber}");
+
+            // InstallationAddress
+            var addr = mp.InstallationAddress?.Address;
+            if (addr?.StreetName != expected.Street)
+                errors.Add($"{mpId}.Street: expected={expected.Street} actual={addr?.StreetName}");
+            if (addr?.BuildingNumber != expected.BuildingNumber)
+                errors.Add($"{mpId}.BuildingNumber: expected={expected.BuildingNumber} actual={addr?.BuildingNumber}");
+            if (addr?.PostalCode != expected.PostalCode)
+                errors.Add($"{mpId}.PostalCode: expected={expected.PostalCode} actual={addr?.PostalCode}");
+            // City skipped: not mandatory in Settl API, and AddressZipCode seed data
+            // may not cover all zip codes (subset of full Xellent DB).
+
+            // Consumer
+            if (mp.Consumer?.CustomerType != expected.ConsumerType)
+                errors.Add($"{mpId}.ConsumerType: expected={expected.ConsumerType} actual={mp.Consumer?.CustomerType}");
+            if (mp.Consumer?.FirstConsumerParty?.Name?.FullName != expected.ConsumerName)
+                errors.Add($"{mpId}.ConsumerName: expected={expected.ConsumerName} actual={mp.Consumer?.FirstConsumerParty?.Name?.FullName}");
+            if (expected.ConsumerCvr != null && mp.Consumer?.FirstConsumerParty?.VatIdentificationNumber != expected.ConsumerCvr)
+                errors.Add($"{mpId}.ConsumerCvr: expected={expected.ConsumerCvr} actual={mp.Consumer?.FirstConsumerParty?.VatIdentificationNumber}");
+
+            // MeterCharacteristics
+            // MeterType skipped: extraction sends null, Settl API auto-populates from other data.
+            // ExpectedMeteringPoint retains Settl values (e.g. "D01") for documentation.
+            var meter = mp.MeterCharacteristics?.Meters.FirstOrDefault();
+            if (expected.MeterIdentifier != null)
+            {
+                if (meter?.MeterIdentifier != expected.MeterIdentifier)
+                    errors.Add($"{mpId}.MeterIdentifier: expected={expected.MeterIdentifier} actual={meter?.MeterIdentifier}");
+            }
+
+            // Grid
+            if (expected.GridArea != null && mp.Grid?.GridAreaCode != expected.GridArea)
+                errors.Add($"{mpId}.GridArea: expected={expected.GridArea} actual={mp.Grid?.GridAreaCode}");
+
+            // SettlementMethod skipped: Settl production has legacy "NonProfiled" for some
+            // consumption MPs, but extraction correctly produces "Flex" per current rules.
+
+            // ConnectionInfo
+            if (mp.ConnectionInfo?.ConnectionStatus != expected.ConnectionStatus)
+                errors.Add($"{mpId}.ConnectionStatus: expected={expected.ConnectionStatus} actual={mp.ConnectionInfo?.ConnectionStatus}");
+        }
+
+        Assert.True(errors.Count == 0,
+            $"Metering point errors:\n  {string.Join("\n  ", errors)}");
+    }
+
+    // ===== Contract mapping =====
+
+    [Fact]
+    public void ContractMapping()
+    {
+        // Verify this group's MPs are mapped to the expected contract name
+        // via the profile's GroupNum -> ContractName mapping
+        var contractName = _testCase.ExpectedContractName;
+        Assert.False(string.IsNullOrEmpty(contractName), "ExpectedContractName must be set");
+
+        // Check that MpContractNames in the report maps this group's MPs to the expected contract
+        foreach (var expected in _testCase.ExpectedMeteringPoints)
+        {
+            if (_report.MpContractNames.TryGetValue(expected.MeteringPointIdentification, out var mappedContract))
+            {
+                Assert.Equal(contractName, mappedContract);
+            }
+        }
+    }
+
+    private static SettlAccountSeedData? LoadSettl(string account)
+    {
+        try { return SettlSeedData.Load(account); }
+        catch (FileNotFoundException) { return null; }
+    }
+
+}

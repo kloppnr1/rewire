@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <!-- Xellent is an in-memory SQLite database here; see Fakes/FakeXellent.cs. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Goldens\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Goldens\**\*.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\XellentDomain\src\DataMigration.Core\DataMigration.Core.csproj" />
+    <ProjectReference Include="..\..\..\..\XellentDomain\src\DataMigration.XellentData\DataMigration.XellentData.csproj" />
+    <ProjectReference Include="..\..\DataMigration.Migration.Library\DataMigration.Migration.Library.csproj" />
+    <ProjectReference Include="..\..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+    <ProjectReference Include="..\..\DataMigration.OpsCli.Library\DataMigration.OpsCli.Library.csproj" />
+    <!-- CsvGoldenAsserter lives with the unit tests, which need it too and run in CI. Referenced
+         rather than copied so the two suites cannot drift on what a golden diff looks like. -->
+    <ProjectReference Include="..\DataMigration.OpsCli.Tests\DataMigration.OpsCli.Tests.csproj" />
+    <!-- The anonymised Xellent seed snapshots and the seeder that reads them. -->
+    <ProjectReference Include="..\DataMigration.Migration.Tests\DataMigration.Migration.Tests.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,78 @@
+{
+  "dataAreaId": "hol",
+  "deliveryCategory": "El-ekstern",
+  "legacyTg4MergeCutoffCos": "2026-05-01",
+  "mappings": {
+    "groupNum": {
+      "Verdo A/S": "E_FinansielPulje_Spot10_VerdoHoldingA/S",
+      "V LadVariP": "V Lade Variabel",
+      "Nykredit": "E_PPA_Nykredit",
+      "ForeBankDa": "E_PPA_Foreningen_Bankdata",
+      "JN Data": "E_PPA_JN_Data",
+      "SparNordBa": "E_PPA_Spar_Nord_Bank",
+      "MerkurKlim": "E_PPA_Merkur_Klimafond",
+      "LollandsBa": "E_PPA_Lollands_Bank",
+      "Spk.Nr.Neb": "E_PPA_Sparekassen_for_Nr._Nebel_og_Omegn",
+      "FasterAnde": "E_PPA_Faster_Andelskasse",
+      "Exolak": "E_FinansielPulje_DK1_Exolak"
+    },
+    "productNum": {
+      "V LadVariP": "V Lade Variabel",
+      "V ErhVari": "E_ErhVari",
+      "V ErhKvt": "E_ErhKvt",
+      "V SMEspot": "E_SME_Spot_Lb+1d",
+      "VGGSpot10": {
+        "lb+30": "E_VGGSpot10_Netto+30d",
+        "lb+15": "E_VGGSpot10_Lb+15d",
+        "lbm+1d": "E_VGGSpot10_Lb+1d"
+      },
+      "VGGSpot6": {
+        "lb+31": "E_VGGSpot6_Lb+31d",
+        "lbm+1d": "E_VGGSpot6_Lb+1d"
+      },
+      "VGGSpotH6": "E_VGGSpot6H_LB+1d",
+      "VGGSpotH0": {
+        "lb+31": "E_VGGSpot0H_Lb+31d",
+        "lbm+1d": "E_VGGSpot0H_Lb+1d"
+      },
+      "V SMESpotH": "E_SME_SpotH_Lb+1d",
+      "V SMEPulje": "E_SME_Pulje_Lb+1d",
+      "VGGSpotH10": "E_VGGSpot10H_Lb+1d",
+      "VGGSpot0": {
+        "Netto+30": "E_VGGSpot0_Netto+30d",
+        "Lbm+1d": "E_VGGSpot0_Lb+1d"
+      },
+      "V VandNord": "E_VE_VandNord",
+      "V Biomasse": "E_VE_Biomasse",
+      "V VindNord": "E_VE_VindNord",
+      "V VindDK": "E_VE_VindDansk",
+      "V P Hybel": "Partner_HybelStenhøj",
+      "VGGFastErh": "FastPris"
+    },
+    "templateProducts": {
+      "V_Privat": {
+        "V ErhKvt": { "cvr": "E_ErhKvt" },
+        "V P Flex": { "cvr": "V P Flex" },
+        "V P Fast": { "cvr": "V P Fast" },
+        "V ErhVari": { "cvr": "E_ErhVari" },
+        "V Variabel": { "cvr": "E_ErhVari" }
+      },
+      "V_Partner": {
+        "V P Fast": { "cvr": "V P Fast" },
+        "V P Hybel": { "cvr": "Partner_HybelStenhøj" }
+      },
+      "V_Fordel": {
+        "V P Flex": { "cvr": "V P Flex" }
+      },
+      "E. ErhProd": {
+        "*": { "cvr": "V ProdErhv" }
+      }
+    },
+    "settlementGroup": {
+      "Måned.": "Månedlige opgørelser",
+      "Md+MdAC": "MånedOpg+MånedAconto",
+      "Kvartal": "Kvartalsvis Opgørelse",
+      "KvartalAC": "Kvartalsvis Aconto"
+    }
+  }
+}

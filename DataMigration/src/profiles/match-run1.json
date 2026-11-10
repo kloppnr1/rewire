@@ -1,0 +1,24 @@
+{
+  "Name": "match-run1",
+  "Description": "Match run 1 kunder",
+  "Accounts": [
+    "514162",
+    "362149",
+    "436905"
+  ],
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern",
+    "GroupOwners": {
+      "Vestervold": "900073",
+      "ZweiGroBie": "900072",
+      "Underværk": "900065"
+    }
+  },
+  "Mappings": {
+    "GroupNum": {
+      "Vestervold": "E_FinansielPulje_DK2_VesterVoldAPS(RestaurantKarla)",
+      "Underværk": "E_FinansielPulje_DK1_Underværket",
+      "ZweiGroBie": "E_FinansielPulje_DK1_ZweiGrosseBierBar"
+    }
+  }
+}

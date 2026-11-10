@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.XellentDomain.Domain.TimeSeries</PackageId>
+    <Description>Time-series domain types: raw measured metering point values (hourly/quarterly/etc.).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataMigration.Domain\DataMigration.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

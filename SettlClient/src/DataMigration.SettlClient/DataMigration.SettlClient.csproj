@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.SettlClient</PackageId>
+    <Description>Domain → Settl migration orchestrator. Translates DataMigration.Domain Customer aggregates to Settl API calls (customer, payer, metering point, contract links, billing config, exemptions).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataMigration.SettlClient.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain\DataMigration.Domain.csproj" />
+    <ProjectReference Include="..\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+  </ItemGroup>
+
+</Project>

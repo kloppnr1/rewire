@@ -1,0 +1,5 @@
+Kundenummer;Betalingsaftale fundet på kontrakt;Kontrakttype;Kontraktslutdato;Målepunkter med egen betalingsaftale;Status;Bemærkning;Målepunkt;Nøgle der matchede i Settl;Enummer Settl;E-nummer hentet fra betalingsmetode;Migreret kontrakt;Betalingsaftale på migreret kontrakt;COS;Betalingsaftale-ID;Betalingsaftale-status (Xellent)
+111111;mb-main;Hovedkontrakt;2026-06-30;1;E-nummer fundet;;571000000000000001;571000000000000001;E-1001;Betalingsservice;mb-main;Ja;2026-07-01;MP-1;Aktiv
+222222;mb-sub;Underkontrakt;;2;E-nummer fundet;Konkurrerende aftaler på kundenummeret;571000000000000002;Fællesfaktura J-500;E-1002;FI-Kort;mb-other;Nej;2026-07-01;MP-2;Aktiv
+333333;mb-alone;Enkeltkontrakt;;1;INTET E-nummer i Settl;INTET E-NUMMER i Settl;571000000000000003;;;;mb-alone;Ja;2026-07-01;MP-3;Aktiv
+444444;mb-opsagt;Enkeltkontrakt;;0;E-nummer fundet;;571000000000000004;571000000000000004;E-1004;Betalingsservice;mb-opsagt;Ja;2026-07-01;MP-4;Opsagt 2026-07-02

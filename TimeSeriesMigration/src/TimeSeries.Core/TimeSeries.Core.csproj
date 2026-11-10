@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.TimeSeriesMigration.Core</PackageId>
+    <Description>Shared DTOs for the TimeSeries migration pipeline (TimeSeriesDto, MeteringPointTimeSeriesDto, TimeResolutionDto, TimeSeriesFileDto). Settl wire-format DTOs (SettlTimeSeriesRequestDto, SettlTimeSeriesPointDto) lever nu i NewSettlement.SettlClient.Api.</Description>
+    <PackageProjectUrl>https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.TimeSeriesMigration</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+  </ItemGroup>
+
+</Project>

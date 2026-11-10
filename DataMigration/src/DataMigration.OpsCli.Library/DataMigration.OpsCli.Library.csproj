@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DataMigration.OpsCli</RootNamespace>
+    <AssemblyName>DataMigration.OpsCli.Library</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>NewSettlement.DataMigration.OpsCli</PackageId>
+    <Description>Reusable OpsCli runners + report generators extracted from NewSettlement.DataMigration. Contains ReportPayersRunner, ReportMeteringPointsRunner, ReportMeterInfoRunner, ReportDeliveryStartRunner, PbsMatch + Excel exporters, and the compare/fix/state runners. Used by Dashboard.Api to call these in-process from HTTP endpoints.</Description>
+    <PackageProjectUrl>https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.DataMigration</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataMigration.OpsCli" />
+    <InternalsVisibleTo Include="DataMigration.Api" />
+    <InternalsVisibleTo Include="DataMigration.OpsCli.Tests" />
+    <InternalsVisibleTo Include="DataMigration.OpsCli.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataMigration.Migration.Library\DataMigration.Migration.Library.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Core\DataMigration.Core.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain.Engros\DataMigration.Domain.Engros.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain.Xellent\DataMigration.Domain.Xellent.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.XellentData\DataMigration.XellentData.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlClient\DataMigration.SettlClient.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+  </ItemGroup>
+
+</Project>

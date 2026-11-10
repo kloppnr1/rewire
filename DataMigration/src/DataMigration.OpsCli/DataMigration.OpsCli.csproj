@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>a1f3e2d7-4b85-4c91-9e6f-2d0c8b7a5e13</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataMigration.OpsCli.Library\DataMigration.OpsCli.Library.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\DataMigration.Migration\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Schedule- og segment-mappen ejes af hosten, som al anden datafil i disse repos.
+         BEMÆRK: Dashboard.Api har sin egen kopi (NewSettlement.MigrationDashboard/
+         src/Dashboard.Api/settlement-config.json). SettlementConfigLoader læser
+         fra AppContext.BaseDirectory, så de to hosts grupperer kun ens hvis begge filer
+         holdes i sync. Opdaterer du den ene, så opdatér den anden. -->
+    <None Update="settlement-config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="appsettings.local.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>
