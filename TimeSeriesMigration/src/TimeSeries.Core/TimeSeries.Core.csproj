@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewSettlement.SettlClient.Api" Version="0.7.*-*" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
   </ItemGroup>
 
 </Project>

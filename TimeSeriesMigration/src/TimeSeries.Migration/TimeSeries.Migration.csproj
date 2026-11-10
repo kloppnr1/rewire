@@ -27,9 +27,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewSettlement.SettlClient.Api" Version="0.7.*-*" />
-    <PackageReference Include="NewSettlement.XellentDomain.Domain.TimeSeries" Version="0.8.*-*" />
-    <PackageReference Include="NewSettlement.XellentDomain.XellentData" Version="0.8.*-*" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain.TimeSeries\DataMigration.Domain.TimeSeries.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.XellentData\DataMigration.XellentData.csproj" />
   </ItemGroup>
 
   <ItemGroup>

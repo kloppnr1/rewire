@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewSettlement.XellentDomain.Core" Version="0.8.*-*" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Core\DataMigration.Core.csproj" />
   </ItemGroup>
 
 </Project>

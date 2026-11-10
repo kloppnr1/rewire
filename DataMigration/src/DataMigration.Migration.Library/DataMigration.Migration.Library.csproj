@@ -24,10 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewSettlement.XellentDomain.Core" Version="0.8.*-*" />
-    <PackageReference Include="NewSettlement.XellentDomain.Domain.Xellent" Version="0.8.*-*" />
-    <PackageReference Include="NewSettlement.SettlClient" Version="0.7.*-*" />
-    <PackageReference Include="NewSettlement.SettlClient.Api" Version="0.7.*-*" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Core\DataMigration.Core.csproj" />
+    <ProjectReference Include="..\..\..\XellentDomain\src\DataMigration.Domain.Xellent\DataMigration.Domain.Xellent.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlClient\DataMigration.SettlClient.csproj" />
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
   </ItemGroup>
 
   <ItemGroup>

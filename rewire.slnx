@@ -1,0 +1,43 @@
+<Solution>
+  <Folder Name="/XellentDomain/">
+    <Project Path="XellentDomain/src/DataMigration.Core/DataMigration.Core.csproj" />
+    <Project Path="XellentDomain/src/DataMigration.Domain/DataMigration.Domain.csproj" />
+    <Project Path="XellentDomain/src/DataMigration.Domain.Engros/DataMigration.Domain.Engros.csproj" />
+    <Project Path="XellentDomain/src/DataMigration.Domain.TimeSeries/DataMigration.Domain.TimeSeries.csproj" />
+    <Project Path="XellentDomain/src/DataMigration.Domain.Xellent/DataMigration.Domain.Xellent.csproj" />
+    <Project Path="XellentDomain/src/DataMigration.XellentData/DataMigration.XellentData.csproj" />
+    <Project Path="XellentDomain/examples/XellentInvestigationQueries/XellentInvestigationQueries.csproj" />
+  </Folder>
+  <Folder Name="/XellentDomain/Tests/">
+    <Project Path="XellentDomain/src/Tests/DataMigration.Core.Tests/DataMigration.Core.Tests.csproj" />
+    <Project Path="XellentDomain/src/Tests/DataMigration.Domain.Engros.Tests/DataMigration.Domain.Engros.Tests.csproj" />
+    <Project Path="XellentDomain/src/Tests/DataMigration.Domain.Tests/DataMigration.Domain.Tests.csproj" />
+    <Project Path="XellentDomain/src/Tests/DataMigration.Domain.Xellent.Tests/DataMigration.Domain.Xellent.Tests.csproj" />
+  </Folder>
+  <Folder Name="/SettlClient/">
+    <Project Path="SettlClient/src/DataMigration.SettlApi/DataMigration.SettlApi.csproj" />
+    <Project Path="SettlClient/src/DataMigration.SettlClient/DataMigration.SettlClient.csproj" />
+  </Folder>
+  <Folder Name="/SettlClient/Tests/">
+    <Project Path="SettlClient/src/Tests/DataMigration.SettlClient.Tests/DataMigration.SettlClient.Tests.csproj" />
+  </Folder>
+  <Folder Name="/DataMigration/">
+    <Project Path="DataMigration/src/DataMigration.Migration.Library/DataMigration.Migration.Library.csproj" />
+    <Project Path="DataMigration/src/DataMigration.Migration/DataMigration.Migration.csproj" />
+    <Project Path="DataMigration/src/DataMigration.OpsCli.Library/DataMigration.OpsCli.Library.csproj" />
+    <Project Path="DataMigration/src/DataMigration.OpsCli/DataMigration.OpsCli.csproj" />
+  </Folder>
+  <Folder Name="/DataMigration/Tests/">
+    <Project Path="DataMigration/src/Tests/DataMigration.Migration.Tests/DataMigration.Migration.Tests.csproj" />
+    <Project Path="DataMigration/src/Tests/DataMigration.OpsCli.Tests/DataMigration.OpsCli.Tests.csproj" />
+  </Folder>
+  <Folder Name="/TimeSeriesMigration/">
+    <Project Path="TimeSeriesMigration/src/TimeSeries.Core/TimeSeries.Core.csproj" />
+    <Project Path="TimeSeriesMigration/src/TimeSeries.Migration/TimeSeries.Migration.csproj" />
+    <Project Path="TimeSeriesMigration/src/TimeSeries.Cli/TimeSeries.Cli.csproj" />
+  </Folder>
+  <Folder Name="/TimeSeriesMigration/Tests/">
+    <Project Path="TimeSeriesMigration/src/Tests/TimeSeries.Core.Tests/TimeSeries.Core.Tests.csproj" />
+    <Project Path="TimeSeriesMigration/src/Tests/TimeSeries.Cli.Tests/TimeSeries.Cli.Tests.csproj" />
+  </Folder>
+</Solution>
