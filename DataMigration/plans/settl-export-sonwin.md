@@ -13,7 +13,7 @@
 - Environment: `production`, own folder per environment
 - Schedule: nightly
 - Personal data on the share: approved
-- Out of scope: time series, externally invoiced periods, invoices, water
+- Out of scope: time series, externally invoiced periods, invoices, activity notes, water
 
 ## Content (= what `create` and the price-list import wrote)
 - Customer (v3 + v2, incl. CPR/CVR)
@@ -52,9 +52,7 @@
 - Alert on non-zero exit or stale `_READY`
 
 ## Open
-- Payment agreements: business example has metering point / joint invoice, external customer no., payment method, last updated; no Settl API endpoint documented (today a manual Settl CSV). Needs SonWin's requirement, then possibly a vendor question
-- Activity notes (`GET /api/v2/customers/{id}/notes`, untested): in or out; free text and author email are personal data
-- Host and UNC path
+- Payment agreements: business example has metering point / joint invoice, external customer no., payment method, last updated; no Settl API endpoint documented (today a manual Settl CSV). Needs SonWin's requirement, then possibly a vendor question- Host and UNC path
 - SonWin: raw or projected JSON, schema, how they pick up runs
 - Settl vendor: modified-since filter or change feed (would replace full scan)
 
