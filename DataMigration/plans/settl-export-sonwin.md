@@ -21,7 +21,14 @@
 - Metering points: market master data, consumer national ids, delivery statuses, billing configuration, settlement groups
 - Links: customer, payer and contract to metering point (active only)
 - Contracts, customer price lists, extra invoice lines
-- Verify on a real record: billing exemptions and estimated annual volume are present
+- Reference examples: private `Customer_405013.xlsx` (= current projection), business `Customer_397697_Verdo_Varme.xlsx` (06.11.2026)
+
+## Gaps from the business example (not in the projection today)
+- Market price lists per metering point: type, period, charge owner GLN, occurrences, invoicing flags; Market `GET /api/v3/meteringPoints/{id}/marketPriceLists`, no client yet
+- Customer price lists and product (spot price, surcharge, product elements): read with `--raw`, add to projection
+- Full contract: order number, category, payment terms, frequencies, contract lines, product setup
+- Metering point: ignore in billing, VAT exempt, settlement schedule, price area, grid area, balance supplier, meter type code, consumer category, electrical heating
+- Customer: segment, settlement schedules, manual invoice approval
 
 ## Approach
 - Extend existing `export-active-customers` (OpsCli); it already selects the right scope and reads the sections above
@@ -45,7 +52,8 @@
 - Alert on non-zero exit or stale `_READY`
 
 ## Open
-- Payment agreements (PBS/MobilePay): channel + agreement number from payer billing is all the export has; full agreements have no API client (today a manual Settl CSV). Needs SonWin's requirement, then possibly a vendor question
+- Payment agreements: business example has metering point / joint invoice, external customer no., payment method, last updated; no Settl API endpoint documented (today a manual Settl CSV). Needs SonWin's requirement, then possibly a vendor question
+- Activity notes (`GET /api/v2/customers/{id}/notes`, untested): in or out; free text and author email are personal data
 - Host and UNC path
 - SonWin: raw or projected JSON, schema, how they pick up runs
 - Settl vendor: modified-since filter or change feed (would replace full scan)
