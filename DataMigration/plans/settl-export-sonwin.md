@@ -51,7 +51,7 @@
 - Settl vendor: modified-since filter or change feed (would replace full scan)
 
 ## Phases
-1. Spike: run `export-active-customers --raw --limit 100 --env featuretest` locally; measure time and request count; check exemptions and annual volume
-2. Build: JSON Lines, share delivery, manifest, delta, lock; unit tests for diff, hashing, atomic write
+1. Spike: `export-active-customers` has no tests today; add an integration test in `DataMigration.OpsCli.IntegrationTests` against the in-memory Settl fake (no VPN); check exemptions and annual volume are carried
+2. Build: JSON Lines, share delivery, manifest, delta, lock; tests for diff, hashing, atomic write against the fake
 3. Featuretest: nightly schedule to a test share; SonWin trial import
 4. Production: after host, share and SonWin format are settled
