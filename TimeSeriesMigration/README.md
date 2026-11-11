@@ -222,7 +222,7 @@ Writes Settl's `MeteringPointMeters` import workbook for the resolution switches
 - the first dated Settl's earliest MeterCharacteristics entry (Danish date), with the old `MeterReadingOccurrence` and series (`Hourly`, `<MP>_PT1H`)
 - the second dated `ChangeDate`, with the new ones (`QuarterHourly`, `<MP>_PT15M`)
 
-Other columns stay empty. The `Date` cell is a real date shown year first (`2025-10-22`): Settl reads a shown `22-10-2025` month first and rejects it. Settl creates a series the rows name that it does not have yet (`<MP>_PT1H`, with the same settings as `<MP>_PT15M`), so there is no TimeSeries file to import.
+Each row also carries what Settl holds at its date: `EstimatedAnnualVolume`, and `DigitsOfPrecision`, `Decimals`, `MultiplicationFactor` and `Ampere` of the meter. Rows without them left the new history without them (production, Systemate, 2026-11-11). A cell stays empty when Settl has no value. When the version has no meter or several, the meter columns stay empty and the output says so. `MeterType` is not a column of the template, so the import cannot set it. Other columns stay empty. The `Date` cell is a real date shown year first (`2025-10-22`): Settl reads a shown `22-10-2025` month first and rejects it. Settl creates a series the rows name that it does not have yet (`<MP>_PT1H`, with the same settings as `<MP>_PT15M`), so there is no TimeSeries file to import.
 
 The file starts with the two header rows of Settl's template (`MeteringPointMeter` version 8). Left out, and named in the output: a switch on or before Settl's earliest entry (Settl is right already), an earliest entry that already has the old value (imported before), a metering point with more than one switch (by hand) or not found in Settl. If Settl cannot be read for a metering point, no file is written and the exit code is 1.
 
@@ -231,6 +231,17 @@ The file starts with the two header rows of Settl's template (`MeteringPointMete
 | `--env <name>` | Which environment |
 | `--in <file>` | The resolution-switches file. Default `output/resolution-switches-<env>.csv` |
 | `--parallel <n>` | Metering points asked about at a time (default 6) |
+| `--correct` | Write the correction for switches already imported with empty value columns (below), to `MeteringPointMeters_V8_<env>_<date>_correction.xlsx` |
+
+### `--correct`
+
+The first production import (2026-11-09) filled only the columns that change, and Settl's new history has no `EstimatedAnnualVolume` or meter values from the earliest entry up to the next version it already had. `--correct` reads every MeterCharacteristics version of each metering point in the file. The first version with an `EstimatedAnnualVolume` or an `Ampere` is the source. Each earlier version that lacks either gets an `Update` row with its own date, `MeterReadingOccurrence` and series, and the source's values (as above). The output names the source date and the rows per metering point. Review it: the values are the ones Settl holds later, not necessarily what held back then.
+
+Left out, and named in the output: the earliest entry is not the old resolution yet (not imported, use `switch-import`), no version on `ChangeDate`, no version with values, or nothing missing. A metering point whose earliest entry was the old resolution before any import also looks imported, so pass `--in` with a file of only the imported metering points (same columns as `resolution-switches-<env>.csv`).
+
+```powershell
+.\TimeSeries.Cli.exe switch-import --env production --correct --in output\resolution-switches-production-imported.csv
+```
 
 ## `requarter`
 

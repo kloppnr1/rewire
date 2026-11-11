@@ -22,7 +22,8 @@ public sealed class SwitchImportRunnerTests : IDisposable
     {
         public Dictionary<string, Guid> Ids { get; } = new();
         public Dictionary<Guid, List<DateTime>> Starts { get; } = new();
-        public Dictionary<Guid, List<string>> Occurrences { get; } = new();
+        // Settl's MeterCharacteristics versions per metering point: start (UTC) and what holds from it.
+        public Dictionary<Guid, List<(DateTime Start, MeterEntry Entry)>> Versions { get; } = new();
         public string? HistoryError { get; set; }
         public List<(Guid Id, DateTime At)> VersionReads { get; } = [];
 
@@ -32,22 +33,29 @@ public sealed class SwitchImportRunnerTests : IDisposable
         public Task<(List<DateTime>? Starts, string? Error)> MeterCharacteristicsStartsAsync(Guid id, CancellationToken cancellationToken) =>
             Task.FromResult<(List<DateTime>?, string?)>(HistoryError != null ? (null, HistoryError) : (Starts[id], null));
 
-        public Task<(List<string>? Occurrences, string? Error)> MeterReadingOccurrencesAtAsync(Guid id, DateTime at, CancellationToken cancellationToken)
+        public Task<(MeterEntry? Entry, string? Error)> MeterEntryAtAsync(Guid id, DateTime at, CancellationToken cancellationToken)
         {
             lock (VersionReads)
                 VersionReads.Add((id, at));
-            return Task.FromResult<(List<string>?, string?)>((Occurrences[id], null));
+            var entry = Versions[id].Where(v => v.Start <= at).MaxBy(v => v.Start).Entry;
+            return Task.FromResult<(MeterEntry?, string?)>((entry, null));
         }
     }
 
+    private static readonly DateTime Created = new(2023, 12, 31, 23, 0, 0, DateTimeKind.Utc);   // 2024-01-01 Danish
+    private static readonly DateTime FromDataHub = new(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc); // 2026-09-01 Danish
+
+    private static MeterEntry Entry(string occurrence, double? volume = 4200, string? ampere = "25", int meters = 1) =>
+        new(volume, Enumerable.Range(0, meters).Select(_ => new MeterValues(occurrence, 6, 2, 1.0, ampere)).ToList());
+
     // A metering point in Settl as migrated: meter entries from create (2024-01-01 Danish) and DataHub
-    // (2026-09-01), all QuarterHourly.
+    // (2026-09-01), all QuarterHourly with one meter.
     private Guid InSettl(string mp, string occurrence = "QuarterHourly")
     {
         var id = Guid.NewGuid();
         _settl.Ids[mp] = id;
-        _settl.Starts[id] = [new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), new DateTime(2023, 12, 31, 23, 0, 0, DateTimeKind.Utc)];
-        _settl.Occurrences[id] = [occurrence];
+        _settl.Starts[id] = [FromDataHub, Created];
+        _settl.Versions[id] = [(Created, Entry(occurrence)), (FromDataHub, Entry(occurrence, volume: 3900))];
         return id;
     }
 
@@ -68,8 +76,27 @@ public sealed class SwitchImportRunnerTests : IDisposable
         return path;
     }
 
-    private Task<int> Run(string input) =>
-        new SwitchImportRunner(_settl, _logs.Add).RunAsync("test", input, _dir, parallel: 4, Today);
+    private Task<int> Run(string input, bool correct = false) =>
+        new SwitchImportRunner(_settl, _logs.Add).RunAsync("test", input, _dir, parallel: 4, Today, correct: correct);
+
+    private string CorrectionPath => Path.Combine(_dir, "MeteringPointMeters_V8_test_2026-11-10_correction.xlsx");
+
+    private static readonly DateTime ChangeDec9 = new(2025, 12, 8, 23, 0, 0, DateTimeKind.Utc); // 2025-12-09 Danish
+
+    // Settl after the first switch-import: the rows left the earliest entry and the ChangeDate entry without values;
+    // the DataHub entry still has them.
+    private Guid ImportedWithoutValues(string mp)
+    {
+        var id = InSettl(mp);
+        _settl.Starts[id] = [FromDataHub, ChangeDec9, Created];
+        _settl.Versions[id] =
+        [
+            (Created, Entry("Hourly", volume: null, ampere: null)),
+            (ChangeDec9, Entry("QuarterHourly", volume: null, ampere: null)),
+            (FromDataHub, Entry("QuarterHourly", volume: 3900, ampere: "35")),
+        ];
+        return id;
+    }
 
     private string MetersPath => Path.Combine(_dir, "MeteringPointMeters_V8_test_2026-11-10.xlsx");
 
@@ -112,11 +139,109 @@ public sealed class SwitchImportRunnerTests : IDisposable
             Assert.Equal(XLDataType.DateTime, date.DataType);
             Assert.Equal("2025-12-09", date.GetFormattedString());
         }
-        Assert.Equal("", meters[0]["MeterIdentification"]);  // only the columns that change are filled
+        Assert.Equal("", meters[0]["MeterIdentification"]);  // the row names no meter
         OnlyTheMetersFile();
         Assert.DoesNotContain(_logs, l => l.StartsWith("TimeSeries", StringComparison.Ordinal));
-        // The earliest entry is read an hour into it.
-        Assert.Equal(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Assert.Single(_settl.VersionReads).At);
+        // The earliest entry and the one at ChangeDate (2025-12-09 Danish midnight is 2025-12-08T23:00Z) are read an hour into them.
+        Assert.Equal([new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2025, 12, 9, 0, 0, 0, DateTimeKind.Utc)],
+            _settl.VersionReads.Select(v => v.At));
+    }
+
+    [Fact]
+    public async Task EachRow_CarriesWhatSettlHoldsAtItsDate()
+    {
+        var id = InSettl(Mp1);
+        _settl.Versions[id] =
+        [
+            (Created, Entry("QuarterHourly", volume: 4200, ampere: "25")),
+            (new DateTime(2025, 6, 30, 22, 0, 0, DateTimeKind.Utc), Entry("QuarterHourly", volume: 3900, ampere: "35")),
+        ];
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
+
+        var meters = Rows(MetersPath);
+        Assert.Equal(("4200", "6", "2", "1", "25"),
+            (meters[0]["EstimatedAnnualVolume"], meters[0]["DigitsOfPrecision"], meters[0]["Decimals"], meters[0]["MultiplicationFactor"], meters[0]["Ampere"]));
+        Assert.Equal(("3900", "35"), (meters[1]["EstimatedAnnualVolume"], meters[1]["Ampere"]));
+    }
+
+    [Fact]
+    public async Task NoVolumeOrAmpereInSettl_LeavesThoseCellsEmpty()
+    {
+        var id = InSettl(Mp1);
+        _settl.Versions[id] = [(Created, Entry("QuarterHourly", volume: null, ampere: null))];
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
+
+        var meters = Rows(MetersPath);
+        Assert.All(meters, m => Assert.Equal(("", "", "6"), (m["EstimatedAnnualVolume"], m["Ampere"], m["DigitsOfPrecision"])));
+    }
+
+    [Fact]
+    public async Task SeveralMeters_LeaveTheMeterColumnsEmpty_AndSaySo()
+    {
+        var id = InSettl(Mp1);
+        _settl.Versions[id] = [(Created, Entry("QuarterHourly", meters: 2))];
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
+
+        var meters = Rows(MetersPath);
+        Assert.All(meters, m => Assert.Equal(("4200", "", "", "", ""),
+            (m["EstimatedAnnualVolume"], m["DigitsOfPrecision"], m["Decimals"], m["MultiplicationFactor"], m["Ampere"])));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: 2 meters at 2024-01-01, meter columns left empty"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: 2 meters at 2025-12-09, meter columns left empty"));
+    }
+
+    [Fact]
+    public async Task Correct_FillsTheVersionsBeforeTheFirstWithValues_KeepingTheirOwnResolution()
+    {
+        ImportedWithoutValues(Mp1);
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M")), correct: true));
+
+        var meters = Rows(CorrectionPath);
+        Assert.Equal(
+            [
+                ("2024-01-01", "Hourly", $"{Mp1}_PT1H", "3900", "35", "6", "2", "1"),
+                ("2025-12-09", "QuarterHourly", $"{Mp1}_PT15M", "3900", "35", "6", "2", "1"),
+            ],
+            meters.Select(m => (m["Date"], m["MeterReadingOccurrence"], m["MeasuredTimeSeriesName"], m["EstimatedAnnualVolume"],
+                m["Ampere"], m["DigitsOfPrecision"], m["Decimals"], m["MultiplicationFactor"])));
+        Assert.All(meters, m => Assert.Equal(("Update", "False", "DK"), (m["Action"], m["OverwriteFuture"], m["CountryCode"])));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: values from Settl's meter entry at 2026-09-01 → 2024-01-01, 2025-12-09"));
+        Assert.False(File.Exists(MetersPath));
+    }
+
+    [Fact]
+    public async Task Correct_LeavesOutWhatIsNotImported_AlreadyRight_OrHasNoSource()
+    {
+        InSettl(Mp1);                       // never imported: earliest entry is still QuarterHourly
+        var right = ImportedWithoutValues(Mp2);
+        _settl.Versions[right][0] = (Created, Entry("Hourly"));
+        _settl.Versions[right][1] = (ChangeDec9, Entry("QuarterHourly"));
+        const string Mp3 = "571313100000000003";
+        var none = ImportedWithoutValues(Mp3);
+        _settl.Versions[none][2] = (FromDataHub, Entry("QuarterHourly", volume: null, ampere: null));
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"), (Mp2, "2025-12-09", "PT15M"), (Mp3, "2025-12-09", "PT15M")), correct: true));
+
+        Assert.Empty(Rows(CorrectionPath));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: not imported yet"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp2}: left out: Settl's history already has the values"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp3}: left out: no Settl meter entry has an EstimatedAnnualVolume or an Ampere"));
+    }
+
+    [Fact]
+    public async Task Correct_WithoutAnEntryOnChangeDate_IsLeftOut()
+    {
+        var id = ImportedWithoutValues(Mp1);
+        _settl.Starts[id] = [FromDataHub, Created];
+        _settl.Versions[id].RemoveAt(1);
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M")), correct: true));
+
+        Assert.Empty(Rows(CorrectionPath));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: Settl has no meter entry on ChangeDate"));
     }
 
     [Fact]
