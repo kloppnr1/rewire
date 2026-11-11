@@ -6,6 +6,8 @@ namespace TimeSeries.Cli.Tests.Fixtures;
 
 /// <summary>
 /// Records all calls and lets the test program responses. Hand-rolled instead of a mock framework.
+/// The runner calls these from parallel workers (done checks, presence scans), so every recording
+/// takes a lock: an unlocked List.Add from two threads can drop one of the calls.
 /// </summary>
 public sealed class RecordingTimeSeriesClient : ISettlTimeSeriesClient
 {
@@ -20,14 +22,14 @@ public sealed class RecordingTimeSeriesClient : ISettlTimeSeriesClient
     public Task<(bool Success, string? Error)> PostPointsAsync(
         Guid timeSeriesGuid, SettlTimeSeriesRequestDto payload, CancellationToken cancellationToken = default)
     {
-        PostCalls.Add((timeSeriesGuid, payload));
+        lock (PostCalls) PostCalls.Add((timeSeriesGuid, payload));
         return Task.FromResult(PostResponse(timeSeriesGuid, payload));
     }
 
     public Task<(SettlPointsSummaryDto? Summary, string? Error)> GetPointsSummaryAsync(
         Guid timeSeriesGuid, DateOnly start, DateOnly end, CancellationToken cancellationToken = default)
     {
-        GetPointsCalls.Add((timeSeriesGuid, start, end));
+        lock (GetPointsCalls) GetPointsCalls.Add((timeSeriesGuid, start, end));
         // Mirrors Settl: a summary period longer than one year is rejected with HTTP 400.
         if (end > start.AddYears(1))
             return Task.FromResult(((SettlPointsSummaryDto?)null, (string?)"HTTP 400: \"The requested period must not exceed 1 year.\""));
@@ -91,7 +93,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public Task<(MeteringPointInfoDto? MeteringPoint, string? Error)> SearchByIdentificationAsync(
         string meteringPointIdentification, CancellationToken cancellationToken = default)
     {
-        SearchByIdentificationCalls.Add(meteringPointIdentification);
+        lock (SearchByIdentificationCalls) SearchByIdentificationCalls.Add(meteringPointIdentification);
         var result = SearchByIdentificationResponse(meteringPointIdentification);
         return Task.FromResult((result, (string?)null));
     }
@@ -99,7 +101,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public Task<(MeteringPointCurrentDto? MeteringPoint, string? Error)> GetByIdAsync(
         Guid meteringPointId, DateTime? effectiveDate = null, CancellationToken cancellationToken = default)
     {
-        GetByIdCalls.Add(meteringPointId);
+        lock (GetByIdCalls) GetByIdCalls.Add(meteringPointId);
         var result = GetByIdResponse(meteringPointId);
         return Task.FromResult((result, (string?)null));
     }
@@ -107,7 +109,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public Task<(List<TimeSeriesInfoDto>? TimeSeries, string? Error)> GetTimeSeriesAsync(
         Guid meteringPointGuid, CancellationToken cancellationToken = default)
     {
-        GetTimeSeriesCalls.Add(meteringPointGuid);
+        lock (GetTimeSeriesCalls) GetTimeSeriesCalls.Add(meteringPointGuid);
         var result = GetTimeSeriesResponse(meteringPointGuid);
         return Task.FromResult((result, (string?)null));
     }
@@ -115,7 +117,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public Task<(bool Success, string? Error)> AddExternallyInvoicedPeriodsAsync(
         Guid meteringPointId, AddExternallyInvoicedPeriodsRequest request, CancellationToken cancellationToken = default)
     {
-        AddEipCalls.Add((meteringPointId, request));
+        lock (AddEipCalls) AddEipCalls.Add((meteringPointId, request));
         return Task.FromResult(AddEipResponse(meteringPointId, request));
     }
 
@@ -163,7 +165,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public List<Guid> GetByIdV4Calls { get; } = new();
     public Task<(MeteringPointV4Dto? MeteringPoint, string? Error)> GetByIdV4Async(Guid id, DateTime? d = null, CancellationToken ct = default)
     {
-        GetByIdV4Calls.Add(id);
+        lock (GetByIdV4Calls) GetByIdV4Calls.Add(id);
         return Task.FromResult((GetByIdV4Response(id), (string?)null));
     }
     public Task<(bool Success, string? Error)> UpdateEstimatedAnnualVolumeAsync(Guid id, double volume, DateOnly validFrom, CancellationToken ct = default) => Task.FromResult((true, (string?)null));
@@ -173,7 +175,7 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
     public Task<(GetDeliveryStatusesResponse? DeliveryStatuses, string? Error)> GetDeliveryStatusesAsync(
         Guid meteringPointId, CancellationToken cancellationToken = default)
     {
-        GetDeliveryStatusesCalls.Add(meteringPointId);
+        lock (GetDeliveryStatusesCalls) GetDeliveryStatusesCalls.Add(meteringPointId);
         return Task.FromResult(GetDeliveryStatusesResponse(meteringPointId));
     }
 }
@@ -228,14 +230,14 @@ public sealed class RecordingCustomerClient : ISettlCustomerClient
     public Task<(CustomerInfoDto? Customer, string? Error)> SearchByCustomerNumberAsync(
         string customerNumber, string countryCode = "DK", CancellationToken cancellationToken = default)
     {
-        SearchByCustomerNumberCalls.Add(customerNumber);
+        lock (SearchByCustomerNumberCalls) SearchByCustomerNumberCalls.Add(customerNumber);
         return Task.FromResult((SearchByCustomerNumberResponse(customerNumber), (string?)null));
     }
 
     public Task<(List<CustomerMeteringPointDto>? Items, string? Error)> GetMeteringPointsAsync(
         Guid customerId, CancellationToken cancellationToken = default)
     {
-        GetMeteringPointsCalls.Add(customerId);
+        lock (GetMeteringPointsCalls) GetMeteringPointsCalls.Add(customerId);
         return Task.FromResult((GetMeteringPointsResponse(customerId), (string?)null));
     }
 
