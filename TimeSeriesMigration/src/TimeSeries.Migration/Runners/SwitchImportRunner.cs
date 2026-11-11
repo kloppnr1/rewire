@@ -438,8 +438,13 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         Set("CountryCode", "DK");
         Set("MeterReadingOccurrence", resolution.Occurrence);
         Set("MeasuredTimeSeriesName", SeriesName(meteringPoint, resolution));
+        // Settl rejects a volume without a unit: "QuantityUnit must be set if EstimatedAnnualVolume is set"
+        // (featuretest, 2026-11-11).
         if (entry.EstimatedAnnualVolume is { } volume)
+        {
             Cell("EstimatedAnnualVolume").Value = volume;
+            Set("QuantityUnit", "kWh");
+        }
         // The row names no meter, so meter values are copied only when the version has exactly one.
         if (entry.Meters is [var meter])
         {

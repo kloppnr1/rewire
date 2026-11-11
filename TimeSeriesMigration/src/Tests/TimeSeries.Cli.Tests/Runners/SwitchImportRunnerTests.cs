@@ -163,6 +163,7 @@ public sealed class SwitchImportRunnerTests : IDisposable
         Assert.Equal(("4200", "6", "2", "1", "25"),
             (meters[0]["EstimatedAnnualVolume"], meters[0]["DigitsOfPrecision"], meters[0]["Decimals"], meters[0]["MultiplicationFactor"], meters[0]["Ampere"]));
         Assert.Equal(("3900", "35"), (meters[1]["EstimatedAnnualVolume"], meters[1]["Ampere"]));
+        Assert.All(meters, m => Assert.Equal("kWh", m["QuantityUnit"]));
     }
 
     [Fact]
@@ -174,7 +175,8 @@ public sealed class SwitchImportRunnerTests : IDisposable
         Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"))));
 
         var meters = Rows(MetersPath);
-        Assert.All(meters, m => Assert.Equal(("", "", "6"), (m["EstimatedAnnualVolume"], m["Ampere"], m["DigitsOfPrecision"])));
+        Assert.All(meters, m => Assert.Equal(("", "", "", "6"),
+            (m["EstimatedAnnualVolume"], m["QuantityUnit"], m["Ampere"], m["DigitsOfPrecision"])));
     }
 
     [Fact]
@@ -207,7 +209,8 @@ public sealed class SwitchImportRunnerTests : IDisposable
             ],
             meters.Select(m => (m["Date"], m["MeterReadingOccurrence"], m["MeasuredTimeSeriesName"], m["EstimatedAnnualVolume"],
                 m["Ampere"], m["DigitsOfPrecision"], m["Decimals"], m["MultiplicationFactor"])));
-        Assert.All(meters, m => Assert.Equal(("Update", "False", "DK"), (m["Action"], m["OverwriteFuture"], m["CountryCode"])));
+        Assert.All(meters, m => Assert.Equal(("Update", "False", "DK", "kWh"),
+            (m["Action"], m["OverwriteFuture"], m["CountryCode"], m["QuantityUnit"])));
         Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: values from Settl's meter entry at 2026-09-01 → 2024-01-01, 2025-12-09"));
         Assert.False(File.Exists(MetersPath));
     }
