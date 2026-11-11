@@ -187,6 +187,8 @@ public class MeteringPointMeterDto
     public int DigitsOfPrecision { get; set; }
     public double? MultiplicationFactor { get; set; }
     public int Decimals { get; set; }
+    /// <summary>Settl's market API sends Ampere as text (Market-Internal OpenAPI 2026-06-15). Null is left out of a create body.</summary>
+    public string? Ampere { get; set; }
     public string? MeterReadingOccurrence { get; set; }
     public string? ProductionType { get; set; }
 }

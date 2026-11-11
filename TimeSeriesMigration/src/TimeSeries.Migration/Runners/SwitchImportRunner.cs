@@ -16,9 +16,15 @@ public interface ISwitchImportSettlReader
     /// <summary>Start of every MeterCharacteristics version, as Settl returns them (UTC).</summary>
     Task<(List<DateTime>? Starts, string? Error)> MeterCharacteristicsStartsAsync(Guid id, CancellationToken cancellationToken);
 
-    /// <summary>The MeterReadingOccurrence of each meter in the MeterCharacteristics version in force at <paramref name="at"/>.</summary>
-    Task<(List<string>? Occurrences, string? Error)> MeterReadingOccurrencesAtAsync(Guid id, DateTime at, CancellationToken cancellationToken);
+    /// <summary>The MeterCharacteristics version in force at <paramref name="at"/>: its estimated annual volume and meters.</summary>
+    Task<(MeterEntry? Entry, string? Error)> MeterEntryAtAsync(Guid id, DateTime at, CancellationToken cancellationToken);
 }
+
+/// <summary>What switch-import copies from a Settl MeterCharacteristics version into its import row.</summary>
+public sealed record MeterEntry(double? EstimatedAnnualVolume, IReadOnlyList<MeterValues> Meters);
+
+/// <summary>One meter of a MeterCharacteristics version.</summary>
+public sealed record MeterValues(string Occurrence, int DigitsOfPrecision, int Decimals, double? MultiplicationFactor, string? Ampere);
 
 public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPoints)
     : ISwitchImportSettlReader
@@ -35,10 +41,17 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
         return (history?.MeterCharacteristicsDates ?? (error == null ? [] : null), error);
     }
 
-    public async Task<(List<string>? Occurrences, string? Error)> MeterReadingOccurrencesAtAsync(Guid id, DateTime at, CancellationToken cancellationToken)
+    public async Task<(MeterEntry? Entry, string? Error)> MeterEntryAtAsync(Guid id, DateTime at, CancellationToken cancellationToken)
     {
         var (mp, error) = await meteringPoints.GetByIdAsync(id, at, cancellationToken);
-        return (mp?.MeterCharacteristics?.Meters.Select(m => m.MeterReadingOccurrence ?? "").ToList(), error);
+        if (mp == null)
+            return (null, error ?? "metering point not returned");
+        var characteristics = mp.MeterCharacteristics;
+        var volume = characteristics?.EstimatedAnnualVolume is { IsEmpty: false } eav ? eav.Value : (double?)null;
+        var meters = characteristics?.Meters
+            .Select(m => new MeterValues(m.MeterReadingOccurrence ?? "", m.DigitsOfPrecision, m.Decimals, m.MultiplicationFactor, m.Ampere))
+            .ToList() ?? [];
+        return (new MeterEntry(volume, meters), null);
     }
 }
 
@@ -47,7 +60,10 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
 /// resolution-switches-&lt;env&gt;.csv, so Settl holds the resolution from before the switch until the
 /// DataHub message's date (ChangeDate). Read-only towards Settl and Xellent; it writes only the file.
 /// Two Update rows per metering point — the old MeterReadingOccurrence and series from Settl's earliest
-/// MeterCharacteristics entry, the new ones from ChangeDate. OverwriteFuture stays False. Settl creates a series the
+/// MeterCharacteristics entry, the new ones from ChangeDate. OverwriteFuture stays False. Each row also carries what
+/// Settl holds at its date (EstimatedAnnualVolume; DigitsOfPrecision, Decimals, MultiplicationFactor and Ampere of a
+/// single meter): rows with those columns empty left the new history without them (production, Systemate,
+/// 2026-11-11). MeterType is not a column of the template, so the import cannot carry it. Settl creates a series the
 /// rows name that it lacks (<c>&lt;MP&gt;_PT1H</c>, like the <c>&lt;MP&gt;_PT15M</c> it has): featuretest
 /// 571313115101027361, 2026-11-10.
 /// Left out: a switch on or before Settl's earliest entry (Settl is right already), one whose earliest entry already
@@ -65,7 +81,16 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
 
     /// <summary>Per metering point: what goes in the files, or why nothing does.</summary>
     internal sealed record Outcome(string MeteringPoint, string Result, DateOnly? From = null, DateOnly? ChangeDate = null,
-        Resolution? Old = null, Resolution? New = null);
+        Resolution? Old = null, Resolution? New = null, MeterEntry? OldEntry = null, MeterEntry? NewEntry = null)
+    {
+        /// <summary>Why a row's meter columns stay empty: the version has no meter, or several.</summary>
+        public IEnumerable<string> Notes()
+        {
+            foreach (var (date, entry) in new[] { (From, OldEntry), (ChangeDate, NewEntry) })
+                if (entry is { Meters.Count: not 1 })
+                    yield return $"{entry.Meters.Count} meters at {date:yyyy-MM-dd}, meter columns left empty";
+        }
+    }
 
     /// <summary>Hour or Quarter, as the file names them.</summary>
     internal sealed record Resolution(string Occurrence, string SeriesSuffix)
@@ -115,6 +140,9 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         var failed = outcomes.Where(o => o.Result.StartsWith("ERROR", StringComparison.Ordinal)).ToList();
         foreach (var o in outcomes.Where(o => o.Result != "Import"))
             log($"  MP {o.MeteringPoint}: {o.Result}");
+        foreach (var o in outcomes.Where(o => o.Result == "Import"))
+            foreach (var note in o.Notes())
+                log($"  MP {o.MeteringPoint}: {note}");
         if (failed.Count > 0)
         {
             log($"ERROR: {failed.Count} metering point(s) could not be read from Settl; no files written.");
@@ -158,14 +186,18 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         if (row.ChangeDate <= from)
             return new Outcome(mp, "left out: switch on or before Settl's earliest meter entry");
 
-        // Read the earliest version an hour into it, clear of the boundary.
-        var (occurrences, versionError) = await settl.MeterReadingOccurrencesAtAsync(marketId, earliest.AddHours(1), cancellationToken);
-        if (versionError != null || occurrences == null)
+        // Read each version an hour into it, clear of the boundary.
+        var (oldEntry, versionError) = await settl.MeterEntryAtAsync(marketId, earliest.AddHours(1), cancellationToken);
+        if (versionError != null || oldEntry == null)
             return new Outcome(mp, $"ERROR: meter entry failed: {versionError}");
-        if (occurrences.Count > 0 && occurrences.All(o => o == oldResolution.Occurrence))
+        if (oldEntry.Meters.Count > 0 && oldEntry.Meters.All(m => m.Occurrence == oldResolution.Occurrence))
             return new Outcome(mp, $"left out: Settl's earliest meter entry is already {oldResolution.Occurrence}");
 
-        return new Outcome(mp, "Import", from, row.ChangeDate, oldResolution, newResolution);
+        var (newEntry, changeError) = await settl.MeterEntryAtAsync(marketId, DanishMidnightUtc(row.ChangeDate).AddHours(1), cancellationToken);
+        if (changeError != null || newEntry == null)
+            return new Outcome(mp, $"ERROR: meter entry at {row.ChangeDate:yyyy-MM-dd} failed: {changeError}");
+
+        return new Outcome(mp, "Import", from, row.ChangeDate, oldResolution, newResolution, oldEntry, newEntry);
     }
 
     private static DateTime ToUtc(DateTime value) => value.Kind switch
@@ -174,6 +206,9 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         DateTimeKind.Local => value.ToUniversalTime(),
         _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
     };
+
+    private static DateTime DanishMidnightUtc(DateOnly date) =>
+        TimeZoneInfo.ConvertTimeToUtc(date.ToDateTime(TimeOnly.MinValue), DanishTimeZone);
 
     private static DateOnly ToDanishDate(DateTime utc) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utc, DanishTimeZone));
@@ -296,13 +331,14 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         var r = 3;
         foreach (var o in imports)
         {
-            WriteMeterRow(sheet, r++, o.MeteringPoint, o.From!.Value, o.Old!);
-            WriteMeterRow(sheet, r++, o.MeteringPoint, o.ChangeDate!.Value, o.New!);
+            WriteMeterRow(sheet, r++, o.MeteringPoint, o.From!.Value, o.Old!, o.OldEntry!);
+            WriteMeterRow(sheet, r++, o.MeteringPoint, o.ChangeDate!.Value, o.New!, o.NewEntry!);
         }
         book.SaveAs(path);
     }
 
-    private static void WriteMeterRow(IXLWorksheet sheet, int row, string meteringPoint, DateOnly date, Resolution resolution)
+    private static void WriteMeterRow(IXLWorksheet sheet, int row, string meteringPoint, DateOnly date, Resolution resolution,
+        MeterEntry entry)
     {
         IXLCell Cell(string column) => sheet.Cell(row, Array.IndexOf(MetersColumns, column) + 1);
         void Set(string column, string value) => Cell(column).Value = value;
@@ -318,6 +354,18 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         Set("CountryCode", "DK");
         Set("MeterReadingOccurrence", resolution.Occurrence);
         Set("MeasuredTimeSeriesName", SeriesName(meteringPoint, resolution));
+        if (entry.EstimatedAnnualVolume is { } volume)
+            Cell("EstimatedAnnualVolume").Value = volume;
+        // The row names no meter, so meter values are copied only when the version has exactly one.
+        if (entry.Meters is [var meter])
+        {
+            Cell("DigitsOfPrecision").Value = meter.DigitsOfPrecision;
+            Cell("Decimals").Value = meter.Decimals;
+            if (meter.MultiplicationFactor is { } factor)
+                Cell("MultiplicationFactor").Value = factor;
+            if (!string.IsNullOrEmpty(meter.Ampere))
+                Set("Ampere", meter.Ampere);
+        }
     }
 
     private static void WriteHeader(IXLWorksheet sheet, string[] columns)
