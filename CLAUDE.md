@@ -60,7 +60,7 @@ Production is dry-run. `production`, `production-hev` and `production-vhel` need
 
 ## Production runs
 
-When the user asks how to run something in production, give the steps from [README.md](README.md#running-timeseriescli-in-production): build and publish on the laptop, copy to `C:\Services\DataMigration\TimeSeriesCli` on `SVDKRA1VBIFROST` without the build's `appsettings.json`, run on the server. Write out the exact commands for the task, with `--env` and, for `post`, `--dry-run` first. Never tell the user to put production credentials on the laptop or in user-secrets: they live only in the server's `appsettings.json`. A hot production run needs the user's explicit yes.
+When the user asks how to run something in production, give the steps from [docs/production-runbook.md](docs/production-runbook.md): build and publish on the laptop, copy to `C:\Services\DataMigration\TimeSeriesCli` on `SVDKRA1VBIFROST` without the build's `appsettings.json`, run on the server. Write out the exact commands for the task, with `--env` and, for `post`, `--dry-run` first. Never tell the user to put production credentials on the laptop or in user-secrets: they live only in the server's `appsettings.json`. A hot production run needs the user's explicit yes.
 
 If a change edits `TimeSeries.Cli/appsettings.json`, say so, because the user must make the same edit by hand on the server.
 
