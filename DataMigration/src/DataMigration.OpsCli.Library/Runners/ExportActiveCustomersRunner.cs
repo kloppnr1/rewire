@@ -42,7 +42,9 @@ public class ExportActiveCustomersRunOptions
 /// scan stops once enough customers are found. Per customer the same rule is checked again on each
 /// linked metering point's own market data. Only those
 /// metering points are linked in the export: customer, payer and contract links to anything else
-/// (moved-out, water, not in delivery) are left out, and so are contracts with no active link.</para>
+/// (moved-out, water, not in delivery) are left out, and so are contracts with no active link.
+/// A link to an active metering point is kept when it is open today or starts later; ended links
+/// are left out.</para>
 ///
 /// <para>Per customer: customer (v2 + v3), metering point links, payers with their metering point
 /// links, each electricity metering point (market, billing, delivery statuses, consumer national
@@ -292,12 +294,17 @@ public class ExportActiveCustomersRunner
 
     /// <summary>
     /// True when a link (customer, payer or contract → metering point) points at one of the customer's
-    /// active metering points and is open today. Settl writes open-ended links as year 9999.
+    /// active metering points and has not ended: open today, or starting later (an agreed contract or
+    /// price change that takes effect after the export). Ended links are history and left out.
+    /// Settl writes open-ended links as year 9999.
     /// </summary>
     private static bool IsActiveLink(JsonNode? link, DateTime today, HashSet<Guid> active) =>
         Guid.TryParse(link?["MeteringPointId"]?.GetValue<string>(), out var mpId)
         && active.Contains(mpId)
-        && IsOpen(link, today);
+        && NotEnded(link, today);
+
+    private static bool NotEnded(JsonNode? link, DateTime today) =>
+        ParseDate(link?["End"]) is not { } end || end > today;
 
     private static bool IsOpen(JsonNode? link, DateTime today)
     {

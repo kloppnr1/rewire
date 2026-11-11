@@ -9,7 +9,7 @@
 - Source: Settl only, no Xellent reads
 - Selection: customers linked today to an electricity metering point with `InDelivery=true`
 - Two active delivery statuses on one metering point cannot occur; if Settl returns it anyway, the run fails
-- Current state only, no history
+- Current state only, no history: links open today or starting later; ended links left out
 - Environment: `production`, own folder per environment
 - Schedule: nightly
 - Personal data on the share: approved
@@ -57,14 +57,14 @@
 
 ## Open
 - Payment agreement source: no Settl API endpoint documented; ask the vendor for one. Until then someone must drop the manual Settl CSV before each run; who and how often is open- Host and UNC path
-- Future-dated links (e.g. a contract or price change starting next month): today's rule drops them; "current state only" may need to mean "open today or later"
 - SonWin: raw or projected JSON, schema, how they pick up runs
 - Settl vendor: modified-since filter or change feed (would replace full scan)
 
 ## Phases
 1. Spike (done): `ExportActiveCustomersFlowTests` runs the export over a fake tenant filled by real `create`
    - Exported: customer, in-delivery metering points with market, billing and delivery status, payers and links, open-today contracts, price lists, extra invoice lines
-   - Left out: metering points not in delivery, customers without one, contract links starting after today
+   - Left out: metering points not in delivery, customers without one, ended links
+   - Links starting after today are kept (decided 2026-11-11)
 2. Build: JSON Lines, share delivery, manifest, delta, lock; tests for diff, hashing, atomic write against the fake
 3. Featuretest: nightly schedule to a test share; SonWin trial import
 4. Production: after host, share and SonWin format are settled

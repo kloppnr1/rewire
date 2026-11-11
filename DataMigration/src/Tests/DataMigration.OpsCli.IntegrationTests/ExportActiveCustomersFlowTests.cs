@@ -73,12 +73,18 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             .ToHashSet());
 
         // Contracts: create linked the account's contracts from their contract part start, which in
-        // this fixture is in the future. The export keeps current state only, so a contract whose
-        // links all start after today is left out.
-        Assert.NotEmpty(fixture.Settl.Api.Contracts.SelectMany(c => c.Links));
-        Assert.All(fixture.Settl.Api.Contracts.SelectMany(c => c.Links),
+        // this fixture is after today. Links that start later are kept, so SonWin sees agreed changes.
+        var futureLinks = fixture.Settl.Api.Contracts.SelectMany(c => c.Links).ToList();
+        Assert.NotEmpty(futureLinks);
+        Assert.All(futureLinks,
             l => Assert.True(DateTime.Parse((string)l["Start"]!).ToUniversalTime().Date > DateTime.UtcNow.Date));
-        Assert.Empty(customer["contracts"]!.AsArray());
+        var expectedContracts = fixture.Settl.Api.Contracts
+            .Where(c => c.Links.Any(l => expectedMps.Contains(Guid.Parse((string)l["MeteringPointId"]!))))
+            .Select(c => c.Id)
+            .ToHashSet();
+        Assert.Equal(expectedContracts, customer["contracts"]!.AsArray()
+            .Select(c => Guid.Parse((string)c!["Id"]!))
+            .ToHashSet());
     }
 
     [Fact]
@@ -138,6 +144,14 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
                 ["Start"] = "2020-01-01T00:00:00Z",
                 ["End"] = "9999-12-31T23:59:58.999Z",
             });
+            // An ended link on the same metering point is history and left out.
+            current.Links.Add(new JsonObject
+            {
+                ["Id"] = Guid.NewGuid().ToString(),
+                ["MeteringPointId"] = inDeliveryMp.ToString(),
+                ["Start"] = "2018-01-01T00:00:00Z",
+                ["End"] = "2019-12-31T23:00:00Z",
+            });
             current.Links.Add(new JsonObject
             {
                 ["Id"] = Guid.NewGuid().ToString(),
@@ -162,9 +176,10 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             Assert.DoesNotContain(customer["meteringPointLinks"]!.AsArray(),
                 l => Guid.Parse((string)l!["MeteringPointId"]!) == outOfDelivery);
 
-            var contract = Assert.Single(customer["contracts"]!.AsArray())!;
-            Assert.Equal(current.Id, Guid.Parse((string)contract["Id"]!));
-            Assert.Equal(inDeliveryMp, Guid.Parse((string)Assert.Single(contract["MeteringPoints"]!.AsArray())!["MeteringPointId"]!));
+            var contract = Assert.Single(customer["contracts"]!.AsArray(), c => Guid.Parse((string)c!["Id"]!) == current.Id)!;
+            var link = Assert.Single(contract["MeteringPoints"]!.AsArray())!;
+            Assert.Equal(inDeliveryMp, Guid.Parse((string)link["MeteringPointId"]!));
+            Assert.StartsWith("2020-01-01", (string)link["Start"]!);
 
             Assert.Equal("E_TEST", (string?)customer["priceLists"]?["CustomerPriceListAssociations"]?[0]?["PriceListIdentifier"]);
             Assert.Equal("Test line", (string?)customer["extraInvoiceLines"]?[0]?["Text"]);
