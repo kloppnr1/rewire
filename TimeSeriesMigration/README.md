@@ -243,6 +243,28 @@ Left out, and named in the output: the earliest entry is not the old resolution 
 .\TimeSeries.Cli.exe switch-import --env production --correct --in output\resolution-switches-production-imported.csv
 ```
 
+## `eav-import`
+
+Writes Settl's `MeteringPointMeters` import workbook that gives every active metering point an `EstimatedAnnualVolume` (default 2000 kWh). Read-only: it reads Settl's market API and changes nothing there. The file is for importing in Settl by hand.
+
+```powershell
+.\TimeSeries.Cli.exe eav-import --env featuretest
+.\TimeSeries.Cli.exe eav-import --env production
+```
+
+Active: a parent metering point that Settl's market list shows in delivery (`InDelivery=true`). Children and points not in delivery are counted and left out. For each active point it reads every MeterCharacteristics version from the one in force at the start of the current (or next) delivery period onward; with no delivery period, from the version in force today. Each of those versions without an `EstimatedAnnualVolume` gets its own `Update` row dated at the version's start (Danish date), so one metering point can get several rows. Versions that already have a volume get no row.
+
+An `Update` row replaces the version: empty columns leave it without those values (see `switch-import`). So each row carries the version's `MeterReadingOccurrence` and series (`<MP>_PT1H` or `<MP>_PT15M`) and its meter's `DigitsOfPrecision`, `Decimals`, `MultiplicationFactor` and `Ampere`, plus the new volume. `OverwriteFuture` `False`, `CountryCode` `DK`, `Date` a real date shown year first. A version with no meter, several meters, or no Hourly/QuarterHourly reading leaves the whole metering point out, named in the output, by hand. If Settl cannot be read for a metering point, no file is written and the exit code is 1.
+
+Output: `MeteringPointMeters_V8_<env>_<date>_eav.xlsx` in `Output:BaseDirectory`.
+
+| Option | Meaning |
+|--------|---------|
+| `--env <name>` | Which environment |
+| `--value <kWh>` | The volume to set (default 2000) |
+| `--only <mp> ...` | Just these 18-digit identifications instead of Settl's whole list (for a featuretest trial) |
+| `--parallel <n>` | Metering points asked about at a time (default 6) |
+
 ## `requarter`
 
 Lists the done metering points that were posted as hourly values where Xellent's reading period says 15-minute. Those were posted before hourly values were split into quarters (story 45902), and their done mark keeps every later run away from them.

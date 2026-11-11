@@ -404,7 +404,7 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         "MeasuredTimeSeriesName", "ProductionType",
     ];
 
-    private static void WriteMeters(string path, List<ImportRow> rows)
+    internal static void WriteMeters(string path, List<ImportRow> rows)
     {
         using var book = new XLWorkbook();
         var sheet = book.AddWorksheet("MeteringPointMeters");
