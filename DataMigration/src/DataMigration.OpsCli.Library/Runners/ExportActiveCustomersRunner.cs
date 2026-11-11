@@ -61,6 +61,7 @@ public class ExportActiveCustomersRunner
     private readonly ISettlCustomerLinkLookup _linkLookup;
     private readonly ISettlCustomerClient _customerClient;
     private readonly Action<string> _log;
+    private ReferenceNames _names = ReferenceNames.Empty;
 
     public ExportActiveCustomersRunner(
         ISettlRawReader reader,
@@ -89,6 +90,14 @@ public class ExportActiveCustomersRunner
             ? await ResolveCustomerNumbersAsync(options.CustomerNumbers, ct)
             : await SelectActiveCustomersAsync(options.Limit, ct);
         if (customerIds == null) return 1;
+
+        var (names, namesError) = await LoadReferenceNamesAsync(ct);
+        if (names == null)
+        {
+            _log($"ERROR: reading Settl reference data failed: {namesError}");
+            return 1;
+        }
+        _names = names;
 
         if (options.Limit > 0 && customerIds.Count > options.Limit)
             customerIds = customerIds.Take(options.Limit).ToList();
@@ -332,6 +341,71 @@ public class ExportActiveCustomersRunner
     private static JsonArray ActiveLinks(JsonArray links, DateTime today, HashSet<Guid> active) =>
         new(links.Where(l => IsActiveLink(l, today, active)).Select(l => l!.DeepClone()).ToArray());
 
+    /// <summary>
+    /// Names for the Settl ids the export carries (price area, grid area, customer segment, price
+    /// list, product element), read once per run. They are written next to the Settl response under
+    /// <c>names</c>, so the export is readable without Settl. Any read that fails fails the run.
+    /// </summary>
+    private async Task<(ReferenceNames? Names, string? Error)> LoadReferenceNamesAsync(CancellationToken ct)
+    {
+        var billing = _reader.Settings.BillingBaseUrl;
+        var tenant = _reader.Settings.MarketTenantBaseUrl;
+
+        var (priceLists, e1) = await _reader.GetAllItemsAsync($"{billing}/api/v1/priceLists?CountryCode=DK", PageSize, ct);
+        if (e1 != null) return (null, $"price lists: {e1}");
+        var (elements, e2) = await _reader.GetAllItemsAsync($"{billing}/api/v1/productElements?CountryCode=DK", PageSize, ct);
+        if (e2 != null) return (null, $"product elements: {e2}");
+        var (segments, e3) = await _reader.GetAsync($"{billing}/api/v1/customerSegments", ct);
+        if (e3 != null) return (null, $"customer segments: {e3}");
+        var (areas, e4) = await _reader.GetAllItemsAsync($"{tenant}/v1/market-balance-areas", 100, ct);
+        if (e4 != null) return (null, $"price areas: {e4}");
+        var (gridList, e5) = await _reader.GetAllItemsAsync($"{tenant}/v1/metering-grid-areas", 100, ct);
+        if (e5 != null) return (null, $"grid areas: {e5}");
+
+        // The grid area list carries only ids; the code is on each area's own record.
+        var grid = new Dictionary<Guid, string>();
+        foreach (var item in gridList)
+        {
+            if (!Guid.TryParse(item?["Id"]?.GetValue<string>(), out var id)) continue;
+            var (detail, e6) = await _reader.GetAsync($"{tenant}/v1/metering-grid-areas/{id}", ct);
+            if (e6 != null) return (null, $"grid area {id}: {e6}");
+            if (detail?["MeteringGridAreaIdentification"]?.GetValue<string>() is { } code) grid[id] = code;
+        }
+
+        return (new ReferenceNames(
+            PriceAreas: ByIdOf(areas, "Name"),
+            GridAreas: grid,
+            CustomerSegments: ByIdOf(segments as JsonArray ?? [], "Name"),
+            PriceLists: ByIdOf(priceLists, "PriceListIdentifier"),
+            ProductElements: ByIdOf(elements, "ProductElementCode")), null);
+    }
+
+    private static Dictionary<Guid, string> ByIdOf(JsonArray items, string field)
+    {
+        var result = new Dictionary<Guid, string>();
+        foreach (var item in items)
+            if (Guid.TryParse(item?["Id"]?.GetValue<string>(), out var id)
+                && item?[field] is JsonValue v && v.GetValueKind() == JsonValueKind.String)
+                result[id] = v.GetValue<string>();
+        return result;
+    }
+
+    private sealed record ReferenceNames(
+        Dictionary<Guid, string> PriceAreas,
+        Dictionary<Guid, string> GridAreas,
+        Dictionary<Guid, string> CustomerSegments,
+        Dictionary<Guid, string> PriceLists,
+        Dictionary<Guid, string> ProductElements)
+    {
+        public static readonly ReferenceNames Empty = new([], [], [], [], []);
+
+        /// <summary>The name for a Settl id, or null when the id is absent or unknown.</summary>
+        public string? Name(Dictionary<Guid, string> names, JsonNode? id) =>
+            id is JsonValue v && v.GetValueKind() == JsonValueKind.String
+            && Guid.TryParse(v.GetValue<string>(), out var guid)
+            && names.TryGetValue(guid, out var name) ? name : null;
+    }
+
     private async Task<JsonObject> ExportCustomerAsync(Guid customerId, CancellationToken ct)
     {
         var billing = _reader.Settings.BillingBaseUrl;
@@ -376,6 +450,11 @@ public class ExportActiveCustomersRunner
             meteringPoints.Add(new JsonObject
             {
                 ["meteringPointId"] = mpId.ToString(),
+                ["names"] = new JsonObject
+                {
+                    ["priceArea"] = _names.Name(_names.PriceAreas, marketData?["Grid"]?["MarketBalanceAreaId"]),
+                    ["gridArea"] = _names.Name(_names.GridAreas, marketData?["Grid"]?["MeteringGridAreaId"]),
+                },
                 ["market"] = marketData,
                 ["consumerNationalIds"] = await Get($"mp {mpId} consumerNationalIds",
                     $"{market}/api/v4/meteringPoints/{mpId}/nationalIdentificationNumber"),
@@ -419,6 +498,16 @@ public class ExportActiveCustomersRunner
         var (priceLists, priceListError) = await _reader.PostSearchAsync(
             $"{billing}/api/v2/customers/{customerId}/pricelists/search", new { }, ct);
         if (priceListError != null) errors.Add(new JsonObject { ["section"] = "priceLists", ["error"] = priceListError });
+        foreach (var association in priceLists?["CustomerPriceListAssociations"] as JsonArray ?? [])
+        {
+            if (association is not JsonObject a) continue;
+            a["names"] = new JsonObject
+            {
+                ["priceList"] = _names.Name(_names.PriceLists, a["PriceListId"]),
+                ["productElement"] = _names.Name(_names.ProductElements, a["ProductElementId"]),
+                ["priceArea"] = _names.Name(_names.PriceAreas, a["MarketBalanceAreaId"]),
+            };
+        }
         var extraInvoiceLines = await GetAll("extraInvoiceLines",
             $"{billing}/api/v2/customers/{customerId}/extraInvoiceLines?countryCode=DK");
 
@@ -426,6 +515,10 @@ public class ExportActiveCustomersRunner
         {
             ["customerId"] = customerId.ToString(),
             ["customerNumber"] = customerV3?["CustomerNumber"]?.DeepClone() ?? customerV2?["CustomerNumber"]?.DeepClone(),
+            ["names"] = new JsonObject
+            {
+                ["customerSegment"] = _names.Name(_names.CustomerSegments, customerV3?["CustomerSegmentId"]),
+            },
             ["customer"] = customerV3,
             ["customerV2"] = customerV2,
             ["meteringPointLinks"] = mpLinks,

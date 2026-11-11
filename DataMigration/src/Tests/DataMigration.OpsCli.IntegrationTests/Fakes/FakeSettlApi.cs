@@ -33,6 +33,8 @@ public sealed class FakeSettlApi : HttpMessageHandler
     public List<FakeContract> Contracts { get; } = [];
     public List<FakeSettlementGroup> SettlementGroups { get; } = [];
     public List<JsonObject> CustomerSegments { get; } = [];
+    public List<JsonObject> PriceLists { get; } = [];
+    public List<JsonObject> ProductElements { get; } = [];
     public List<(Guid Id, string Name)> MarketBalanceAreas { get; } = [];
     public List<(Guid Id, string Code)> GridAreas { get; } = [];
     public List<(HttpMethod Method, string PathAndQuery)> Requests { get; } = [];
@@ -75,6 +77,10 @@ public sealed class FakeSettlApi : HttpMessageHandler
                 "api/v1" when rest.Length > 0 && rest[0].Equals("customerSegments", StringComparison.OrdinalIgnoreCase)
                     => Ok(new JsonArray([.. CustomerSegments.Select(c => c.DeepClone())])),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("Payers", StringComparison.OrdinalIgnoreCase) => Payer(method, rest[1..], q, body),
+                "api/v1" when rest.Length == 1 && rest[0] == "priceLists" && method == HttpMethod.Get
+                    => Ok(Page(PriceLists.Select(x => (JsonObject)x.DeepClone()), q)),
+                "api/v1" when rest.Length == 1 && rest[0] == "productElements" && method == HttpMethod.Get
+                    => Ok(Page(ProductElements.Select(x => (JsonObject)x.DeepClone()), q)),
                 "api/v1" when rest.Length > 0 && rest[0] == "meteringPoints" => BillingMp(method, rest[1..], q, body),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("contracts", StringComparison.OrdinalIgnoreCase) => Contract(method, rest[1..], q, body),
                 "api/v1" when rest.Length > 0 && rest[0] == "settlementGroups" => Group(method, rest[1..], q, body),
@@ -616,6 +622,7 @@ public sealed class FakeSettlApi : HttpMessageHandler
         public SortedDictionary<DateTimeOffset, JsonObject> BillingVersions { get; } = [];
         public SortedDictionary<DateTimeOffset, JsonObject> PaymentVersions { get; } = [];
         public List<JsonObject> Exemptions { get; } = [];
+        public JsonObject? SettlementInfo { get; set; }
         public JsonObject? BillingConfiguration => BillingVersions.Count == 0 ? null : BillingVersions.Last().Value;
         public JsonObject? PaymentConfiguration => PaymentVersions.Count == 0 ? null : PaymentVersions.Last().Value;
         public IEnumerable<string> BillingDates => BillingVersions.Values.Select(v => (string)v["Start"]!);
@@ -684,6 +691,7 @@ public sealed class FakeSettlApi : HttpMessageHandler
             ["BillingConfiguration"] = At(BillingVersions, at)?.DeepClone(),
             ["PaymentConfiguration"] = At(PaymentVersions, at)?.DeepClone(),
             ["Exemptions"] = new JsonArray([.. Exemptions.Select(e => e.DeepClone())]),
+            ["SettlementInfo"] = SettlementInfo?.DeepClone(),
         };
 
         public JsonObject DeliveryStatuses() => new()

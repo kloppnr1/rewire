@@ -5,11 +5,12 @@ namespace DataMigration.OpsCli.Services;
 
 /// <summary>
 /// Cuts one raw export-active-customers customer (the Settl responses as Settl returned them) down to
-/// the fields of the approved customer example (Customer_405013.xlsx, approved 2026-11-06): customer,
-/// metering points, contracts on them, payers and extra invoice lines.
+/// the fields of the approved customer examples (private Customer_405013.xlsx, approved 2026-11-06;
+/// business Customer_397697, 2026-11-06): customer, metering points, contracts on them, payers,
+/// customer price lists and extra invoice lines.
 ///
 /// <para>Settl's own ids (GUIDs for segment, grid area, price area, supplier, product element) are
-/// left out. Every null, empty string, empty list and empty object is left out, so a field that is
+/// left out; where the runner resolved a name for one (under <c>names</c>), the name is used. Every null, empty string, empty list and empty object is left out, so a field that is
 /// absent means Settl had no value for it. The customer's own numbers stay: customer number, payer
 /// number, metering point id, installation number and the DAR address id.</para>
 /// </summary>
@@ -41,10 +42,14 @@ public static class CustomerExportProjection
             ["cellphone"] = Value(address?["Cellphone"]),
             ["email"] = Value(address?["Email"]),
             ["customerGroup"] = Value(customer?["CrmData"]?["CustomerGroupName"]),
+            ["customerSegment"] = Value(raw["names"]?["customerSegment"]),
+            ["manualApprovalRequired"] = Value(customer?["CreditInfo"]?["ManualApprovalRequired"]),
             ["address"] = Address(postal?["PhysicalAddress"]),
             ["meteringPoints"] = new JsonArray(meteringPoints.Select(m => (JsonNode?)MeteringPoint(m, contracts)).ToArray()),
             ["payers"] = new JsonArray((raw["payers"] as JsonArray ?? [])
                 .Select(p => (JsonNode?)Payer(p, identificationBySettlId)).ToArray()),
+            ["priceLists"] = new JsonArray((raw["priceLists"]?["CustomerPriceListAssociations"] as JsonArray ?? [])
+                .Select(a => (JsonNode?)PriceList(a, contracts)).ToArray()),
             ["extraInvoiceLines"] = new JsonArray((raw["extraInvoiceLines"] as JsonArray ?? [])
                 .Select(l => (JsonNode?)ExtraInvoiceLine(l)).ToArray()),
             ["errors"] = raw["errors"]?.DeepClone(),
@@ -76,6 +81,8 @@ public static class CustomerExportProjection
                 ["secondName"] = Value(consumer?["SecondConsumerParty"]?["Name"]?["FullName"]),
                 ["secondCpr"] = Value(nationalIds?["SecondConsumerPartyNationalIdentificationNumber"]),
                 ["supplyStart"] = Date(consumer?["SupplyStart"]),
+                ["category"] = Value(consumer?["ConsumerCategory"]),
+                ["electricalHeating"] = Value(consumer?["ElectricalHeating"]),
             },
             ["deliveryStatus"] = new JsonObject
             {
@@ -86,6 +93,9 @@ public static class CustomerExportProjection
                 ["stopReason"] = Value(period?["StopReason"]),
             },
             ["connectionStatus"] = Value(market?["ConnectionInfo"]?["ConnectionStatus"]),
+            ["remark"] = Value(market?["Notes"]?["Remark"]),
+            ["priceArea"] = Value(m?["names"]?["priceArea"]),
+            ["gridArea"] = Value(m?["names"]?["gridArea"]),
             ["settlementMethod"] = Value(market?["SettlementMethod"]?["SettlementMethod"]),
             ["type"] = Value(characteristics?["MeteringPointType"]),
             ["subType"] = Value(characteristics?["MeteringPointSubType"]),
@@ -93,6 +103,7 @@ public static class CustomerExportProjection
                 .Select(x => (JsonNode?)new JsonObject
                 {
                     ["meterNumber"] = Value(x?["MeterIdentifier"]),
+                    ["meterType"] = Value(x?["MeterType"]),
                     ["reading"] = Value(x?["MeterReadingOccurrence"]),
                 }).ToArray()),
             ["estimatedAnnualConsumption"] = new JsonObject
@@ -120,6 +131,8 @@ public static class CustomerExportProjection
                 ["currency"] = Value(billing?["BillingConfiguration"]?["Currency"]),
                 ["jointInvoice"] = Value(billing?["BillingConfiguration"]?["JointInvoice"]),
                 ["jointInvoiceNumber"] = Value(billing?["BillingConfiguration"]?["JointInvoiceNumber"]),
+                ["ignoreInBilling"] = Value(billing?["SettlementInfo"]?["IgnoreInBilling"]),
+                ["exemptFromVat"] = Value(billing?["SettlementInfo"]?["ExemptFromVat"]),
                 ["exemptions"] = new JsonArray((billing?["Exemptions"] as JsonArray ?? [])
                     .Select(e => (JsonNode?)new JsonObject
                     {
@@ -142,6 +155,7 @@ public static class CustomerExportProjection
             ["payerId"] = Value(info?["PayerIdentifier"]),
             ["payerType"] = Value(billing?["PayerType"]),
             ["primary"] = Value(payer?["IsPrimaryCustomerPayer"]),
+            ["automaticallyApproveInvoices"] = Value(payer?["AutomaticallyApproveInvoices"]),
             ["cpr"] = Value(billing?["NationalIdentificationNumber"]),
             ["cvr"] = Value(billing?["VatIdentificationNumber"] ?? billing?["OrganizationIdentifier"]),
             ["name"] = Value(postal?["Name1"]?["FullName"]),
@@ -160,6 +174,23 @@ public static class CustomerExportProjection
                     : null)
                 .Where(n => n != null)
                 .ToArray()),
+        };
+    }
+
+    /// <summary>A customer price list association: price list and product element by their codes, the
+    /// contract by name when it is one of the exported contracts, and the period.</summary>
+    private static JsonObject PriceList(JsonNode? a, JsonArray contracts)
+    {
+        var contractId = Str(a?["ContractId"]);
+        var contract = contracts.FirstOrDefault(c => string.Equals(Str(c?["Id"]), contractId, StringComparison.OrdinalIgnoreCase));
+        return new JsonObject
+        {
+            ["priceList"] = Value(a?["names"]?["priceList"]),
+            ["productElement"] = Value(a?["names"]?["productElement"]),
+            ["contract"] = Value(contract?["ContractName"]),
+            ["priceArea"] = Value(a?["names"]?["priceArea"]),
+            ["start"] = DanishDate(a?["AssociationPeriod"]?["Start"]),
+            ["end"] = DanishOpenEnd(a?["AssociationPeriod"]?["End"]),
         };
     }
 
@@ -206,6 +237,23 @@ public static class CustomerExportProjection
 
     private static JsonNode? Date(JsonNode? node) =>
         Str(Value(node)) is { Length: >= 10 } s ? JsonValue.Create(s[..10]) : null;
+
+    private static readonly TimeZoneInfo Danish = TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen");
+
+    /// <summary>The Danish calendar date of a Settl instant: <c>2022-12-31T23:00:00Z</c> is 2023-01-01.
+    /// A value without zone or offset keeps its own date.</summary>
+    private static JsonNode? DanishDate(JsonNode? node)
+    {
+        if (Str(Value(node)) is not { Length: >= 10 } s) return null;
+        if (!DateTimeOffset.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var instant)
+            || s.Length <= 10 || !(s.EndsWith('Z') || s.LastIndexOfAny(['+', '-']) > 10))
+            return JsonValue.Create(s[..10]);
+        return JsonValue.Create(TimeZoneInfo.ConvertTime(instant, Danish).ToString("yyyy-MM-dd"));
+    }
+
+    private static JsonNode? DanishOpenEnd(JsonNode? node) =>
+        Str(Value(node)) is { } s && s.StartsWith("9999", StringComparison.Ordinal) ? null : DanishDate(node);
 
     /// <summary>Settl writes "no end" as year 9999; that is no value.</summary>
     private static JsonNode? OpenEnd(JsonNode? node) =>

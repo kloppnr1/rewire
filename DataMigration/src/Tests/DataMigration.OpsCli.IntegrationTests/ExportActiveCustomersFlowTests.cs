@@ -190,6 +190,76 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
         }
     }
 
+    [Fact]
+    public async Task Projected_export_carries_the_business_example_fields()
+    {
+        var tenant = new ProvisioningFixture();
+        await tenant.InitializeAsync();
+        StartDelivery(tenant);
+        try
+        {
+            var api = tenant.Settl.Api;
+            var customerId = api.Customers.Keys.Single();
+            var mpId = api.CustomerMpLinks[customerId].Select(l => Guid.Parse((string)l["MeteringPointId"]!)).First();
+            var mp = api.MeteringPoints[mpId];
+
+            // Reference data the export resolves ids against.
+            var segment = Guid.NewGuid();
+            api.CustomerSegments.Add(new JsonObject { ["Id"] = segment.ToString(), ["Name"] = "Erhverv" });
+            api.Customers[customerId]["CustomerSegmentId"] = segment.ToString();
+            api.Customers[customerId]["CreditInfo"] = new JsonObject { ["ManualApprovalRequired"] = "Yes" };
+            var priceList = Guid.NewGuid();
+            var element = Guid.NewGuid();
+            api.PriceLists.Add(new JsonObject { ["Id"] = priceList.ToString(), ["PriceListIdentifier"] = "E_KAM_Spot" });
+            api.ProductElements.Add(new JsonObject { ["Id"] = element.ToString(), ["ProductElementCode"] = "E_KAM_Tillaeg" });
+            var area = api.MarketBalanceAreas[0];
+            mp.Market["Grid"] = new JsonObject { ["MarketBalanceAreaId"] = area.Id.ToString() };
+
+            // Metering point fields from the business example.
+            mp.Market["Consumer"] = new JsonObject { ["ConsumerCategory"] = "Erhverv", ["ElectricalHeating"] = false };
+            mp.Market["Notes"] = new JsonObject { ["Remark"] = "Test remark" };
+            mp.SettlementInfo = new JsonObject { ["IgnoreInBilling"] = false, ["ExemptFromVat"] = true };
+
+            // A customer price list valid from Danish midnight 1 January 2023.
+            api.CustomerPriceLists[customerId] =
+            [
+                new JsonObject
+                {
+                    ["PriceListId"] = priceList.ToString(),
+                    ["ProductElementId"] = element.ToString(),
+                    ["MarketBalanceAreaId"] = area.Id.ToString(),
+                    ["AssociationPeriod"] = new JsonObject { ["Start"] = "2022-12-31T23:00:00Z", ["End"] = "9999-12-31T23:59:58.999Z" },
+                },
+            ];
+
+            var (exitCode, document) = await ExportAsync(tenant, raw: false);
+
+            Assert.Equal(0, exitCode);
+            var customer = Assert.Single(document["customers"]!.AsArray())!;
+            Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
+            Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
+
+            var exported = Assert.Single(customer["meteringPoints"]!.AsArray(), m => (string?)m!["meteringPointId"] == mp.Identification)!;
+            Assert.Equal(area.Name, (string?)exported["priceArea"]);
+            Assert.Equal("Test remark", (string?)exported["remark"]);
+            Assert.Equal("Erhverv", (string?)exported["consumer"]?["category"]);
+            Assert.False(exported["consumer"]?["electricalHeating"]?.GetValue<bool>());
+            Assert.False(exported["billing"]?["ignoreInBilling"]?.GetValue<bool>());
+            Assert.True(exported["billing"]?["exemptFromVat"]?.GetValue<bool>());
+
+            var price = Assert.Single(customer["priceLists"]!.AsArray())!;
+            Assert.Equal("E_KAM_Spot", (string?)price["priceList"]);
+            Assert.Equal("E_KAM_Tillaeg", (string?)price["productElement"]);
+            Assert.Equal(area.Name, (string?)price["priceArea"]);
+            Assert.Equal("2023-01-01", (string?)price["start"]);
+            Assert.Null(price["end"]);
+        }
+        finally
+        {
+            await tenant.DisposeAsync();
+        }
+    }
+
     private static async Task LinkAsync(ProvisioningFixture tenant, Guid customerId, Guid meteringPointId)
     {
         var (ok, error) = await tenant.Settl.CustomerClient.AddMeteringPointsAsync(customerId, new AddCustomerMeteringPointsRequest
