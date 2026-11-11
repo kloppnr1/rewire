@@ -23,4 +23,4 @@ All tests run on a clean clone with no network access to Xellent or Settl: the i
 ## Documentation
 
 - Each folder has its own `README.md` and `docs/`.
-- Production deployment of TimeSeries.Cli: [docs/production-runbook.md](docs/production-runbook.md).
+- Production deployment of TimeSeries.Cli and OpsCli: [docs/production-runbook.md](docs/production-runbook.md).

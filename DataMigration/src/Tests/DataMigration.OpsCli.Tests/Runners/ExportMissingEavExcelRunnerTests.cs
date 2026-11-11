@@ -223,6 +223,15 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
         Assert.Equal(new Dictionary<string, DateOnly> { [Mp1] = new(2025, 4, 1), [Mp2] = new(2025, 4, 1) }, _origin.Asked);
         Assert.Contains(_logs, l => l.Trim() == $"1  {ExportMissingEavExcelRunner.Migrated}");
         Assert.DoesNotContain(_logs, l => l.Contains($"MP {Mp1}:"));
+
+        // The decisions file says why each one is in or out.
+        Assert.Equal(
+        [
+            "MeteringPoint;FirstDeliveryStart;FirstStartReason;XellentAccountAtCosMinusOne;Result",
+            $"{Mp1};2025-04-01;ChangeOfSupplier;yes;{ExportMissingEavExcelRunner.Migrated}",
+            $"{Mp2};2025-04-01;ChangeOfSupplier;no;row(s) written: 1",
+            $"{Mp3};2025-04-01;MoveIn;;row(s) written: 1",
+        ], File.ReadAllLines(ExportMissingEavExcelRunner.DecisionsPath(FilePath)));
     }
 
     [Fact]
@@ -272,5 +281,112 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
         Assert.Equal(1, await Run());
 
         Assert.False(File.Exists(FilePath));
+    }
+
+    // ---- Settl snapshot (--offline) ----
+
+    private static readonly DateTimeOffset Now = new(2026, 11, 11, 8, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A Settl reader that fails every call: an offline run must not reach Settl.</summary>
+    private sealed class NoSettl : IMissingEavSettlReader
+    {
+        public int Calls;
+        private Task<(T?, string?)> Fail<T>() { Interlocked.Increment(ref Calls); return Task.FromResult<(T?, string?)>((default, "Settl was called")); }
+        public Task<(List<MissingEavCandidate>? Items, string? Error)> ListAsync(CancellationToken c) => Fail<List<MissingEavCandidate>>();
+        public Task<(MissingEavCandidate? Item, string? Error)> GetAsync(string i, CancellationToken c) => Fail<MissingEavCandidate>();
+        public Task<(List<DateTime>? Starts, string? Error)> VersionStartsAsync(Guid id, CancellationToken c) => Fail<List<DateTime>>();
+        public Task<(MeterVersion? Version, string? Error)> VersionAtAsync(Guid id, DateTime at, CancellationToken c) => Fail<MeterVersion>();
+        public Task<(IReadOnlyList<DeliveryStatusDto>? Statuses, string? Error)> DeliveryStatusesAsync(Guid id, CancellationToken c) =>
+            Fail<IReadOnlyList<DeliveryStatusDto>>();
+    }
+
+    private Task<int> RunWithSnapshot(IMissingEavSettlReader settl, string? offline, DateTimeOffset now,
+        string environment = "production", int maxAgeHours = 24, params string[] only) =>
+        ExportMissingEavWithSnapshot.RunAsync(new ExportMissingEavExcelRunOptions
+        {
+            OutputPath = FilePath, MeteringPoints = only, Parallel = 4, Today = Today,
+        }, settl, _origin, _logs.Add, () => now, environment, offline, TimeSpan.FromHours(maxAgeHours));
+
+    private string SnapshotFile => ExportMissingEavWithSnapshot.SnapshotPath(FilePath);
+
+    private string CopyOfSnapshot()
+    {
+        var copy = Path.Combine(_dir, "snapshot-copy.json");
+        File.Copy(SnapshotFile, copy, overwrite: true);
+        return copy;
+    }
+
+    [Fact]
+    public async Task OfflineRun_FromTheSnapshot_GivesTheSameWorkbookAndDecisions_WithoutCallingSettl()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")), (Switch, Version("QuarterHourly")));
+        InSettl(Mp2, (Created, Version("Hourly", volume: 1500)));
+        InSettl(Mp3, (Created, Version("Hourly")));
+        _settl.FirstStart[IdOf(Mp3)] = DeliveryStartReason.ChangeOfSupplier;
+        _origin.WithAccount.Add(Mp3);
+
+        Assert.Equal(0, await RunWithSnapshot(_settl, offline: null, Now));
+        Assert.True(File.Exists(SnapshotFile));
+        var liveRows = Rows();
+        var liveDecisions = File.ReadAllLines(ExportMissingEavExcelRunner.DecisionsPath(FilePath));
+        var snapshot = CopyOfSnapshot();
+
+        var noSettl = new NoSettl();
+        Assert.Equal(0, await RunWithSnapshot(noSettl, snapshot, Now.AddHours(2)));
+
+        Assert.Equal(0, noSettl.Calls);
+        Assert.Equal(liveRows, Rows());
+        Assert.Equal(liveDecisions, File.ReadAllLines(ExportMissingEavExcelRunner.DecisionsPath(FilePath)));
+        Assert.Contains(_logs, l => l.StartsWith("Settl from snapshot") && l.EndsWith("Xellent read live"));
+    }
+
+    [Fact]
+    public async Task OfflineRun_AppliesAChangedXellentAnswerToTheSameSettlData()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.ChangeOfSupplier;
+        Assert.Equal(0, await RunWithSnapshot(_settl, offline: null, Now));
+        Assert.Equal([Mp1], Rows().Select(r => r["MeteringPointIdentification"]));
+        var snapshot = CopyOfSnapshot();
+
+        _origin.WithAccount.Add(Mp1);   // e.g. the rule now finds the account in another company
+        Assert.Equal(0, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(1)));
+
+        Assert.Empty(Rows());
+    }
+
+    [Fact]
+    public async Task OfflineRun_RefusesAnOldSnapshotOrOneFromAnotherEnvironment()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        Assert.Equal(0, await RunWithSnapshot(_settl, offline: null, Now));
+        var snapshot = CopyOfSnapshot();
+        File.Delete(FilePath);
+
+        Assert.Equal(1, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(25)));
+        Assert.Contains(_logs, l => l.Contains("25 hours ago (limit 24)"));
+        Assert.Equal(1, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(1), environment: "featuretest"));
+        Assert.Contains(_logs, l => l.Contains("the snapshot is from production, this run is --env featuretest"));
+        Assert.False(File.Exists(FilePath));
+
+        // Raised limit, for analysis.
+        Assert.Equal(0, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(25), maxAgeHours: 48));
+    }
+
+    [Fact]
+    public async Task OfflineRun_FailsWhenTheSnapshotLacksWhatItNeeds()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        InSettl(Mp2, (Created, Version("Hourly")));
+        Assert.Equal(0, await RunWithSnapshot(_settl, offline: null, Now, only: [Mp1]));
+        var snapshot = CopyOfSnapshot();
+        File.Delete(FilePath);
+
+        Assert.Equal(1, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(1)));
+        Assert.Contains(_logs, l => l.Contains("the whole metering point list is not in the snapshot"));
+        Assert.False(File.Exists(FilePath));
+
+        Assert.Equal(0, await RunWithSnapshot(new NoSettl(), snapshot, Now.AddHours(1), only: [Mp1]));
+        Assert.Equal([Mp1], Rows().Select(r => r["MeteringPointIdentification"]));
     }
 }

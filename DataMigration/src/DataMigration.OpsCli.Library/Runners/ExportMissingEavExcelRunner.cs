@@ -34,8 +34,9 @@ public interface IMissingEavSettlReader
 }
 
 /// <summary>
-/// Which metering points were part of the migration, by the rule generate-state-from-settl uses: Xellent has an
-/// el-ekstern FOR (or blank-company) delpoint for it with a contract ending on its change-of-supplier date minus one.
+/// Which metering points were part of the migration: Xellent has an el-ekstern delpoint for it with a contract ending
+/// on its change-of-supplier date minus one, in any Xellent company. The migration read every company, so the FOR
+/// filter generate-state-from-settl applies to invoices does not belong here.
 /// </summary>
 public interface IMigrationOriginReader
 {
@@ -44,7 +45,7 @@ public interface IMigrationOriginReader
         IReadOnlyDictionary<string, DateOnly> cosByMeteringPoint, CancellationToken cancellationToken);
 }
 
-/// <summary>Reads Xellent (read-only) through <see cref="MeteringPointAccountResolver"/>, as generate-state-from-settl does.</summary>
+/// <summary>Reads Xellent (read-only) through <see cref="MeteringPointAccountResolver"/>, every company.</summary>
 public sealed class XellentMigrationOriginReader(string connectionString) : IMigrationOriginReader
 {
     public async Task<(IReadOnlySet<string>? Migrated, string? Error)> WithAccountAtCosMinusOneAsync(
@@ -55,8 +56,7 @@ public sealed class XellentMigrationOriginReader(string connectionString) : IMig
         try
         {
             var resolution = await MeteringPointAccountResolver.ResolveAsync(connectionString, cosByMeteringPoint,
-                MigrationConstants.DataAreaId, ct: cancellationToken, companyId: ForInvoiceScope.CompanyId,
-                includeBlankCompany: true);
+                MigrationConstants.DataAreaId, ct: cancellationToken);
             return (resolution.Pairs.Select(p => p.MpId).ToHashSet(StringComparer.Ordinal), null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -139,9 +139,10 @@ public class ExportMissingEavExcelRunOptions
 /// metering point that was not part of the migration an EstimatedAnnualVolume. Read-only towards Settl and Xellent;
 /// the file is imported in Settl by hand.
 /// <para>
-/// Active: a parent metering point that Settl's market list shows in delivery. Part of the migration, by the rule
-/// generate-state-from-settl uses: Settl's first delivery start is a ChangeOfSupplier and Xellent has an account for
-/// it at that date minus one (<see cref="IMigrationOriginReader"/>); those are left out. A first start by MoveIn, or a
+/// Active: a parent metering point that Settl's market list shows in delivery. Part of the migration: Settl's first
+/// delivery start is a ChangeOfSupplier and Xellent has an account for it at that date minus one, in any Xellent
+/// company (<see cref="IMigrationOriginReader"/>); those are left out. Every decision is written to
+/// <c>&lt;workbook&gt;-decisions.csv</c>. A first start by MoveIn, or a
 /// ChangeOfSupplier without a Xellent account at COS-1, is not part of the migration. Any other first start (unknown,
 /// conflicting, none) is left out, by hand. Versions in scope: the
 /// MeterCharacteristics version in force at the start of the current (or next) delivery period, and every later one;
@@ -200,6 +201,7 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, IM
         // Part of the migration or not: Settl's first delivery start, then Xellent at COS-1 for the ChangeOfSupplier ones.
         var settled = new ConcurrentDictionary<string, Outcome>(StringComparer.Ordinal);
         var cosByMp = new ConcurrentDictionary<string, DateOnly>(StringComparer.Ordinal);
+        var firstStarts = new ConcurrentDictionary<string, (DateOnly? Date, string Reason)>(StringComparer.Ordinal);
         using (var startGate = new SemaphoreSlim(Math.Max(1, options.Parallel)))
             await Task.WhenAll(active.Select(async candidate =>
             {
@@ -213,6 +215,7 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, IM
                         return;
                     }
                     var (first, disposition) = MoveInDeliveryFilter.FirstDelivery(statuses);
+                    firstStarts[candidate.Identification] = (first, disposition);
                     if (disposition == "ChangeOfSupplier")
                         cosByMp[candidate.Identification] = first!.Value;
                     else if (disposition != "MoveIn")
@@ -281,6 +284,9 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, IM
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
         MeteringPointMeterExcelWriter.Write(options.OutputPath, rows);
+        var decisionsPath = DecisionsPath(options.OutputPath);
+        await File.WriteAllTextAsync(decisionsPath, BuildDecisions(results, firstStarts, migrated),
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
 
         log("");
         foreach (var g in results.GroupBy(o => o.Result).OrderByDescending(g => g.Count()))
@@ -288,7 +294,33 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, IM
         foreach (var g in imports.GroupBy(o => o.Rows.Count).OrderBy(g => g.Key))
             log($"  {g.Count(),5}  metering point(s) with {g.Key} row(s)");
         log($"MeteringPointMeter: {rows.Count} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(options.OutputPath)}");
+        log($"Why each metering point is in or out: {Path.GetFullPath(decisionsPath)}");
         return 0;
+    }
+
+    /// <summary><c>&lt;workbook&gt;-decisions.csv</c> next to the workbook.</summary>
+    internal static string DecisionsPath(string outputPath) =>
+        Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? "",
+            $"{Path.GetFileNameWithoutExtension(outputPath)}-decisions.csv");
+
+    /// <summary>
+    /// One line per active metering point: its first delivery start in Settl and the reason, whether Xellent has an
+    /// account for it at COS-1 (asked only for a ChangeOfSupplier start), and what the export did. Ids, dates and
+    /// codes only. Semicolons, BOM, for Excel.
+    /// </summary>
+    private static string BuildDecisions(IEnumerable<Outcome> results,
+        IReadOnlyDictionary<string, (DateOnly? Date, string Reason)> firstStarts, IReadOnlySet<string> migrated)
+    {
+        var csv = new System.Text.StringBuilder("MeteringPoint;FirstDeliveryStart;FirstStartReason;XellentAccountAtCosMinusOne;Result\n");
+        foreach (var o in results.OrderBy(o => o.MeteringPoint, StringComparer.Ordinal))
+        {
+            var (date, reason) = firstStarts.TryGetValue(o.MeteringPoint, out var f) ? f : (null, "");
+            var xellent = reason == "ChangeOfSupplier" ? (migrated.Contains(o.MeteringPoint) ? "yes" : "no") : "";
+            var result = o.Result == Import ? $"row(s) written: {o.Rows.Count}" : o.Result;
+            csv.Append(o.MeteringPoint).Append(';').Append(date?.ToString("yyyy-MM-dd")).Append(';').Append(reason)
+                .Append(';').Append(xellent).Append(';').Append(result.Replace(';', ',')).Append('\n');
+        }
+        return csv.ToString();
     }
 
     private async Task<(List<MissingEavCandidate>? Items, string? Error)> LoadCandidatesAsync(
