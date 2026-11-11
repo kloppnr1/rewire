@@ -886,6 +886,16 @@ var missingEavParallelOption = new Option<int>("--parallel")
     DefaultValueFactory = _ => 6
 };
 
+var missingEavOfflineOption = new Option<string?>("--offline")
+{
+    Description = "Read Settl from this snapshot (<workbook>-settl-snapshot.json, written by every live run) instead of Settl; Xellent is still read live"
+};
+var missingEavSnapshotMaxAgeOption = new Option<int>("--snapshot-max-age-hours")
+{
+    Description = "With --offline: refuse an older snapshot (default 24). Raise it for analysis only, never for a workbook to import",
+    DefaultValueFactory = _ => 24
+};
+
 var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
     "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) that " +
@@ -897,6 +907,8 @@ var exportMissingEavExcelCommand = new Command(
     missingEavValueOption,
     missingEavMeteringPointsOption,
     missingEavParallelOption,
+    missingEavOfflineOption,
+    missingEavSnapshotMaxAgeOption,
 };
 
 exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -909,15 +921,17 @@ exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
     {
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
         meteringPointClient.SetDeliveryCategory("El-ekstern");
-        var runner = new ExportMissingEavExcelRunner(new SettlMissingEavReader(meteringPointClient),
-            new XellentMigrationOriginReader(connectionString), Console.Error.WriteLine);
-        return await runner.RunAsync(new ExportMissingEavExcelRunOptions
-        {
-            OutputPath = parseResult.GetValue(missingEavOutputOption)!,
-            Volume = parseResult.GetValue(missingEavValueOption),
-            MeteringPoints = meteringPoints,
-            Parallel = parseResult.GetValue(missingEavParallelOption),
-        }, cancellationToken);
+        return await ExportMissingEavWithSnapshot.RunAsync(new ExportMissingEavExcelRunOptions
+            {
+                OutputPath = parseResult.GetValue(missingEavOutputOption)!,
+                Volume = parseResult.GetValue(missingEavValueOption),
+                MeteringPoints = meteringPoints,
+                Parallel = parseResult.GetValue(missingEavParallelOption),
+            },
+            new SettlMissingEavReader(meteringPointClient), new XellentMigrationOriginReader(connectionString),
+            Console.Error.WriteLine, () => DateTimeOffset.UtcNow, settlEnv,
+            parseResult.GetValue(missingEavOfflineOption),
+            TimeSpan.FromHours(parseResult.GetValue(missingEavSnapshotMaxAgeOption)), cancellationToken);
     }
     catch (Exception ex)
     {
