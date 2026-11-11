@@ -254,42 +254,6 @@ switchImportCommand.SetAction(async (parseResult, cancellationToken) =>
         correct: parseResult.GetValue(switchImportCorrectOption));
 });
 
-// === eav-import command ===
-var eavImportValueOption = new Option<double>("--value")
-{
-    Description = "EstimatedAnnualVolume in kWh for the versions that have none (default 2000)",
-    DefaultValueFactory = _ => EavImportRunner.DefaultVolume
-};
-var eavImportParallelOption = new Option<int>("--parallel")
-{
-    Description = "How many metering points to ask Settl about at a time (default 6)",
-    DefaultValueFactory = _ => 6
-};
-var eavImportOnlyOption = new Option<string[]>("--only")
-{
-    Description = "Just these 18-digit metering point identifications instead of Settl's whole list",
-    AllowMultipleArgumentsPerToken = true
-};
-var eavImportCommand = new Command("eav-import",
-    "Write Settl's MeteringPointMeters_V8 import workbook that gives every active (in delivery, parent) metering point " +
-    "an EstimatedAnnualVolume: one Update row per meter version without one, from the version in force at the " +
-    "delivery start. Read-only: it changes nothing in Settl.")
-{
-    envOption, eavImportValueOption, eavImportParallelOption, eavImportOnlyOption
-};
-
-eavImportCommand.SetAction(async (parseResult, cancellationToken) =>
-{
-    var outputDir = config["Output:BaseDirectory"] ?? "output";
-    await using var provider = BuildSettlServices(config);
-    var reader = new SettlEavImportReader(provider.GetRequiredService<ISettlMeteringPointClient>());
-    var runner = new EavImportRunner(reader, Console.WriteLine);
-    var only = parseResult.GetValue(eavImportOnlyOption) ?? [];
-    return await runner.RunAsync(settlEnv, outputDir, parseResult.GetValue(eavImportValueOption),
-        parseResult.GetValue(eavImportParallelOption), DateOnly.FromDateTime(DateTime.Today),
-        only.Length > 0 ? only : null, cancellationToken);
-});
-
 // === progress command ===
 var progressWatchOption = new Option<bool>("--watch") { Description = "Repaint the report in place every --refresh seconds until Ctrl+C" };
 var progressRefreshOption = new Option<int>("--refresh")
@@ -319,7 +283,6 @@ rootCommand.Subcommands.Add(postCommand);
 rootCommand.Subcommands.Add(snapshotCommand);
 rootCommand.Subcommands.Add(progressCommand);
 rootCommand.Subcommands.Add(switchImportCommand);
-rootCommand.Subcommands.Add(eavImportCommand);
 
 var parseResultTop = rootCommand.Parse(args);
 return await parseResultTop.InvokeAsync();
