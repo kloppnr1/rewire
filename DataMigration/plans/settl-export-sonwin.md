@@ -17,7 +17,10 @@
 - Reference examples: private `Customer_405013.xlsx`, business `Customer_397697_Verdo_Varme.xlsx` (06.11.2026)
 
 ## Command
+- Operated through `settl-export.ps1` (Trial, Run, Check, Schedule, Unschedule), deployed next to the exe: [runbook](../docs/settl-export-runbook.md)
 - `export-active-customers --env production --deliver-to <unc> --payment-agreements <csv> [--keep 14] [--raw]`
+- `check-share-delivery --env production --deliver-to <unc>`: read-only check of the newest run
+- `--limit`/`--customer` with `--deliver-to`: trial run in `<env>-trial`, never touches the real delta
 - GET only; never Settl's export endpoints (`POST .../export`, `exportApprovedSettlement`, `POST /SettlementExports`)
 - Identifiers kept apart: Settl GUID, 18-digit metering point identification, EAN on payer
 
@@ -43,7 +46,7 @@
 - Keeps the newest 14 published and 14 failed runs
 
 ## Open
-- Host and UNC path; Task Scheduler job, service account, alert on non-zero exit or stale `_READY`
+- Host and UNC path; account for the scheduled task; who watches `Check` (alerting not built)
 - Payment CSV: who exports it from Settl before each run; ask the vendor for an API endpoint
 - SonWin: projected or `--raw`, schema, pick-up by `_READY`
 - Settl vendor: modified-since filter or change feed (would replace the full scan)
@@ -55,5 +58,5 @@
 ## Phases
 1. Spike (done): `ExportActiveCustomersFlowTests` over a fake tenant filled by real `create`
 2. Build (done): content above, JSON Lines, share delivery; tests against the fake
-3. Featuretest: nightly schedule to a test share; SonWin trial import
-4. Production: after host, share and SonWin format are settled
+3. Real-system testing, by the user, following the runbook: featuretest trial, full run, payment CSV, SonWin trial import
+4. Production: runbook steps 4 and 5, after host, share and SonWin format are settled

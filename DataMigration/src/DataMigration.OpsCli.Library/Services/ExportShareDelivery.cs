@@ -24,6 +24,9 @@ public sealed class ExportShareDeliveryOptions
 
     /// <summary>Written to the manifest: what one line in customers.jsonl is.</summary>
     public string Shape { get; set; } = string.Empty;
+
+    /// <summary>The run covers only some customers (a trial); written to the manifest.</summary>
+    public bool Trial { get; set; }
 }
 
 /// <summary>
@@ -142,6 +145,7 @@ public sealed class ExportShareDelivery(Func<DateTimeOffset> clock, Action<strin
                 ["schemaVersion"] = SchemaVersion,
                 ["environment"] = options.Environment,
                 ["shape"] = options.Shape,
+                ["trial"] = options.Trial,
                 ["run"] = name,
                 ["previousRun"] = previous?.Run,
                 ["startedUtc"] = started.ToString("O"),

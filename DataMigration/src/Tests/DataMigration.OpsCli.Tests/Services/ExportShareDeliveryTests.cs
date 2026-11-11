@@ -158,4 +158,67 @@ public sealed class ExportShareDeliveryTests : IDisposable
         Assert.True(Directory.Exists(Run(0) + ".failed"));
         Assert.False(File.Exists(Path.Combine(EnvDir, "state", "customers.json")));
     }
+
+    private (int Code, List<string> Log) Check(TimeSpan? maxAge = null)
+    {
+        var log = new List<string>();
+        var code = new ShareDeliveryCheck(() => _now, log.Add).Run(_root, "production", maxAge ?? TimeSpan.FromHours(26));
+        return (code, log);
+    }
+
+    [Fact]
+    public async Task Check_passes_a_published_run()
+    {
+        await RunAsync(Export(0, ("100", "a"), ("200", "b")));
+        _now = _now.AddDays(-1).AddHours(2);
+
+        var (code, log) = Check();
+
+        Assert.Equal(0, code);
+        Assert.Contains(log, l => l.StartsWith("OK"));
+        Assert.Contains(log, l => l.Contains("customers:") && l.EndsWith(" 2"));
+    }
+
+    [Fact]
+    public async Task Check_finds_a_changed_file_and_an_old_run()
+    {
+        await RunAsync(Export(0, ("100", "a")));
+        await File.AppendAllTextAsync(Path.Combine(Run(0), ExportShareDelivery.CustomersFile), "{\"customerNumber\":\"999\"}\n");
+
+        var (code, log) = Check(maxAge: TimeSpan.FromHours(12));
+
+        Assert.Equal(1, code);
+        Assert.Contains(log, l => l.Contains("customers.jsonl has") && l.Contains("bytes"));
+        Assert.Contains(log, l => l.Contains("manifest says 1"));
+        Assert.Contains(log, l => l.Contains("hours ago"));
+    }
+
+    [Fact]
+    public void Check_reports_when_nothing_was_delivered()
+    {
+        var (code, log) = Check();
+
+        Assert.Equal(1, code);
+        Assert.Contains(log, l => l.StartsWith("PROBLEM: no delivery folder"));
+    }
+
+    [Fact]
+    public async Task Check_flags_customers_with_read_errors_and_bad_metering_point_ids()
+    {
+        await Delivery().RunAsync(Options(), async (path, ct) =>
+        {
+            await File.WriteAllLinesAsync(path,
+            [
+                "{\"customerNumber\":\"100\",\"meteringPoints\":[{\"meteringPointId\":\"571313100000000017\"}]}",
+                "{\"customerNumber\":\"200\",\"meteringPoints\":[{\"meteringPointId\":\"12345\"}],\"errors\":[{\"section\":\"customer\"}]}",
+            ], ct);
+            return 0;
+        });
+
+        var (code, log) = Check();
+
+        Assert.Equal(1, code);
+        Assert.Contains(log, l => l.Contains("1 customer(s) carry read errors"));
+        Assert.Contains(log, l => l.Contains("1 metering point(s) without an 18-digit identification"));
+    }
 }

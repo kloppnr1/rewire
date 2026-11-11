@@ -25,6 +25,8 @@
     <None Update="appsettings.local.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Nightly Settl export for the SonWin migration; runs next to the exe (docs/settl-export-runbook.md). -->
+    <None Include="..\..\scripts\settl-export.ps1" Link="settl-export.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

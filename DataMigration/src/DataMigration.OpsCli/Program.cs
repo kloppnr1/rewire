@@ -286,7 +286,7 @@ var exportActiveLimitOption = new Option<int>("--limit") { Description = "Stop a
 var exportActiveParallelOption = new Option<int>("--parallel") { Description = "Customers read concurrently", DefaultValueFactory = _ => 8 };
 var exportActivePrettyOption = new Option<bool>("--pretty") { Description = "Indent the JSON (much bigger file)" };
 var exportActivePaymentAgreementsOption = new Option<string?>("--payment-agreements") { Description = "Settl 'Payment Agreement' CSV export; attaches each customer's payment agreements by metering point and joint invoice number" };
-var exportActiveDeliverToOption = new Option<string?>("--deliver-to") { Description = "Share folder to deliver to (<dir>/<env>/<run>/customers.jsonl, delta.jsonl, manifest.json, _READY); replaces --output" };
+var exportActiveDeliverToOption = new Option<string?>("--deliver-to") { Description = "Share folder to deliver to (<dir>/<env>/<run>/customers.jsonl, delta.jsonl, manifest.json, _READY); replaces --output. With --limit or --customer the run is a trial and goes to <dir>/<env>-trial" };
 var exportActiveKeepOption = new Option<int>("--keep") { Description = "With --deliver-to: published runs to keep", DefaultValueFactory = _ => 14 };
 var exportActiveRawOption = new Option<bool>("--raw") { Description = "Write the Settl responses whole instead of the customer example shape (much bigger)" };
 var exportActivePseudonymiseOption = new Option<bool>("--pseudonymise") { Description = "Replace CPR, CVR, names, addresses, email, phone and other identifiers with consistent fake values (sample data)" };
@@ -336,17 +336,19 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             return await runner.RunAsync(Options(parseResult.GetValue(exportActiveOutputOption)
                 ?? $"active-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.json", jsonLines: false), cancellationToken);
 
-        if (parseResult.GetValue(exportActiveOutputOption) != null || parseResult.GetValue(exportActivePrettyOption)
-            || (parseResult.GetValue(exportActiveCustomersOption) ?? []).Length > 0 || parseResult.GetValue(exportActiveLimitOption) > 0)
+        if (parseResult.GetValue(exportActiveOutputOption) != null || parseResult.GetValue(exportActivePrettyOption))
         {
-            Console.Error.WriteLine("ERROR: --deliver-to delivers every active customer; it cannot be combined with --output, --pretty, --customer or --limit");
+            Console.Error.WriteLine("ERROR: --deliver-to cannot be combined with --output or --pretty");
             return 1;
         }
+        // A run limited to some customers is a trial: it goes to <env>-trial so the real delta is untouched.
+        var trial = (parseResult.GetValue(exportActiveCustomersOption) ?? []).Length > 0 || parseResult.GetValue(exportActiveLimitOption) > 0;
         var delivery = new ExportShareDelivery(() => DateTimeOffset.UtcNow, Console.Error.WriteLine);
         return await delivery.RunAsync(new ExportShareDeliveryOptions
         {
             Root = deliverTo,
-            Environment = settlEnv,
+            Environment = trial ? $"{settlEnv}-trial" : settlEnv,
+            Trial = trial,
             Keep = parseResult.GetValue(exportActiveKeepOption),
             PaymentAgreementsCsv = parseResult.GetValue(exportActivePaymentAgreementsOption),
             Shape = parseResult.GetValue(exportActiveRawOption) ? "raw Settl responses"
@@ -363,6 +365,26 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 rootCommand.Subcommands.Add(exportActiveCustomersCommand);
+
+// === check-share-delivery command ===
+var checkShareDeliverToOption = new Option<string>("--deliver-to") { Description = "The share folder given to export-active-customers --deliver-to", Required = true };
+var checkShareEnvOption = new Option<string>("--env") { Description = "Environment whose delivery to check (featuretest, production, production-hev, production-vhel)" };
+var checkShareTrialOption = new Option<bool>("--trial") { Description = "Check the trial folder (<env>-trial)" };
+var checkShareRunOption = new Option<string?>("--run") { Description = "A run folder name (default: the newest published run)" };
+var checkShareMaxAgeOption = new Option<int>("--max-age-hours") { Description = "Report a problem when the newest run is older", DefaultValueFactory = _ => 26 };
+var checkShareDeliveryCommand = new Command("check-share-delivery",
+    "Read-only: check the newest run delivered by export-active-customers --deliver-to (files, checksums, counts, freshness); exit 0 = OK")
+{
+    checkShareDeliverToOption, checkShareEnvOption, checkShareTrialOption, checkShareRunOption, checkShareMaxAgeOption,
+};
+checkShareDeliveryCommand.SetAction(parseResult =>
+{
+    var env = parseResult.GetValue(checkShareTrialOption) ? $"{settlEnv}-trial" : settlEnv;
+    return new ShareDeliveryCheck(() => DateTimeOffset.UtcNow, Console.WriteLine).Run(
+        parseResult.GetValue(checkShareDeliverToOption)!, env,
+        TimeSpan.FromHours(parseResult.GetValue(checkShareMaxAgeOption)), parseResult.GetValue(checkShareRunOption));
+});
+rootCommand.Subcommands.Add(checkShareDeliveryCommand);
 
 
 // === report-payer-diff command ===

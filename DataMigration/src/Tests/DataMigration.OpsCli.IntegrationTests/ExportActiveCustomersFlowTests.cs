@@ -408,6 +408,10 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var delta = JsonNode.Parse(Assert.Single(File.ReadAllLines(Path.Combine(second, ExportShareDelivery.DeltaFile))))!;
             Assert.Equal("changed", (string?)delta["op"]);
             Assert.Contains(delta["customer"]!["meteringPoints"]!.AsArray(), m => (string?)m!["remark"] == "Changed in Settl");
+
+            // The check a person runs on the server passes on a real delivery.
+            var checkLog = new List<string>();
+            Assert.Equal(0, new ShareDeliveryCheck(() => now, checkLog.Add).Run(root, "featuretest", TimeSpan.FromHours(26)));
         }
         finally
         {
