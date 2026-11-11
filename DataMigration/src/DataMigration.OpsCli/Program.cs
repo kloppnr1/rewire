@@ -886,6 +886,8 @@ var missingEavParallelOption = new Option<int>("--parallel")
     DefaultValueFactory = _ => 6
 };
 
+var missingEavEnvOption = new Option<string>("--env") { Description = "Settl environment to read (featuretest, production, production-hev, production-vhel)" };
+
 var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
     "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) an " +
@@ -896,6 +898,7 @@ var exportMissingEavExcelCommand = new Command(
     missingEavValueOption,
     missingEavMeteringPointsOption,
     missingEavParallelOption,
+    missingEavEnvOption,
 };
 
 exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
