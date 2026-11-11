@@ -68,7 +68,8 @@ Stop if a test fails. The last line keeps the build from replacing the server's 
 On `SVDKRA1VBIFROST`, first keep the current version, then copy the build over it:
 
 ```powershell
-Copy-Item C:\Services\DataMigration\OpsCli C:\Services\DataMigration\OpsCli-previous -Recurse -Force
+Remove-Item C:\Services\DataMigration\OpsCli-previous -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item C:\Services\DataMigration\OpsCli C:\Services\DataMigration\OpsCli-previous -Recurse
 ```
 
 Copy the contents of `publish\OpsCli` into `C:\Services\DataMigration\OpsCli`, overwriting what is there. No OpsCli command may be running while you copy, including a scheduled `settl-export.ps1` run.
