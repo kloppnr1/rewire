@@ -888,9 +888,10 @@ var missingEavParallelOption = new Option<int>("--parallel")
 
 var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
-    "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) an " +
-    "EstimatedAnnualVolume: one Update row per meter version without one, from the version in force at the delivery " +
-    "start. Reads Settl only (read-only)")
+    "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) that " +
+    "was not part of the migration an EstimatedAnnualVolume: one Update row per meter version without one, from the " +
+    "version in force at the delivery start. Part of the migration = first delivery start is a ChangeOfSupplier and " +
+    "Xellent has an account at COS-1. Reads Settl and Xellent only (read-only)")
 {
     missingEavOutputOption,
     missingEavValueOption,
@@ -908,7 +909,8 @@ exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
     {
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
         meteringPointClient.SetDeliveryCategory("El-ekstern");
-        var runner = new ExportMissingEavExcelRunner(new SettlMissingEavReader(meteringPointClient), Console.Error.WriteLine);
+        var runner = new ExportMissingEavExcelRunner(new SettlMissingEavReader(meteringPointClient),
+            new XellentMigrationOriginReader(connectionString), Console.Error.WriteLine);
         return await runner.RunAsync(new ExportMissingEavExcelRunOptions
         {
             OutputPath = parseResult.GetValue(missingEavOutputOption)!,
