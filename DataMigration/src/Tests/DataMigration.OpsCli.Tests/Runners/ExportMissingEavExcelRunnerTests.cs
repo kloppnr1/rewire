@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using DataMigration.OpsCli.Runners;
 using DataMigration.OpsCli.Services;
+using DataMigration.SettlApi.Models;
 
 namespace DataMigration.OpsCli.Tests.Runners;
 
@@ -44,7 +45,39 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
 
         public Task<(MeterVersion? Version, string? Error)> VersionAtAsync(Guid id, DateTime at, CancellationToken cancellationToken) =>
             Task.FromResult<(MeterVersion?, string?)>((Versions[id].Where(v => v.Start <= at).MaxBy(v => v.Start).Version, null));
+
+        /// <summary>First delivery start reason per metering point; MoveIn (not part of the migration) when not set.</summary>
+        public Dictionary<Guid, DeliveryStartReason> FirstStart { get; } = new();
+        public string? DeliveryError { get; set; }
+
+        public Task<(IReadOnlyList<DeliveryStatusDto>? Statuses, string? Error)> DeliveryStatusesAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult<(IReadOnlyList<DeliveryStatusDto>?, string?)>(DeliveryError != null
+                ? (null, DeliveryError)
+                : ([new DeliveryStatusDto
+                {
+                    InDelivery = true,
+                    Period = new TimePeriodDto { Start = new DateTimeOffset(Delivery), End = DateTimeOffset.MaxValue },
+                    StartReason = FirstStart.GetValueOrDefault(id, DeliveryStartReason.MoveIn),
+                }], null));
     }
+
+    private sealed class FakeOrigin : IMigrationOriginReader
+    {
+        public HashSet<string> WithAccount { get; } = new(StringComparer.Ordinal);
+        public IReadOnlyDictionary<string, DateOnly>? Asked { get; private set; }
+        public string? Error { get; set; }
+
+        public Task<(IReadOnlySet<string>? Migrated, string? Error)> WithAccountAtCosMinusOneAsync(
+            IReadOnlyDictionary<string, DateOnly> cosByMeteringPoint, CancellationToken cancellationToken)
+        {
+            Asked = cosByMeteringPoint;
+            return Task.FromResult<(IReadOnlySet<string>?, string?)>(Error != null
+                ? (null, Error)
+                : (cosByMeteringPoint.Keys.Where(WithAccount.Contains).ToHashSet(StringComparer.Ordinal), null));
+        }
+    }
+
+    private readonly FakeOrigin _origin = new();
 
     private static MeterVersion Version(string occurrence, double? volume = null, int meters = 1) =>
         new(volume, Enumerable.Range(0, meters).Select(_ => new MeterVersionMeter(occurrence, 6, 2, 1.0, "25")).ToList());
@@ -52,17 +85,20 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
     private void InSettl(string mp, params (DateTime Start, MeterVersion Version)[] versions) =>
         InSettl(mp, inDelivery: true, child: false, Delivery, versions);
 
-    private void InSettl(string mp, bool inDelivery, bool child, DateTime? deliveryStart, params (DateTime Start, MeterVersion Version)[] versions)
+    private Guid InSettl(string mp, bool inDelivery, bool child, DateTime? deliveryStart, params (DateTime Start, MeterVersion Version)[] versions)
     {
         var id = Guid.NewGuid();
         _settl.List.Add(new MissingEavCandidate(mp, id, inDelivery, child, deliveryStart));
         _settl.Versions[id] = versions.ToList();
+        return id;
     }
+
+    private Guid IdOf(string mp) => _settl.List.Single(c => c.Identification == mp).Id;
 
     private string FilePath => Path.Combine(_dir, "missing-eav.xlsx");
 
     private Task<int> Run(params string[] only) =>
-        new ExportMissingEavExcelRunner(_settl, _logs.Add).RunAsync(new ExportMissingEavExcelRunOptions
+        new ExportMissingEavExcelRunner(_settl, _origin, _logs.Add).RunAsync(new ExportMissingEavExcelRunOptions
         {
             OutputPath = FilePath,
             MeteringPoints = only,
@@ -167,6 +203,64 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
         Assert.Equal(0, await Run(Mp2));
 
         Assert.Equal([Mp2], Rows().Select(r => r["MeteringPointIdentification"]));
+    }
+
+    [Fact]
+    public async Task PartOfTheMigration_IsLeftOut_ChangeOfSupplierWithoutXellentAccountAndMoveIn_AreNot()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));   // ChangeOfSupplier, Xellent account at COS-1: migrated
+        InSettl(Mp2, (Created, Version("Hourly")));   // ChangeOfSupplier, no Xellent account at COS-1
+        InSettl(Mp3, (Created, Version("Hourly")));   // MoveIn
+        _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.ChangeOfSupplier;
+        _settl.FirstStart[IdOf(Mp2)] = DeliveryStartReason.ChangeOfSupplier;
+        _origin.WithAccount.Add(Mp1);
+        _origin.WithAccount.Add(Mp2 + "0");
+
+        Assert.Equal(0, await Run());
+
+        Assert.Equal([Mp2, Mp3], Rows().Select(r => r["MeteringPointIdentification"]));
+        // Only the ChangeOfSupplier points go to Xellent, each with its first delivery date (2025-04-01 Danish).
+        Assert.Equal(new Dictionary<string, DateOnly> { [Mp1] = new(2025, 4, 1), [Mp2] = new(2025, 4, 1) }, _origin.Asked);
+        Assert.Contains(_logs, l => l.Trim() == $"1  {ExportMissingEavExcelRunner.Migrated}");
+        Assert.DoesNotContain(_logs, l => l.Contains($"MP {Mp1}:"));
+    }
+
+    [Fact]
+    public async Task AnUnknownFirstDeliveryStart_IsLeftOutByHand()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        InSettl(Mp2, (Created, Version("Hourly")));
+        _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.Unknown;
+
+        Assert.Equal(0, await Run());
+
+        Assert.Equal([Mp2], Rows().Select(r => r["MeteringPointIdentification"]));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: first delivery start is UnknownDeliveryStartReason, by hand"));
+    }
+
+    [Fact]
+    public async Task AXellentReadFailure_WritesNoFile()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.ChangeOfSupplier;
+        _origin.Error = "network-related";
+
+        Assert.Equal(1, await Run());
+
+        Assert.False(File.Exists(FilePath));
+        Assert.Contains(_logs, l => l.Contains("ERROR: Xellent read failed: network-related"));
+    }
+
+    [Fact]
+    public async Task ADeliveryStatusFailure_WritesNoFile_AndDoesNotReadXellent()
+    {
+        InSettl(Mp1, (Created, Version("Hourly")));
+        _settl.DeliveryError = "500";
+
+        Assert.Equal(1, await Run());
+
+        Assert.False(File.Exists(FilePath));
+        Assert.Null(_origin.Asked);
     }
 
     [Fact]

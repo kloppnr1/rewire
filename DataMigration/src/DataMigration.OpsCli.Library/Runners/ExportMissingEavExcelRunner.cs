@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.Globalization;
+using DataMigration.Core;
 using DataMigration.OpsCli.Services;
+using DataMigration.OpsCli.Services.Reconcile;
 using DataMigration.SettlApi.Clients;
 using DataMigration.SettlApi.Models;
 
@@ -25,6 +28,42 @@ public interface IMissingEavSettlReader
 
     /// <summary>The MeterCharacteristics version in force at <paramref name="at"/>.</summary>
     Task<(MeterVersion? Version, string? Error)> VersionAtAsync(Guid id, DateTime at, CancellationToken cancellationToken);
+
+    /// <summary>The metering point's delivery statuses, for its first delivery start and its reason.</summary>
+    Task<(IReadOnlyList<DeliveryStatusDto>? Statuses, string? Error)> DeliveryStatusesAsync(Guid id, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Which metering points were part of the migration, by the rule generate-state-from-settl uses: Xellent has an
+/// el-ekstern FOR (or blank-company) delpoint for it with a contract ending on its change-of-supplier date minus one.
+/// </summary>
+public interface IMigrationOriginReader
+{
+    /// <summary>The identifications in <paramref name="cosByMeteringPoint"/> that Xellent has an account for at COS-1.</summary>
+    Task<(IReadOnlySet<string>? Migrated, string? Error)> WithAccountAtCosMinusOneAsync(
+        IReadOnlyDictionary<string, DateOnly> cosByMeteringPoint, CancellationToken cancellationToken);
+}
+
+/// <summary>Reads Xellent (read-only) through <see cref="MeteringPointAccountResolver"/>, as generate-state-from-settl does.</summary>
+public sealed class XellentMigrationOriginReader(string connectionString) : IMigrationOriginReader
+{
+    public async Task<(IReadOnlySet<string>? Migrated, string? Error)> WithAccountAtCosMinusOneAsync(
+        IReadOnlyDictionary<string, DateOnly> cosByMeteringPoint, CancellationToken cancellationToken)
+    {
+        if (cosByMeteringPoint.Count == 0)
+            return (new HashSet<string>(StringComparer.Ordinal), null);
+        try
+        {
+            var resolution = await MeteringPointAccountResolver.ResolveAsync(connectionString, cosByMeteringPoint,
+                MigrationConstants.DataAreaId, ct: cancellationToken, companyId: ForInvoiceScope.CompanyId,
+                includeBlankCompany: true);
+            return (resolution.Pairs.Select(p => p.MpId).ToHashSet(StringComparer.Ordinal), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (null, ex.Message);
+        }
+    }
 }
 
 public sealed class SettlMissingEavReader(ISettlMeteringPointClient meteringPoints) : IMissingEavSettlReader
@@ -72,6 +111,13 @@ public sealed class SettlMissingEavReader(ISettlMeteringPointClient meteringPoin
         return (new MeterVersion(volume, meters), null);
     }
 
+    public async Task<(IReadOnlyList<DeliveryStatusDto>? Statuses, string? Error)> DeliveryStatusesAsync(
+        Guid id, CancellationToken cancellationToken)
+    {
+        var (response, error) = await meteringPoints.GetDeliveryStatusesAsync(id, cancellationToken);
+        return response == null ? (null, error ?? "delivery statuses not returned") : (response.DeliveryStatuses ?? [], null);
+    }
+
     private static MissingEavCandidate ToCandidate(MeteringPointInfoDto mp) => new(
         mp.MeteringPointIdentification, mp.Id, mp.InDelivery == true,
         mp.ParentMeteringPoint?.Id is { } parent && parent != Guid.Empty,
@@ -90,9 +136,14 @@ public class ExportMissingEavExcelRunOptions
 
 /// <summary>
 /// export-missing-eav-excel: writes Settl's MeteringPointMeter import workbook (version 8) that gives every active
-/// metering point an EstimatedAnnualVolume. Read-only towards Settl; the file is imported in Settl by hand.
+/// metering point that was not part of the migration an EstimatedAnnualVolume. Read-only towards Settl and Xellent;
+/// the file is imported in Settl by hand.
 /// <para>
-/// Active: a parent metering point that Settl's market list shows in delivery. Versions in scope: the
+/// Active: a parent metering point that Settl's market list shows in delivery. Part of the migration, by the rule
+/// generate-state-from-settl uses: Settl's first delivery start is a ChangeOfSupplier and Xellent has an account for
+/// it at that date minus one (<see cref="IMigrationOriginReader"/>); those are left out. A first start by MoveIn, or a
+/// ChangeOfSupplier without a Xellent account at COS-1, is not part of the migration. Any other first start (unknown,
+/// conflicting, none) is left out, by hand. Versions in scope: the
 /// MeterCharacteristics version in force at the start of the current (or next) delivery period, and every later one;
 /// with no delivery period, the version in force today and every later one. Each version in scope without an
 /// EstimatedAnnualVolume gets an Update row with its own date, so a metering point can get several rows.
@@ -103,8 +154,9 @@ public class ExportMissingEavExcelRunOptions
 /// Hourly or QuarterHourly reading) leaves the whole metering point out, by hand.
 /// </para>
 /// </summary>
-public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, Action<string> log)
+public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, IMigrationOriginReader origin, Action<string> log)
 {
+    internal const string Migrated = "part of the migration, left out";
     public const double DefaultVolume = 2000;
 
     private static readonly TimeZoneInfo DanishTimeZone =
@@ -145,6 +197,55 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, Ac
         log($"  {candidates.Count} metering point(s) read; {active.Count} active parent(s), " +
             $"{children} child(ren) and {notInDelivery} not in delivery left out");
 
+        // Part of the migration or not: Settl's first delivery start, then Xellent at COS-1 for the ChangeOfSupplier ones.
+        var settled = new ConcurrentDictionary<string, Outcome>(StringComparer.Ordinal);
+        var cosByMp = new ConcurrentDictionary<string, DateOnly>(StringComparer.Ordinal);
+        using (var startGate = new SemaphoreSlim(Math.Max(1, options.Parallel)))
+            await Task.WhenAll(active.Select(async candidate =>
+            {
+                await startGate.WaitAsync(cancellationToken);
+                try
+                {
+                    var (statuses, error) = await settl.DeliveryStatusesAsync(candidate.Id, cancellationToken);
+                    if (error != null || statuses == null)
+                    {
+                        settled[candidate.Identification] = new Outcome(candidate.Identification, $"ERROR: delivery statuses failed: {error}");
+                        return;
+                    }
+                    var (first, disposition) = MoveInDeliveryFilter.FirstDelivery(statuses);
+                    if (disposition == "ChangeOfSupplier")
+                        cosByMp[candidate.Identification] = first!.Value;
+                    else if (disposition != "MoveIn")
+                        settled[candidate.Identification] = new Outcome(candidate.Identification,
+                            $"left out: first delivery start is {disposition}, by hand");
+                }
+                finally
+                {
+                    startGate.Release();
+                }
+            }));
+        var startFailures = settled.Values.Where(o => o.Result.StartsWith("ERROR", StringComparison.Ordinal))
+            .OrderBy(o => o.MeteringPoint, StringComparer.Ordinal).ToList();
+        if (startFailures.Count > 0)
+        {
+            foreach (var o in startFailures)
+                log($"  MP {o.MeteringPoint}: {o.Result}");
+            log($"ERROR: {startFailures.Count} metering point(s) could not be read from Settl; no file written.");
+            return 1;
+        }
+        log($"  Checking Xellent for an account at COS-1 for {cosByMp.Count} metering point(s) whose first delivery start is a ChangeOfSupplier...");
+        var (migrated, originError) = await origin.WithAccountAtCosMinusOneAsync(
+            new Dictionary<string, DateOnly>(cosByMp, StringComparer.Ordinal), cancellationToken);
+        if (originError != null || migrated == null)
+        {
+            log($"ERROR: Xellent read failed: {originError}; no file written.");
+            return 1;
+        }
+        foreach (var mp in migrated)
+            settled[mp] = new Outcome(mp, Migrated);
+        log($"  {migrated.Count} part of the migration, {settled.Count(s => s.Value.Result.StartsWith("left out", StringComparison.Ordinal))} " +
+            $"left out by hand, {active.Count - settled.Count} not part of the migration");
+
         var results = new Outcome[active.Count];
         using var gate = new SemaphoreSlim(Math.Max(1, options.Parallel));
         var done = 0;
@@ -153,7 +254,9 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, Ac
             await gate.WaitAsync(cancellationToken);
             try
             {
-                results[i] = await DecideAsync(candidate, options.Volume, options.Today, cancellationToken);
+                results[i] = settled.TryGetValue(candidate.Identification, out var outcome)
+                    ? outcome
+                    : await DecideAsync(candidate, options.Volume, options.Today, cancellationToken);
                 if (Interlocked.Increment(ref done) % 250 == 0)
                     log($"  {done}/{active.Count} metering points checked");
             }
