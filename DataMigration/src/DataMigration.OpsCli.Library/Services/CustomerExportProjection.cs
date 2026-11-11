@@ -48,6 +48,7 @@ public static class CustomerExportProjection
             ["meteringPoints"] = new JsonArray(meteringPoints.Select(m => (JsonNode?)MeteringPoint(m, contracts)).ToArray()),
             ["payers"] = new JsonArray((raw["payers"] as JsonArray ?? [])
                 .Select(p => (JsonNode?)Payer(p, identificationBySettlId)).ToArray()),
+            ["contracts"] = new JsonArray(contracts.Select(c => (JsonNode?)Contract(c)).ToArray()),
             ["priceLists"] = new JsonArray((raw["priceLists"]?["CustomerPriceListAssociations"] as JsonArray ?? [])
                 .Select(a => (JsonNode?)PriceList(a, contracts)).ToArray()),
             ["extraInvoiceLines"] = new JsonArray((raw["extraInvoiceLines"] as JsonArray ?? [])
@@ -178,6 +179,50 @@ public static class CustomerExportProjection
                 .ToArray()),
         };
     }
+
+    /// <summary>A contract (the product on the customer's metering points) as in the business example's
+    /// Contract sheet: master data, settlement terms and the contract lines that have not ended.</summary>
+    private static JsonObject Contract(JsonNode? c)
+    {
+        var detail = c?["contract"];
+        return new JsonObject
+        {
+            ["name"] = Value(detail?["ContractName"] ?? c?["ContractName"]),
+            ["orderNumber"] = Value(detail?["OrderNumber"]),
+            ["category"] = Value(detail?["ContractCategory"]),
+            ["country"] = Value(detail?["CountryCode"]),
+            ["typeOfContractElements"] = Value(detail?["TypeOfContractElements"]),
+            ["commodityType"] = Value(detail?["CommodityType"]),
+            ["description"] = Value(detail?["Description"] ?? c?["ContractDescription"]),
+            ["quantityDistributionType"] = Value(detail?["QuantityDistributionType"]),
+            ["finalSettlement"] = Settlement(detail?["FinalSettlementInfo"] ?? c?["FinalSettlementInfo"]),
+            ["onAccountSettlement"] = Settlement(detail?["OnAccountSettlementInfo"] ?? c?["OnAccountSettlementInfo"]),
+            ["lines"] = new JsonArray((c?["contractLines"] as JsonArray ?? [])
+                .Select(l => (JsonNode?)new JsonObject
+                {
+                    ["start"] = DanishDate(l?["Start"]),
+                    ["end"] = DanishOpenEnd(l?["End"]),
+                    ["text"] = Value(l?["Text"]),
+                    ["productElement"] = Value(l?["ProductElementCode"]),
+                    ["product"] = Value(l?["ProductName"]),
+                    ["unitPrice"] = Value(l?["UnitPrice"]?["Value"]),
+                    ["unitPriceCurrency"] = Value(l?["UnitPrice"]?["CurrencyUnit"]),
+                    ["unitPriceQuantityUnit"] = Value(l?["UnitPrice"]?["QuantityUnit"]),
+                    ["coverage"] = Value(l?["Coverage"]),
+                    ["category"] = Value(l?["Category"]),
+                    ["profitSplit"] = Value(l?["ProfitSplit"]),
+                    ["volumeFlexibility"] = Value(l?["VolumeFlexibility"]),
+                    ["lastUpdated"] = DanishDate(l?["LastUpdated"]),
+                }).ToArray()),
+        };
+    }
+
+    private static JsonObject Settlement(JsonNode? info) => new()
+    {
+        ["frequency"] = Value(info?["SettlementFrequency"]),
+        ["paymentTerms"] = Value(info?["PaymentTerms"]),
+        ["paymentTermsOffset"] = Value(info?["PaymentTermsOffset"]),
+    };
 
     /// <summary>A market price list on a metering point: the charge (id, type, charge owner GLN), its
     /// period on the metering point as Danish dates, and the price list's name and description.</summary>

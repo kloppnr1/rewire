@@ -232,6 +232,29 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
                 },
             ];
 
+            // The contract create linked: master data and settlement terms, a current line and an
+            // ended one that is left out.
+            var contract = api.Contracts.First(c => c.Links.Any(l => (string?)l["MeteringPointId"] == mpId.ToString()));
+            contract.Fields["OrderNumber"] = "4711";
+            contract.Fields["ContractCategory"] = "Erhverv";
+            contract.Fields["TypeOfContractElements"] = "Electricity";
+            contract.Fields["QuantityDistributionType"] = "Profile";
+            contract.Fields["FinalSettlementInfo"] = new JsonObject
+            {
+                ["SettlementFrequency"] = "Quarterly", ["PaymentTerms"] = 30, ["PaymentTermsOffset"] = "Days",
+            };
+            contract.Lines.Add(new JsonObject
+            {
+                ["Start"] = "2025-12-31T23:00:00Z", ["End"] = "9999-12-31T23:59:58.999Z",
+                ["Text"] = "Spot", ["ProductElementCode"] = "E_KAM_Spot", ["ProductName"] = "E_Spot",
+                ["Coverage"] = 100, ["Category"] = "Spot", ["ProfitSplit"] = 0, ["VolumeFlexibility"] = 0,
+            });
+            contract.Lines.Add(new JsonObject
+            {
+                ["Start"] = "2020-12-31T23:00:00Z", ["End"] = "2021-12-31T23:00:00Z",
+                ["Text"] = "Old", ["ProductElementCode"] = "E_OLD",
+            });
+
             // A TSO subscription on the metering point, and an ended tariff that is left out.
             var tso = Guid.NewGuid();
             api.MarketPriceLists[tso] = new JsonObject
@@ -270,6 +293,18 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             Assert.Null(charge["end"]);
             Assert.Equal(1, (int?)charge["chargeOccurrences"]);
             Assert.Equal("Abonnement TSO", (string?)charge["description"]);
+
+            var exportedContract = Assert.Single(customer["contracts"]!.AsArray(), c => (string?)c!["name"] == contract.Name)!;
+            Assert.Equal("4711", (string?)exportedContract["orderNumber"]);
+            Assert.Equal("Erhverv", (string?)exportedContract["category"]);
+            Assert.Equal("Electricity", (string?)exportedContract["commodityType"]);
+            Assert.Equal("Profile", (string?)exportedContract["quantityDistributionType"]);
+            Assert.Equal("Quarterly", (string?)exportedContract["finalSettlement"]?["frequency"]);
+            Assert.Equal(30, (int?)exportedContract["finalSettlement"]?["paymentTerms"]);
+            var line = Assert.Single(exportedContract["lines"]!.AsArray())!;
+            Assert.Equal("E_KAM_Spot", (string?)line["productElement"]);
+            Assert.Equal("2026-01-01", (string?)line["start"]);
+            Assert.Equal(100, (int?)line["coverage"]);
 
             var price = Assert.Single(customer["priceLists"]!.AsArray())!;
             Assert.Equal("E_KAM_Spot", (string?)price["priceList"]);

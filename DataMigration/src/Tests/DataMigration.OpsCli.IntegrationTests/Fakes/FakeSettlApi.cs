@@ -492,7 +492,9 @@ public sealed class FakeSettlApi : HttpMessageHandler
         }
         var contract = Contracts.FirstOrDefault(c => c.Id == Guid.Parse(r[0]));
         if (contract == null) return NotFound();
-        if (r.Length == 2 && r[1].Equals("ContractLines", StringComparison.OrdinalIgnoreCase)) return Ok(Find([]));
+        if (r.Length == 1 && m == HttpMethod.Get) return Ok(contract.Detail());
+        if (r.Length == 2 && r[1].Equals("ContractLines", StringComparison.OrdinalIgnoreCase))
+            return Ok(Page(contract.Lines.Select(l => (JsonObject)l.DeepClone()), q));
         if (r.Length == 2 && r[1] == "meteringPoints")
         {
             if (m == HttpMethod.Post)
@@ -720,6 +722,20 @@ public sealed class FakeSettlApi : HttpMessageHandler
         public string Name { get; } = name;
         public string CommodityType { get; } = commodityType;
         public List<JsonObject> Links { get; } = [];
+        public List<JsonObject> Lines { get; } = [];
+
+        /// <summary>Extra contract fields a test sets (order number, category, payment terms ...).</summary>
+        public JsonObject Fields { get; } = [];
+
+        public JsonObject Detail()
+        {
+            var detail = (JsonObject)Fields.DeepClone();
+            detail["Id"] = Id;
+            detail["ContractName"] = Name;
+            detail["CommodityType"] = CommodityType;
+            detail["CountryCode"] = "DK";
+            return detail;
+        }
 
         public JsonObject Info() => new()
         {

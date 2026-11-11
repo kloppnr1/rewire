@@ -68,6 +68,12 @@ public class ExportActiveCustomersRunner
     private readonly ConcurrentDictionary<string, Lazy<Task<(JsonNode? Node, string? Error)>>> _marketPriceLists =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // A contract (product) is shared by many customers, so it and its lines are read once per run.
+    private readonly ConcurrentDictionary<string, Lazy<Task<ContractDetail>>> _contractDetails =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record ContractDetail(JsonNode? Contract, JsonArray Lines, string? ContractError, string? LinesError);
+
     public ExportActiveCustomersRunner(
         ISettlRawReader reader,
         ISettlMeteringPointClient meteringPointClient,
@@ -346,6 +352,14 @@ public class ExportActiveCustomersRunner
     private static JsonArray ActiveLinks(JsonArray links, DateTime today, HashSet<Guid> active) =>
         new(links.Where(l => IsActiveLink(l, today, active)).Select(l => l!.DeepClone()).ToArray());
 
+    private async Task<ContractDetail> ReadContractAsync(string contractId, CancellationToken ct)
+    {
+        var billing = _reader.Settings.BillingBaseUrl;
+        var (contract, contractError) = await _reader.GetAsync($"{billing}/api/v1/Contracts/{contractId}", ct);
+        var (lines, linesError) = await _reader.GetAllItemsAsync($"{billing}/api/v1/Contracts/{contractId}/ContractLines", PageSize, ct);
+        return new ContractDetail(contract, lines, contractError, linesError);
+    }
+
     /// <summary>
     /// The market price lists on a metering point (grid tariffs, subscriptions, fees): each association
     /// as Settl returns it, with the price list itself under <c>marketPriceList</c>. Ended associations
@@ -537,6 +551,19 @@ public class ExportActiveCustomersRunner
             if (activeMps.Count == 0) continue;
             var copy = (JsonObject)c.DeepClone();
             copy["MeteringPoints"] = activeMps;
+            if (c["Id"]?.GetValue<string>() is { } contractId)
+            {
+                var detail = await _contractDetails.GetOrAdd(contractId, id =>
+                    new Lazy<Task<ContractDetail>>(() => ReadContractAsync(id, ct))).Value;
+                if (detail.ContractError != null)
+                    errors.Add(new JsonObject { ["section"] = $"contract {contractId}", ["error"] = detail.ContractError });
+                if (detail.LinesError != null)
+                    errors.Add(new JsonObject { ["section"] = $"contract {contractId} lines", ["error"] = detail.LinesError });
+                copy["contract"] = detail.Contract?.DeepClone();
+                copy["contractLines"] = new JsonArray([.. detail.Lines
+                    .Where(l => NotEnded(l, today))
+                    .Select(l => l!.DeepClone())]);
+            }
             contracts.Add(copy);
         }
 
