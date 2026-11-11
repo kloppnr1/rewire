@@ -34,6 +34,7 @@
 - Extra invoice lines
 - Payment agreements from the Settl 'Payment Agreement' CSV, by metering point or joint invoice number
 - Settl ids resolved to names once per run (price area, grid area, segment, price list, product element)
+- All dates are Danish calendar dates of the Settl instant; a value without zone keeps its date (2026-11-11)
 
 ## Delivery (done)
 - Run folder `<root>/<env>/<yyyy-MM-ddTHHmmssZ>/`: `customers.jsonl`, `delta.jsonl`, `manifest.json`, `_READY` last
@@ -53,7 +54,6 @@
 - Not resolved to names: balance supplier (no lookup endpoint known)
 - Not in the export: market price list mandatory and direct invoicing (route and id mapping unverified), "contract shared with other customers", product description template
 - Live check: the new routes (market price lists, contracts, contract lines, price lists, product elements, reference lists) come from the Settl API description, not a live call
-- Existing projection dates take the first 10 characters of a UTC instant (a Danish midnight shows the day before); new fields use Danish dates
 
 ## Phases
 1. Spike (done): `ExportActiveCustomersFlowTests` over a fake tenant filled by real `create`
