@@ -84,15 +84,22 @@ public class ExportMissingEavExcelRunOptions
     public double Volume { get; set; } = ExportMissingEavExcelRunner.DefaultVolume;
     /// <summary>When set, just these identifications instead of Settl's whole list (still only active parents).</summary>
     public string[] MeteringPoints { get; set; } = [];
+    /// <summary>
+    /// Identifications that were part of the migration (the migration model's metering points). They are left out:
+    /// the command is for metering points that came into Settl some other way.
+    /// </summary>
+    public IReadOnlySet<string> Migrated { get; set; } = new HashSet<string>(StringComparer.Ordinal);
     public int Parallel { get; set; } = 6;
     public DateOnly Today { get; set; } = DateOnly.FromDateTime(DateTime.Today);
 }
 
 /// <summary>
 /// export-missing-eav-excel: writes Settl's MeteringPointMeter import workbook (version 8) that gives every active
-/// metering point an EstimatedAnnualVolume. Read-only towards Settl; the file is imported in Settl by hand.
+/// metering point that was not part of the migration an EstimatedAnnualVolume. Read-only towards Settl; the file is
+/// imported in Settl by hand.
 /// <para>
-/// Active: a parent metering point that Settl's market list shows in delivery. Versions in scope: the
+/// Active: a parent metering point that Settl's market list shows in delivery. Not part of the migration: absent from
+/// the migration model (<see cref="ExportMissingEavExcelRunOptions.Migrated"/>). Versions in scope: the
 /// MeterCharacteristics version in force at the start of the current (or next) delivery period, and every later one;
 /// with no delivery period, the version in force today and every later one. Each version in scope without an
 /// EstimatedAnnualVolume gets an Update row with its own date, so a metering point can get several rows.
@@ -139,11 +146,12 @@ public sealed class ExportMissingEavExcelRunner(IMissingEavSettlReader settl, Ac
         }
         var children = candidates.Count(c => c.IsChild);
         var notInDelivery = candidates.Count(c => !c.IsChild && !c.InDelivery);
-        var active = candidates.Where(c => !c.IsChild && c.InDelivery)
+        var activeAll = candidates.Where(c => !c.IsChild && c.InDelivery)
             .GroupBy(c => c.Identification, StringComparer.Ordinal).Select(g => g.First())
             .OrderBy(c => c.Identification, StringComparer.Ordinal).ToList();
-        log($"  {candidates.Count} metering point(s) read; {active.Count} active parent(s), " +
-            $"{children} child(ren) and {notInDelivery} not in delivery left out");
+        var active = activeAll.Where(c => !options.Migrated.Contains(c.Identification)).ToList();
+        log($"  {candidates.Count} metering point(s) read; {active.Count} active parent(s) not migrated, " +
+            $"{activeAll.Count - active.Count} migrated, {children} child(ren) and {notInDelivery} not in delivery left out");
 
         var results = new Outcome[active.Count];
         using var gate = new SemaphoreSlim(Math.Max(1, options.Parallel));
