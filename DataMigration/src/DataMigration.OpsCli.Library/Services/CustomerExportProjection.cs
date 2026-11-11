@@ -92,15 +92,15 @@ public static class CustomerExportProjection
                 ["cvr"] = Value(consumer?["FirstConsumerParty"]?["VatIdentificationNumber"]),
                 ["secondName"] = Value(consumer?["SecondConsumerParty"]?["Name"]?["FullName"]),
                 ["secondCpr"] = Value(nationalIds?["SecondConsumerPartyNationalIdentificationNumber"]),
-                ["supplyStart"] = Date(consumer?["SupplyStart"]),
+                ["supplyStart"] = DanishDate(consumer?["SupplyStart"]),
                 ["category"] = Value(consumer?["ConsumerCategory"]),
                 ["electricalHeating"] = Value(consumer?["ElectricalHeating"]),
             },
             ["deliveryStatus"] = new JsonObject
             {
                 ["inDelivery"] = Value(delivery?["InDelivery"]),
-                ["start"] = Date(period?["Start"]),
-                ["stop"] = OpenEnd(period?["Stop"]),
+                ["start"] = DanishDate(period?["Start"]),
+                ["stop"] = DanishOpenEnd(period?["Stop"]),
                 ["startReason"] = Value(period?["StartReason"]),
                 ["stopReason"] = Value(period?["StopReason"]),
             },
@@ -130,8 +130,8 @@ public static class CustomerExportProjection
                     {
                         ["name"] = Value(k?["ContractName"]),
                         ["description"] = Value(k?["ContractDescription"]),
-                        ["onMeteringPointFrom"] = Date(l?["Start"]),
-                        ["onMeteringPointTo"] = OpenEnd(l?["End"]),
+                        ["onMeteringPointFrom"] = DanishDate(l?["Start"]),
+                        ["onMeteringPointTo"] = DanishOpenEnd(l?["End"]),
                         ["settlementFrequency"] = Value(k?["FinalSettlementInfo"]?["SettlementFrequency"]),
                         ["onAccountFrequency"] = Value(k?["OnAccountSettlementInfo"]?["SettlementFrequency"]),
                     }))
@@ -276,8 +276,8 @@ public static class CustomerExportProjection
         var data = l?["Data"];
         return new JsonObject
         {
-            ["start"] = Date(data?["InvoicePeriod"]?["Start"]),
-            ["end"] = Date(data?["InvoicePeriod"]?["End"]),
+            ["start"] = DanishDate(data?["InvoicePeriod"]?["Start"]),
+            ["end"] = DanishDate(data?["InvoicePeriod"]?["End"]),
             ["text"] = Value(data?["Text"]),
             ["productElement"] = Value(data?["ProductElementCode"]),
             ["quantity"] = Value(data?["Quantity"]?["Value"]),
@@ -312,9 +312,6 @@ public static class CustomerExportProjection
             ? v.DeepClone()
             : null;
 
-    private static JsonNode? Date(JsonNode? node) =>
-        Str(Value(node)) is { Length: >= 10 } s ? JsonValue.Create(s[..10]) : null;
-
     private static readonly TimeZoneInfo Danish = TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen");
 
     /// <summary>The Danish calendar date of a Settl instant: <c>2022-12-31T23:00:00Z</c> is 2023-01-01.
@@ -329,12 +326,9 @@ public static class CustomerExportProjection
         return JsonValue.Create(TimeZoneInfo.ConvertTime(instant, Danish).ToString("yyyy-MM-dd"));
     }
 
+    /// <summary>Settl writes "no end" as year 9999; that is no value.</summary>
     private static JsonNode? DanishOpenEnd(JsonNode? node) =>
         Str(Value(node)) is { } s && s.StartsWith("9999", StringComparison.Ordinal) ? null : DanishDate(node);
-
-    /// <summary>Settl writes "no end" as year 9999; that is no value.</summary>
-    private static JsonNode? OpenEnd(JsonNode? node) =>
-        Str(Value(node)) is { } s && s.StartsWith("9999", StringComparison.Ordinal) ? null : Date(node);
 
     /// <summary>Drops nulls, empty lists and objects left empty, all the way down.</summary>
     private static JsonNode? Prune(JsonNode? node)
