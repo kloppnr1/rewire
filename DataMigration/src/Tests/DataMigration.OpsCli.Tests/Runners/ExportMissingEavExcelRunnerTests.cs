@@ -223,6 +223,15 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
         Assert.Equal(new Dictionary<string, DateOnly> { [Mp1] = new(2025, 4, 1), [Mp2] = new(2025, 4, 1) }, _origin.Asked);
         Assert.Contains(_logs, l => l.Trim() == $"1  {ExportMissingEavExcelRunner.Migrated}");
         Assert.DoesNotContain(_logs, l => l.Contains($"MP {Mp1}:"));
+
+        // The decisions file says why each one is in or out.
+        Assert.Equal(
+        [
+            "MeteringPoint;FirstDeliveryStart;FirstStartReason;XellentAccountAtCosMinusOne;Result",
+            $"{Mp1};2025-04-01;ChangeOfSupplier;yes;{ExportMissingEavExcelRunner.Migrated}",
+            $"{Mp2};2025-04-01;ChangeOfSupplier;no;row(s) written: 1",
+            $"{Mp3};2025-04-01;MoveIn;;row(s) written: 1",
+        ], File.ReadAllLines(ExportMissingEavExcelRunner.DecisionsPath(FilePath)));
     }
 
     [Fact]
