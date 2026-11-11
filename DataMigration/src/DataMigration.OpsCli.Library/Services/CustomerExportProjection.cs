@@ -124,6 +124,8 @@ public static class CustomerExportProjection
                         ["onAccountFrequency"] = Value(k?["OnAccountSettlementInfo"]?["SettlementFrequency"]),
                     }))
                 .ToArray()),
+            ["marketPriceLists"] = new JsonArray((m?["marketPriceLists"] as JsonArray ?? [])
+                .Select(x => (JsonNode?)MarketPriceList(x)).ToArray()),
             ["settlementGroups"] = new JsonArray((m?["settlementGroups"] as JsonArray ?? [])
                 .Select(g => Value(g?["GroupName"])).ToArray()),
             ["billing"] = new JsonObject
@@ -174,6 +176,25 @@ public static class CustomerExportProjection
                     : null)
                 .Where(n => n != null)
                 .ToArray()),
+        };
+    }
+
+    /// <summary>A market price list on a metering point: the charge (id, type, charge owner GLN), its
+    /// period on the metering point as Danish dates, and the price list's name and description.</summary>
+    private static JsonObject MarketPriceList(JsonNode? x)
+    {
+        var association = x?["MeteringPointMarketPriceListAssociation"];
+        var info = x?["marketPriceList"]?["PriceInformation"];
+        return new JsonObject
+        {
+            ["priceListId"] = Value(x?["PriceIdentification"]),
+            ["type"] = Value(x?["MarketPriceListType"]),
+            ["chargeOwner"] = Value(x?["PriceChargeOwner"]?["Identification"]),
+            ["start"] = DanishDate(association?["Start"]),
+            ["end"] = DanishOpenEnd(association?["End"]),
+            ["chargeOccurrences"] = Value(association?["ChargeOccurrences"]),
+            ["name"] = Value(info?["Name"]),
+            ["description"] = Value(info?["Description"]),
         };
     }
 

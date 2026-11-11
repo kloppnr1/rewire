@@ -34,6 +34,7 @@ public sealed class FakeSettlApi : HttpMessageHandler
     public List<FakeSettlementGroup> SettlementGroups { get; } = [];
     public List<JsonObject> CustomerSegments { get; } = [];
     public List<JsonObject> PriceLists { get; } = [];
+    public Dictionary<Guid, JsonObject> MarketPriceLists { get; } = [];
     public List<JsonObject> ProductElements { get; } = [];
     public List<(Guid Id, string Name)> MarketBalanceAreas { get; } = [];
     public List<(Guid Id, string Code)> GridAreas { get; } = [];
@@ -92,6 +93,8 @@ public sealed class FakeSettlApi : HttpMessageHandler
             var version = s[2];
             var rest = s.Skip(3).ToArray();
             if (rest.Length > 0 && rest[0] == "meteringPoints") return MarketMp(method, version, rest[1..], q, body);
+            if (rest.Length == 2 && rest[0] == "marketPriceLists" && version == "v2" && method == HttpMethod.Get)
+                return MarketPriceLists.TryGetValue(Guid.Parse(rest[1]), out var priceList) ? Ok(priceList.DeepClone()) : NotFound();
             return (HttpStatusCode.NotFound, null);
         }
         if (s.Length >= 4 && s[0] == "market" && s[1] == "tenant-api")
@@ -402,6 +405,9 @@ public sealed class FakeSettlApi : HttpMessageHandler
             return NoContent();
         }
         if (r.Length == 2 && r[1] == "deliveryStatuses") return Ok(point.DeliveryStatuses());
+        // Documented as a plain array, not the paged wrapper.
+        if (r.Length == 2 && r[1] == "marketPriceLists" && m == HttpMethod.Get)
+            return Ok(new JsonArray([.. point.MarketPriceLists.Select(x => x.DeepClone())]));
         if (r.Length == 2 && r[1] == "history") return Ok(new JsonObject { ["ChangeDates"] = new JsonArray() });
         if (r.Length == 2 && r[1] == "nationalIdentificationNumber") return Ok(new JsonObject());
         return (HttpStatusCode.NotFound, null);
@@ -623,6 +629,7 @@ public sealed class FakeSettlApi : HttpMessageHandler
         public SortedDictionary<DateTimeOffset, JsonObject> PaymentVersions { get; } = [];
         public List<JsonObject> Exemptions { get; } = [];
         public JsonObject? SettlementInfo { get; set; }
+        public List<JsonObject> MarketPriceLists { get; } = [];
         public JsonObject? BillingConfiguration => BillingVersions.Count == 0 ? null : BillingVersions.Last().Value;
         public JsonObject? PaymentConfiguration => PaymentVersions.Count == 0 ? null : PaymentVersions.Last().Value;
         public IEnumerable<string> BillingDates => BillingVersions.Values.Select(v => (string)v["Start"]!);

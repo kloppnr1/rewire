@@ -232,9 +232,24 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
                 },
             ];
 
+            // A TSO subscription on the metering point, and an ended tariff that is left out.
+            var tso = Guid.NewGuid();
+            api.MarketPriceLists[tso] = new JsonObject
+            {
+                ["Id"] = tso.ToString(),
+                ["PriceInformation"] = new JsonObject { ["Name"] = "Abonnement", ["Description"] = "Abonnement TSO" },
+            };
+            mp.MarketPriceLists.Add(MarketPriceListOn(tso, "40000", "Subscription", "5790000432752",
+                "2023-12-31T23:00:00Z", "9999-12-31T23:59:58.999Z"));
+            var ended = Guid.NewGuid();
+            api.MarketPriceLists[ended] = new JsonObject { ["Id"] = ended.ToString() };
+            mp.MarketPriceLists.Add(MarketPriceListOn(ended, "41000", "Tariff", "5790000432752",
+                "2020-12-31T23:00:00Z", "2022-12-31T23:00:00Z"));
+
             var (exitCode, document) = await ExportAsync(tenant, raw: false);
 
             Assert.Equal(0, exitCode);
+            Assert.Empty(api.UnknownRoutes.Distinct());
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
             Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
@@ -246,6 +261,15 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             Assert.False(exported["consumer"]?["electricalHeating"]?.GetValue<bool>());
             Assert.False(exported["billing"]?["ignoreInBilling"]?.GetValue<bool>());
             Assert.True(exported["billing"]?["exemptFromVat"]?.GetValue<bool>());
+
+            var charge = Assert.Single(exported["marketPriceLists"]!.AsArray())!;
+            Assert.Equal("40000", (string?)charge["priceListId"]);
+            Assert.Equal("Subscription", (string?)charge["type"]);
+            Assert.Equal("5790000432752", (string?)charge["chargeOwner"]);
+            Assert.Equal("2024-01-01", (string?)charge["start"]);
+            Assert.Null(charge["end"]);
+            Assert.Equal(1, (int?)charge["chargeOccurrences"]);
+            Assert.Equal("Abonnement TSO", (string?)charge["description"]);
 
             var price = Assert.Single(customer["priceLists"]!.AsArray())!;
             Assert.Equal("E_KAM_Spot", (string?)price["priceList"]);
@@ -259,6 +283,23 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             await tenant.DisposeAsync();
         }
     }
+
+    private static JsonObject MarketPriceListOn(Guid priceList, string identification, string type, string owner,
+        string start, string end) => new()
+    {
+        ["Id"] = priceList.ToString(),
+        ["PriceIdentification"] = identification,
+        ["PriceChargeOwner"] = new JsonObject { ["Identification"] = owner, ["IdentificationKind"] = "GLN" },
+        ["MarketPriceListType"] = type,
+        ["MeteringPointMarketPriceListAssociation"] = new JsonObject
+        {
+            ["AssociationId"] = Guid.NewGuid().ToString(),
+            ["MarketPriceListId"] = priceList.ToString(),
+            ["ChargeOccurrences"] = 1,
+            ["Start"] = start,
+            ["End"] = end,
+        },
+    };
 
     private static async Task LinkAsync(ProvisioningFixture tenant, Guid customerId, Guid meteringPointId)
     {

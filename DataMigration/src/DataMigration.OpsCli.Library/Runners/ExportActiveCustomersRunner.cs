@@ -63,6 +63,11 @@ public class ExportActiveCustomersRunner
     private readonly Action<string> _log;
     private ReferenceNames _names = ReferenceNames.Empty;
 
+    // Market price lists are shared by many metering points (grid tariffs, TSO subscriptions), so each
+    // is read once per run.
+    private readonly ConcurrentDictionary<string, Lazy<Task<(JsonNode? Node, string? Error)>>> _marketPriceLists =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public ExportActiveCustomersRunner(
         ISettlRawReader reader,
         ISettlMeteringPointClient meteringPointClient,
@@ -342,6 +347,45 @@ public class ExportActiveCustomersRunner
         new(links.Where(l => IsActiveLink(l, today, active)).Select(l => l!.DeepClone()).ToArray());
 
     /// <summary>
+    /// The market price lists on a metering point (grid tariffs, subscriptions, fees): each association
+    /// as Settl returns it, with the price list itself under <c>marketPriceList</c>. Ended associations
+    /// are left out, like ended links.
+    /// </summary>
+    private async Task<JsonArray> MarketPriceListsAsync(Guid mpId, ConcurrentBag<JsonObject> errors, CancellationToken ct)
+    {
+        var market = _reader.Settings.MarketBaseUrl;
+        var section = $"mp {mpId} marketPriceLists";
+        var (node, error) = await _reader.GetAsync($"{market}/api/v3/meteringPoints/{mpId}/marketPriceLists?Limit=1000", ct);
+        if (error != null)
+        {
+            errors.Add(new JsonObject { ["section"] = section, ["error"] = error });
+            return [];
+        }
+        // Settl documents a plain array; accept the paged wrapper too.
+        var items = node as JsonArray ?? node?["Items"] as JsonArray ?? [];
+        var today = DateTime.UtcNow.Date;
+        var result = new JsonArray();
+        foreach (var item in items)
+        {
+            if (item is not JsonObject association) continue;
+            if (!NotEnded(association["MeteringPointMarketPriceListAssociation"], today)) continue;
+            var copy = (JsonObject)association.DeepClone();
+            var priceListId = association["MeteringPointMarketPriceListAssociation"]?["MarketPriceListId"]?.GetValue<string>()
+                              ?? association["Id"]?.GetValue<string>();
+            if (priceListId != null)
+            {
+                var (detail, detailError) = await _marketPriceLists.GetOrAdd(priceListId, id =>
+                    new Lazy<Task<(JsonNode?, string?)>>(() => _reader.GetAsync($"{market}/api/v2/marketPriceLists/{id}", ct))).Value;
+                if (detailError != null)
+                    errors.Add(new JsonObject { ["section"] = $"marketPriceList {priceListId}", ["error"] = detailError });
+                copy["marketPriceList"] = detail?.DeepClone();
+            }
+            result.Add(copy);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Names for the Settl ids the export carries (price area, grid area, customer segment, price
     /// list, product element), read once per run. They are written next to the Settl response under
     /// <c>names</c>, so the export is readable without Settl. Any read that fails fails the run.
@@ -463,6 +507,7 @@ public class ExportActiveCustomersRunner
                 ["billing"] = await Get($"mp {mpId} billing", $"{billing}/api/v1/meteringPoints/{mpId}"),
                 ["settlementGroups"] = await GetAll($"mp {mpId} settlementGroups",
                     $"{billing}/api/v1/settlementGroups?MeteringPointId={mpId}"),
+                ["marketPriceLists"] = await MarketPriceListsAsync(mpId, errors, ct),
             });
         }
 
