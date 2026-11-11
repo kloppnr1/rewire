@@ -229,12 +229,17 @@ var switchImportParallelOption = new Option<int>("--parallel")
     Description = "How many metering points to ask Settl about at a time (default 6)",
     DefaultValueFactory = _ => 6
 };
+var switchImportCorrectOption = new Option<bool>("--correct")
+{
+    Description = "Write the correction for switches already imported without EstimatedAnnualVolume and meter values: " +
+                  "rows for the versions up to the first that still has them, with that version's values"
+};
 var switchImportCommand = new Command("switch-import",
     "Write Settl's MeteringPointMeters_V8 import workbook for the resolution switches post --all listed: " +
     "the old resolution from Settl's earliest meter entry, the new one from the DataHub message's date. Settl creates " +
     "the <MP>_PT1H series the rows name. Read-only: it changes nothing in Settl.")
 {
-    envOption, switchImportInOption, switchImportParallelOption
+    envOption, switchImportInOption, switchImportParallelOption, switchImportCorrectOption
 };
 
 switchImportCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -245,7 +250,8 @@ switchImportCommand.SetAction(async (parseResult, cancellationToken) =>
     var runner = new SwitchImportRunner(reader, Console.WriteLine);
     return await runner.RunAsync(settlEnv,
         parseResult.GetValue(switchImportInOption) ?? Path.Combine(outputDir, $"resolution-switches-{settlEnv}.csv"),
-        outputDir, parseResult.GetValue(switchImportParallelOption), DateOnly.FromDateTime(DateTime.Today), cancellationToken);
+        outputDir, parseResult.GetValue(switchImportParallelOption), DateOnly.FromDateTime(DateTime.Today), cancellationToken,
+        correct: parseResult.GetValue(switchImportCorrectOption));
 });
 
 // === progress command ===

@@ -76,8 +76,27 @@ public sealed class SwitchImportRunnerTests : IDisposable
         return path;
     }
 
-    private Task<int> Run(string input) =>
-        new SwitchImportRunner(_settl, _logs.Add).RunAsync("test", input, _dir, parallel: 4, Today);
+    private Task<int> Run(string input, bool correct = false) =>
+        new SwitchImportRunner(_settl, _logs.Add).RunAsync("test", input, _dir, parallel: 4, Today, correct: correct);
+
+    private string CorrectionPath => Path.Combine(_dir, "MeteringPointMeters_V8_test_2026-11-10_correction.xlsx");
+
+    private static readonly DateTime ChangeDec9 = new(2025, 12, 8, 23, 0, 0, DateTimeKind.Utc); // 2025-12-09 Danish
+
+    // Settl after the first switch-import: the rows left the earliest entry and the ChangeDate entry without values;
+    // the DataHub entry still has them.
+    private Guid ImportedWithoutValues(string mp)
+    {
+        var id = InSettl(mp);
+        _settl.Starts[id] = [FromDataHub, ChangeDec9, Created];
+        _settl.Versions[id] =
+        [
+            (Created, Entry("Hourly", volume: null, ampere: null)),
+            (ChangeDec9, Entry("QuarterHourly", volume: null, ampere: null)),
+            (FromDataHub, Entry("QuarterHourly", volume: 3900, ampere: "35")),
+        ];
+        return id;
+    }
 
     private string MetersPath => Path.Combine(_dir, "MeteringPointMeters_V8_test_2026-11-10.xlsx");
 
@@ -171,6 +190,58 @@ public sealed class SwitchImportRunnerTests : IDisposable
             (m["EstimatedAnnualVolume"], m["DigitsOfPrecision"], m["Decimals"], m["MultiplicationFactor"], m["Ampere"])));
         Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: 2 meters at 2024-01-01, meter columns left empty"));
         Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: 2 meters at 2025-12-09, meter columns left empty"));
+    }
+
+    [Fact]
+    public async Task Correct_FillsTheVersionsBeforeTheFirstWithValues_KeepingTheirOwnResolution()
+    {
+        ImportedWithoutValues(Mp1);
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M")), correct: true));
+
+        var meters = Rows(CorrectionPath);
+        Assert.Equal(
+            [
+                ("2024-01-01", "Hourly", $"{Mp1}_PT1H", "3900", "35", "6", "2", "1"),
+                ("2025-12-09", "QuarterHourly", $"{Mp1}_PT15M", "3900", "35", "6", "2", "1"),
+            ],
+            meters.Select(m => (m["Date"], m["MeterReadingOccurrence"], m["MeasuredTimeSeriesName"], m["EstimatedAnnualVolume"],
+                m["Ampere"], m["DigitsOfPrecision"], m["Decimals"], m["MultiplicationFactor"])));
+        Assert.All(meters, m => Assert.Equal(("Update", "False", "DK"), (m["Action"], m["OverwriteFuture"], m["CountryCode"])));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: values from Settl's meter entry at 2026-09-01 → 2024-01-01, 2025-12-09"));
+        Assert.False(File.Exists(MetersPath));
+    }
+
+    [Fact]
+    public async Task Correct_LeavesOutWhatIsNotImported_AlreadyRight_OrHasNoSource()
+    {
+        InSettl(Mp1);                       // never imported: earliest entry is still QuarterHourly
+        var right = ImportedWithoutValues(Mp2);
+        _settl.Versions[right][0] = (Created, Entry("Hourly"));
+        _settl.Versions[right][1] = (ChangeDec9, Entry("QuarterHourly"));
+        const string Mp3 = "571313100000000003";
+        var none = ImportedWithoutValues(Mp3);
+        _settl.Versions[none][2] = (FromDataHub, Entry("QuarterHourly", volume: null, ampere: null));
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M"), (Mp2, "2025-12-09", "PT15M"), (Mp3, "2025-12-09", "PT15M")), correct: true));
+
+        Assert.Empty(Rows(CorrectionPath));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: not imported yet"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp2}: left out: Settl's history already has the values"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp3}: left out: no Settl meter entry has an EstimatedAnnualVolume or an Ampere"));
+    }
+
+    [Fact]
+    public async Task Correct_WithoutAnEntryOnChangeDate_IsLeftOut()
+    {
+        var id = ImportedWithoutValues(Mp1);
+        _settl.Starts[id] = [FromDataHub, Created];
+        _settl.Versions[id].RemoveAt(1);
+
+        Assert.Equal(0, await Run(Switches((Mp1, "2025-12-09", "PT15M")), correct: true));
+
+        Assert.Empty(Rows(CorrectionPath));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: Settl has no meter entry on ChangeDate"));
     }
 
     [Fact]

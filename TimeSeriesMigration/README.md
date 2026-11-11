@@ -231,6 +231,17 @@ The file starts with the two header rows of Settl's template (`MeteringPointMete
 | `--env <name>` | Which environment |
 | `--in <file>` | The resolution-switches file. Default `output/resolution-switches-<env>.csv` |
 | `--parallel <n>` | Metering points asked about at a time (default 6) |
+| `--correct` | Write the correction for switches already imported with empty value columns (below), to `MeteringPointMeters_V8_<env>_<date>_correction.xlsx` |
+
+### `--correct`
+
+The first production import (2026-11-09) filled only the columns that change, and Settl's new history has no `EstimatedAnnualVolume` or meter values from the earliest entry up to the next version it already had. `--correct` reads every MeterCharacteristics version of each metering point in the file. The first version with an `EstimatedAnnualVolume` or an `Ampere` is the source. Each earlier version that lacks either gets an `Update` row with its own date, `MeterReadingOccurrence` and series, and the source's values (as above). The output names the source date and the rows per metering point. Review it: the values are the ones Settl holds later, not necessarily what held back then.
+
+Left out, and named in the output: the earliest entry is not the old resolution yet (not imported, use `switch-import`), no version on `ChangeDate`, no version with values, or nothing missing. A metering point whose earliest entry was the old resolution before any import also looks imported, so pass `--in` with a file of only the imported metering points (same columns as `resolution-switches-<env>.csv`).
+
+```powershell
+.\TimeSeries.Cli.exe switch-import --env production --correct --in output\resolution-switches-production-imported.csv
+```
 
 ## `requarter`
 

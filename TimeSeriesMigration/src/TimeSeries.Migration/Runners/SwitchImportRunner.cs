@@ -68,6 +68,11 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
 /// 571313115101027361, 2026-11-10.
 /// Left out: a switch on or before Settl's earliest entry (Settl is right already), one whose earliest entry already
 /// has the old value (imported before), and a metering point with more than one switch (by hand).
+/// <para>
+/// With <c>correct</c> it writes the correction for switches imported before the rows carried those values: for each
+/// Settl version from the earliest up to the first one that still has an EstimatedAnnualVolume or an Ampere, an Update
+/// row with that version's own date, MeterReadingOccurrence and series, and that first version's values.
+/// </para>
 /// </summary>
 public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<string> log)
 {
@@ -75,21 +80,22 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Romance Standard Time" : "Europe/Copenhagen");
 
     public const string MetersFilePrefix = "MeteringPointMeters_V8";
+    public const string CorrectionSuffix = "_correction";
 
     /// <summary>A row of resolution-switches: the metering point, ChangeDate and the switched-to MeterReadingOccurrence.</summary>
     internal sealed record SwitchRow(string MeteringPoint, DateOnly ChangeDate, string NewOccurrence);
 
-    /// <summary>Per metering point: what goes in the files, or why nothing does.</summary>
-    internal sealed record Outcome(string MeteringPoint, string Result, DateOnly? From = null, DateOnly? ChangeDate = null,
-        Resolution? Old = null, Resolution? New = null, MeterEntry? OldEntry = null, MeterEntry? NewEntry = null)
+    /// <summary>One Update row of the workbook: its date, resolution, and the values it carries.</summary>
+    internal sealed record ImportRow(string MeteringPoint, DateOnly Date, Resolution Resolution, MeterEntry Values);
+
+    /// <summary>Per metering point: the rows that go in the file, or why none do, and what the output says about them.</summary>
+    internal sealed record Outcome(string MeteringPoint, string Result, IReadOnlyList<ImportRow>? Rows = null,
+        IReadOnlyList<string>? Notes = null)
     {
-        /// <summary>Why a row's meter columns stay empty: the version has no meter, or several.</summary>
-        public IEnumerable<string> Notes()
-        {
-            foreach (var (date, entry) in new[] { (From, OldEntry), (ChangeDate, NewEntry) })
-                if (entry is { Meters.Count: not 1 })
-                    yield return $"{entry.Meters.Count} meters at {date:yyyy-MM-dd}, meter columns left empty";
-        }
+        public IReadOnlyList<ImportRow> Rows { get; } = Rows ?? [];
+        public IReadOnlyList<string> Notes { get; } =
+            [.. Notes ?? [], .. (Rows ?? []).Where(r => r.Values.Meters.Count != 1)
+                .Select(r => $"{r.Values.Meters.Count} meters at {r.Date:yyyy-MM-dd}, meter columns left empty")];
     }
 
     /// <summary>Hour or Quarter, as the file names them.</summary>
@@ -98,11 +104,13 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         public static readonly Resolution Hour = new("Hourly", "PT1H");
         public static readonly Resolution Quarter = new("QuarterHourly", "PT15M");
         public static Resolution FromDataHub(string value) => value == "PT1H" ? Hour : Quarter;
+        public static Resolution? FromSettl(string value) =>
+            value == Hour.Occurrence ? Hour : value == Quarter.Occurrence ? Quarter : null;
         public Resolution Other => this == Hour ? Quarter : Hour;
     }
 
     public async Task<int> RunAsync(string environment, string switchesCsv, string outputDirectory, int parallel,
-        DateOnly today, CancellationToken cancellationToken = default)
+        DateOnly today, CancellationToken cancellationToken = default, bool correct = false)
     {
         if (!File.Exists(switchesCsv))
         {
@@ -115,7 +123,7 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
             log($"ERROR: {readError}");
             return 1;
         }
-        log($"Switch import ({environment}): {rows.Count} switch(es) in {Path.GetFullPath(switchesCsv)}");
+        log($"Switch import{(correct ? " correction" : "")} ({environment}): {rows.Count} switch(es) in {Path.GetFullPath(switchesCsv)}");
 
         var groups = rows.GroupBy(r => r.MeteringPoint, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal).ToList();
         var results = new Outcome[groups.Count];
@@ -126,7 +134,9 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
             await gate.WaitAsync(cancellationToken);
             try
             {
-                results[i] = await DecideAsync(group.ToList(), cancellationToken);
+                results[i] = correct
+                    ? await DecideCorrectionAsync(group.ToList(), cancellationToken)
+                    : await DecideAsync(group.ToList(), cancellationToken);
                 if (Interlocked.Increment(ref done) % 250 == 0)
                     log($"  {done}/{groups.Count} metering points checked");
             }
@@ -141,7 +151,7 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         foreach (var o in outcomes.Where(o => o.Result != "Import"))
             log($"  MP {o.MeteringPoint}: {o.Result}");
         foreach (var o in outcomes.Where(o => o.Result == "Import"))
-            foreach (var note in o.Notes())
+            foreach (var note in o.Notes)
                 log($"  MP {o.MeteringPoint}: {note}");
         if (failed.Count > 0)
         {
@@ -152,13 +162,16 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         var imports = outcomes.Where(o => o.Result == "Import").ToList();
         Directory.CreateDirectory(outputDirectory);
         var stamp = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var metersPath = Path.Combine(outputDirectory, $"{MetersFilePrefix}_{environment}_{stamp}.xlsx");
-        WriteMeters(metersPath, imports);
+        var metersPath = Path.Combine(outputDirectory,
+            $"{MetersFilePrefix}_{environment}_{stamp}{(correct ? CorrectionSuffix : "")}.xlsx");
+        var importRows = imports.SelectMany(o => o.Rows).ToList();
+        WriteMeters(metersPath, importRows);
 
         log("");
         foreach (var g in outcomes.GroupBy(o => o.Result).OrderByDescending(g => g.Count()))
             log($"  {g.Count(),5}  {g.Key}");
-        log($"MeteringPointMeters: {imports.Count * 2} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(metersPath)}");        return 0;
+        log($"MeteringPointMeters: {importRows.Count} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(metersPath)}");
+        return 0;
     }
 
     private async Task<Outcome> DecideAsync(List<SwitchRow> switches, CancellationToken cancellationToken)
@@ -197,8 +210,82 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         if (changeError != null || newEntry == null)
             return new Outcome(mp, $"ERROR: meter entry at {row.ChangeDate:yyyy-MM-dd} failed: {changeError}");
 
-        return new Outcome(mp, "Import", from, row.ChangeDate, oldResolution, newResolution, oldEntry, newEntry);
+        return new Outcome(mp, "Import",
+        [
+            new ImportRow(mp, from, oldResolution, oldEntry),
+            new ImportRow(mp, row.ChangeDate, newResolution, newEntry),
+        ]);
     }
+
+    /// <summary>
+    /// The correction for a switch already imported with empty value columns. Every Settl version is read; the first
+    /// that has an EstimatedAnnualVolume or an Ampere is the source, and each earlier version missing either gets a row
+    /// with its own date and resolution and the source's values.
+    /// </summary>
+    private async Task<Outcome> DecideCorrectionAsync(List<SwitchRow> switches, CancellationToken cancellationToken)
+    {
+        var mp = switches[0].MeteringPoint;
+        if (switches.Count > 1)
+            return new Outcome(mp, "left out: more than one switch, by hand");
+        var row = switches[0];
+        var oldResolution = Resolution.FromDataHub(row.NewOccurrence).Other;
+
+        var (id, findError) = await settl.FindAsync(mp, cancellationToken);
+        if (findError != null)
+            return new Outcome(mp, $"ERROR: market lookup failed: {findError}");
+        if (id is not { } marketId)
+            return new Outcome(mp, "left out: not found in Settl");
+
+        var (starts, historyError) = await settl.MeterCharacteristicsStartsAsync(marketId, cancellationToken);
+        if (historyError != null || starts == null)
+            return new Outcome(mp, $"ERROR: history failed: {historyError}");
+        var ordered = starts.Select(ToUtc).Distinct().Order().ToList();
+        if (ordered.Count == 0)
+            return new Outcome(mp, "left out: no meter entry in Settl");
+
+        var versions = new List<(DateOnly Date, MeterEntry Entry)>();
+        foreach (var start in ordered)
+        {
+            var (entry, error) = await settl.MeterEntryAtAsync(marketId, start.AddHours(1), cancellationToken);
+            if (error != null || entry == null)
+                return new Outcome(mp, $"ERROR: meter entry at {ToDanishDate(start):yyyy-MM-dd} failed: {error}");
+            versions.Add((ToDanishDate(start), entry));
+        }
+
+        if (!(versions[0].Entry.Meters.Count > 0 && versions[0].Entry.Meters.All(m => m.Occurrence == oldResolution.Occurrence)))
+            return new Outcome(mp, "left out: not imported yet (Settl's earliest meter entry is not the old resolution), use switch-import");
+        if (versions.All(v => v.Date != row.ChangeDate))
+            return new Outcome(mp, "left out: Settl has no meter entry on ChangeDate, check by hand");
+
+        var sourceIndex = versions.FindIndex(v => HasValues(v.Entry));
+        if (sourceIndex < 0)
+            return new Outcome(mp, "left out: no Settl meter entry has an EstimatedAnnualVolume or an Ampere");
+        var source = versions[sourceIndex];
+
+        var rows = new List<ImportRow>();
+        foreach (var (date, entry) in versions.Take(sourceIndex).Where(v => LacksValues(v.Entry)))
+        {
+            var occurrences = entry.Meters.Select(m => m.Occurrence).Distinct().ToList();
+            if (occurrences is not [var occurrence] || Resolution.FromSettl(occurrence) is not { } resolution)
+                return new Outcome(mp, $"left out: meter entry at {date:yyyy-MM-dd} has no single Hourly or QuarterHourly reading, by hand");
+            // Meter values only when both versions have one meter; the row names no meter.
+            var meters = entry.Meters.Count == 1 && source.Entry.Meters.Count == 1
+                ? [source.Entry.Meters[0] with { Occurrence = occurrence }]
+                : entry.Meters.Count == 1 ? [] : entry.Meters;
+            rows.Add(new ImportRow(mp, date, resolution, new MeterEntry(source.Entry.EstimatedAnnualVolume, meters)));
+        }
+        if (rows.Count == 0)
+            return new Outcome(mp, "left out: Settl's history already has the values");
+
+        return new Outcome(mp, "Import", rows,
+            [$"values from Settl's meter entry at {source.Date:yyyy-MM-dd} → {string.Join(", ", rows.Select(r => r.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))}"]);
+    }
+
+    private static bool HasValues(MeterEntry entry) =>
+        entry.EstimatedAnnualVolume != null || entry.Meters.Any(m => !string.IsNullOrEmpty(m.Ampere));
+
+    private static bool LacksValues(MeterEntry entry) =>
+        entry.EstimatedAnnualVolume == null || entry.Meters.Any(m => string.IsNullOrEmpty(m.Ampere));
 
     private static DateTime ToUtc(DateTime value) => value.Kind switch
     {
@@ -317,7 +404,7 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         "MeasuredTimeSeriesName", "ProductionType",
     ];
 
-    private static void WriteMeters(string path, List<Outcome> imports)
+    private static void WriteMeters(string path, List<ImportRow> rows)
     {
         using var book = new XLWorkbook();
         var sheet = book.AddWorksheet("MeteringPointMeters");
@@ -329,11 +416,8 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         sheet.Cell(1, 6).Value = "MeteringPointIdentification";
         WriteHeader(sheet, MetersColumns);
         var r = 3;
-        foreach (var o in imports)
-        {
-            WriteMeterRow(sheet, r++, o.MeteringPoint, o.From!.Value, o.Old!, o.OldEntry!);
-            WriteMeterRow(sheet, r++, o.MeteringPoint, o.ChangeDate!.Value, o.New!, o.NewEntry!);
-        }
+        foreach (var row in rows)
+            WriteMeterRow(sheet, r++, row.MeteringPoint, row.Date, row.Resolution, row.Values);
         book.SaveAs(path);
     }
 
