@@ -895,6 +895,7 @@ var missingEavSnapshotMaxAgeOption = new Option<int>("--snapshot-max-age-hours")
     Description = "With --offline: refuse an older snapshot (default 24). Raise it for analysis only, never for a workbook to import",
     DefaultValueFactory = _ => 24
 };
+var missingEavEnvOption = new Option<string>("--env") { Description = "Settl environment to read (featuretest, production, production-hev, production-vhel)" };
 
 var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
@@ -909,6 +910,7 @@ var exportMissingEavExcelCommand = new Command(
     missingEavParallelOption,
     missingEavOfflineOption,
     missingEavSnapshotMaxAgeOption,
+    missingEavEnvOption,
 };
 
 exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
