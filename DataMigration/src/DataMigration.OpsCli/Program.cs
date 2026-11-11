@@ -868,6 +868,67 @@ exportEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
 rootCommand.Subcommands.Add(exportEavExcelCommand);
 
 
+// === export-missing-eav-excel command ===
+var missingEavOutputOption = new Option<string>("--output", "-o") { Description = "Path to .xlsx output file", Required = true };
+var missingEavValueOption = new Option<double>("--value")
+{
+    Description = "EstimatedAnnualVolume in kWh for the versions that have none (default 2000)",
+    DefaultValueFactory = _ => ExportMissingEavExcelRunner.DefaultVolume
+};
+var missingEavMeteringPointsOption = new Option<string[]>("--metering-points")
+{
+    Description = "Just these metering point identification(s) instead of Settl's whole list; repeat or comma-separate",
+    AllowMultipleArgumentsPerToken = true
+};
+var missingEavParallelOption = new Option<int>("--parallel")
+{
+    Description = "How many metering points to ask Settl about at a time (default 6)",
+    DefaultValueFactory = _ => 6
+};
+
+var exportMissingEavExcelCommand = new Command(
+    "export-missing-eav-excel",
+    "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) an " +
+    "EstimatedAnnualVolume: one Update row per meter version without one, from the version in force at the delivery " +
+    "start. Reads Settl only (read-only)")
+{
+    missingEavOutputOption,
+    missingEavValueOption,
+    missingEavMeteringPointsOption,
+    missingEavParallelOption,
+};
+
+exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    var meteringPoints = (parseResult.GetValue(missingEavMeteringPointsOption) ?? [])
+        .SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+    try
+    {
+        var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
+        meteringPointClient.SetDeliveryCategory("El-ekstern");
+        var runner = new ExportMissingEavExcelRunner(new SettlMissingEavReader(meteringPointClient), Console.Error.WriteLine);
+        return await runner.RunAsync(new ExportMissingEavExcelRunOptions
+        {
+            OutputPath = parseResult.GetValue(missingEavOutputOption)!,
+            Volume = parseResult.GetValue(missingEavValueOption),
+            MeteringPoints = meteringPoints,
+            Parallel = parseResult.GetValue(missingEavParallelOption),
+        }, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine($"ERROR: {ex.Message}");
+        Console.ResetColor();
+        return 1;
+    }
+});
+
+rootCommand.Subcommands.Add(exportMissingEavExcelCommand);
+
+
 // === export-exemption-excel command ===
 var exemptionAccountOption = new Option<string[]>("--account", "-a")
 {
