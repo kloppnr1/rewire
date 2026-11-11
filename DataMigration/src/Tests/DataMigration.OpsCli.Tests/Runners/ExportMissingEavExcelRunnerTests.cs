@@ -61,14 +61,11 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
 
     private string FilePath => Path.Combine(_dir, "missing-eav.xlsx");
 
-    private readonly HashSet<string> _migrated = new(StringComparer.Ordinal);
-
     private Task<int> Run(params string[] only) =>
         new ExportMissingEavExcelRunner(_settl, _logs.Add).RunAsync(new ExportMissingEavExcelRunOptions
         {
             OutputPath = FilePath,
             MeteringPoints = only,
-            Migrated = _migrated,
             Parallel = 4,
             Today = Today,
         });

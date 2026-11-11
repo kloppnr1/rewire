@@ -880,11 +880,6 @@ var missingEavMeteringPointsOption = new Option<string[]>("--metering-points")
     Description = "Just these metering point identification(s) instead of Settl's whole list; repeat or comma-separate",
     AllowMultipleArgumentsPerToken = true
 };
-var missingEavMigrationModelOption = new Option<string>("--migration-model")
-{
-    Description = "migration-model.json from build-migration-model; its metering points were part of the migration and are left out",
-    Required = true
-};
 var missingEavParallelOption = new Option<int>("--parallel")
 {
     Description = "How many metering points to ask Settl about at a time (default 6)",
@@ -893,14 +888,13 @@ var missingEavParallelOption = new Option<int>("--parallel")
 
 var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
-    "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) that " +
-    "was not part of the migration an EstimatedAnnualVolume: one Update row per meter version without one, from the " +
-    "version in force at the delivery start. Reads Settl and the migration model only (read-only)")
+    "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) an " +
+    "EstimatedAnnualVolume: one Update row per meter version without one, from the version in force at the delivery " +
+    "start. Reads Settl only (read-only)")
 {
     missingEavOutputOption,
     missingEavValueOption,
     missingEavMeteringPointsOption,
-    missingEavMigrationModelOption,
     missingEavParallelOption,
 };
 
@@ -912,9 +906,6 @@ exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
         .ToArray();
     try
     {
-        var migrationModel = await MigrationRunModel.LoadAsync(parseResult.GetValue(missingEavMigrationModelOption)!, cancellationToken);
-        var migrated = new HashSet<string>(migrationModel.Model.MeteringPoints.Keys, StringComparer.Ordinal);
-        Console.Error.WriteLine($"Migration model: {migrated.Count} migrated metering point(s), left out");
         var meteringPointClient = serviceProvider.GetRequiredService<ISettlMeteringPointClient>();
         meteringPointClient.SetDeliveryCategory("El-ekstern");
         var runner = new ExportMissingEavExcelRunner(new SettlMissingEavReader(meteringPointClient), Console.Error.WriteLine);
@@ -923,7 +914,6 @@ exportMissingEavExcelCommand.SetAction(async (parseResult, cancellationToken) =>
             OutputPath = parseResult.GetValue(missingEavOutputOption)!,
             Volume = parseResult.GetValue(missingEavValueOption),
             MeteringPoints = meteringPoints,
-            Migrated = migrated,
             Parallel = parseResult.GetValue(missingEavParallelOption),
         }, cancellationToken);
     }
