@@ -2,5 +2,6 @@ bin/
 obj/
 .vs/
 TestResults/
+publish/
 *.user
 .claude/settings.local.json

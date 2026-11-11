@@ -34,6 +34,7 @@ CLI smoke: `dotnet run --project DataMigration/src/DataMigration.Migration -- --
 
 ## Safety
 
+- **Agents never connect to Verdo infrastructure**: not Settl, not Xellent, not the APIM gateways, not the servers, not any Verdo host, and not even to test whether it is reachable. Anything that needs it, the user runs.
 - Xellent (`xel2012`; prod `AXDB50`, test `AXDB50_TEST`) and Settl hold real customer data. Reading is fine. Never write to Xellent. Never write to Settl production unless the user says so.
 - No personal data in queries, logs, reports or transcripts: identifiers, counts and dates only. No `SELECT *`, no `sqlcmd -i`.
 - Xellent and Settl need the corporate VPN. On the first "named pipe", "network-related" or "could not open a connection" error: stop, say the VPN is likely down, and wait.
@@ -56,6 +57,12 @@ Production is dry-run. `production`, `production-hev` and `production-vhel` need
 - Check each OpsCli command's write behaviour in DataMigration's guide; do not infer it from the name.
 - `apply-aborabat-repair` is production-only and has no `--dry-run`: leaving out `--execute` shows its plan. Its reviewed workbook does not replace the user's yes.
 - TimeSeries.Cli has no `staging` environment. `--offline` only changes where reads come from; posts still go to Settl.
+
+## Production runs
+
+When the user asks how to run something in production, give the steps from [README.md](README.md#running-timeseriescli-in-production): build and publish on the laptop, copy to `C:\Services\DataMigration\TimeSeriesCli` on `SVDKRA1VBIFROST` without the build's `appsettings.json`, run on the server. Write out the exact commands for the task, with `--env` and, for `post`, `--dry-run` first. Never tell the user to put production credentials on the laptop or in user-secrets: they live only in the server's `appsettings.json`. A hot production run needs the user's explicit yes.
+
+If a change edits `TimeSeries.Cli/appsettings.json`, say so, because the user must make the same edit by hand on the server.
 
 ## Domain rules
 
