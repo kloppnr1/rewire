@@ -97,8 +97,8 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
 
         var rows = Rows();
         Assert.Equal(["2024-01-01", "2025-12-09", "2027-02-01"], rows.Select(r => r["Date"]));
-        Assert.All(rows, r => Assert.Equal(("Update", "False", Mp1, "DK", "2000"),
-            (r["Action"], r["OverwriteFuture"], r["MeteringPointIdentification"], r["CountryCode"], r["EstimatedAnnualVolume"])));
+        Assert.All(rows, r => Assert.Equal(("Update", "False", Mp1, "DK", "2000", "kWh"),
+            (r["Action"], r["OverwriteFuture"], r["MeteringPointIdentification"], r["CountryCode"], r["EstimatedAnnualVolume"], r["QuantityUnit"])));
         Assert.Equal(["Hourly", "QuarterHourly", "QuarterHourly"], rows.Select(r => r["MeterReadingOccurrence"]));
         Assert.Equal([$"{Mp1}_PT1H", $"{Mp1}_PT15M", $"{Mp1}_PT15M"], rows.Select(r => r["MeasuredTimeSeriesName"]));
         // The row replaces the version, so the meter's values ride along.
