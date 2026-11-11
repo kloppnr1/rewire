@@ -286,6 +286,8 @@ var exportActiveLimitOption = new Option<int>("--limit") { Description = "Stop a
 var exportActiveParallelOption = new Option<int>("--parallel") { Description = "Customers read concurrently", DefaultValueFactory = _ => 8 };
 var exportActivePrettyOption = new Option<bool>("--pretty") { Description = "Indent the JSON (much bigger file)" };
 var exportActivePaymentAgreementsOption = new Option<string?>("--payment-agreements") { Description = "Settl 'Payment Agreement' CSV export; attaches each customer's payment agreements by metering point and joint invoice number" };
+var exportActiveDeliverToOption = new Option<string?>("--deliver-to") { Description = "Share folder to deliver to (<dir>/<env>/<run>/customers.jsonl, delta.jsonl, manifest.json, _READY); replaces --output" };
+var exportActiveKeepOption = new Option<int>("--keep") { Description = "With --deliver-to: published runs to keep", DefaultValueFactory = _ => 14 };
 var exportActiveRawOption = new Option<bool>("--raw") { Description = "Write the Settl responses whole instead of the customer example shape (much bigger)" };
 var exportActivePseudonymiseOption = new Option<bool>("--pseudonymise") { Description = "Replace CPR, CVR, names, addresses, email, phone and other identifiers with consistent fake values (sample data)" };
 
@@ -300,7 +302,9 @@ var exportActiveCustomersCommand = new Command("export-active-customers",
     exportActivePrettyOption,
     exportActivePseudonymiseOption,
     exportActiveRawOption,
-    exportActivePaymentAgreementsOption
+    exportActivePaymentAgreementsOption,
+    exportActiveDeliverToOption,
+    exportActiveKeepOption
 };
 
 exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -312,10 +316,10 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             serviceProvider.GetRequiredService<ISettlMeteringPointClient>(),
             serviceProvider.GetRequiredService<ISettlCustomerLinkLookup>(),
             serviceProvider.GetRequiredService<ISettlCustomerClient>());
-        return await runner.RunAsync(new ExportActiveCustomersRunOptions
+        ExportActiveCustomersRunOptions Options(string outputPath, bool jsonLines) => new()
         {
-            OutputPath = parseResult.GetValue(exportActiveOutputOption)
-                ?? $"active-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+            OutputPath = outputPath,
+            JsonLines = jsonLines,
             CustomerNumbers = (parseResult.GetValue(exportActiveCustomersOption) ?? [])
                 .SelectMany(c => c.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 .ToArray(),
@@ -325,7 +329,29 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             Pseudonymise = parseResult.GetValue(exportActivePseudonymiseOption),
             Raw = parseResult.GetValue(exportActiveRawOption),
             PaymentAgreementsCsv = parseResult.GetValue(exportActivePaymentAgreementsOption),
-        }, cancellationToken);
+        };
+
+        var deliverTo = parseResult.GetValue(exportActiveDeliverToOption);
+        if (deliverTo == null)
+            return await runner.RunAsync(Options(parseResult.GetValue(exportActiveOutputOption)
+                ?? $"active-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.json", jsonLines: false), cancellationToken);
+
+        if (parseResult.GetValue(exportActiveOutputOption) != null || parseResult.GetValue(exportActivePrettyOption)
+            || (parseResult.GetValue(exportActiveCustomersOption) ?? []).Length > 0 || parseResult.GetValue(exportActiveLimitOption) > 0)
+        {
+            Console.Error.WriteLine("ERROR: --deliver-to delivers every active customer; it cannot be combined with --output, --pretty, --customer or --limit");
+            return 1;
+        }
+        var delivery = new ExportShareDelivery(() => DateTimeOffset.UtcNow, Console.Error.WriteLine);
+        return await delivery.RunAsync(new ExportShareDeliveryOptions
+        {
+            Root = deliverTo,
+            Environment = settlEnv,
+            Keep = parseResult.GetValue(exportActiveKeepOption),
+            PaymentAgreementsCsv = parseResult.GetValue(exportActivePaymentAgreementsOption),
+            Shape = parseResult.GetValue(exportActiveRawOption) ? "raw Settl responses"
+                : "customer examples (Customer_405013, Customer_397697)",
+        }, (path, ct) => runner.RunAsync(Options(path, jsonLines: true), ct), cancellationToken);
     }
     catch (Exception ex)
     {

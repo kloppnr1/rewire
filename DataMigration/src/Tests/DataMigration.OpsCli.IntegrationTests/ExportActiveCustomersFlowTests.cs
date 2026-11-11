@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using DataMigration.OpsCli.IntegrationTests.Fakes;
 using DataMigration.OpsCli.IntegrationTests.Fixtures;
 using DataMigration.OpsCli.Runners;
+using DataMigration.OpsCli.Services;
 using DataMigration.SettlApi.Models;
 
 namespace DataMigration.OpsCli.IntegrationTests;
@@ -366,6 +367,51 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
         finally
         {
             File.Delete(csv);
+            await tenant.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Share_delivery_publishes_json_lines_and_a_delta_of_what_changed_in_settl()
+    {
+        var tenant = new ProvisioningFixture();
+        await tenant.InitializeAsync();
+        StartDelivery(tenant);
+        var root = Path.Combine(Path.GetTempPath(), $"share-{Guid.NewGuid():N}");
+        try
+        {
+            var settl = tenant.Settl;
+            var runner = new ExportActiveCustomersRunner(
+                settl.RawReader, settl.MeteringPointClient, settl.CustomerLinkLookup, settl.CustomerClient, log: _ => { });
+            var now = new DateTimeOffset(2026, 11, 11, 1, 30, 0, TimeSpan.Zero);
+            var delivery = new ExportShareDelivery(() => now, _ => { });
+            var options = new ExportShareDeliveryOptions { Root = root, Environment = "featuretest", Shape = "test" };
+            Task<int> Export(string path, CancellationToken ct) =>
+                runner.RunAsync(new ExportActiveCustomersRunOptions { OutputPath = path, JsonLines = true, Parallelism = 2 }, ct);
+
+            Assert.Equal(0, await delivery.RunAsync(options, Export));
+
+            // Settl changes between the nightly runs: the customer gets a remark on its metering point.
+            var customerId = settl.Api.Customers.Keys.Single();
+            var mp = settl.Api.MeteringPoints[Guid.Parse((string)settl.Api.CustomerMpLinks[customerId][0]["MeteringPointId"]!)];
+            mp.Market["Notes"] = new JsonObject { ["Remark"] = "Changed in Settl" };
+            now = now.AddDays(1);
+            Assert.Equal(0, await delivery.RunAsync(options, Export));
+
+            var env = Path.Combine(root, "featuretest");
+            var second = Path.Combine(env, now.UtcDateTime.ToString("yyyy-MM-dd'T'HHmmss'Z'"));
+            Assert.True(File.Exists(Path.Combine(second, ExportShareDelivery.ReadyFile)));
+            var customers = File.ReadAllLines(Path.Combine(second, ExportShareDelivery.CustomersFile)).Where(l => l.Length > 0).ToList();
+            var line = JsonNode.Parse(Assert.Single(customers))!;
+            Assert.Equal((string?)settl.Api.Customers[customerId]["CustomerNumber"], (string?)line["customerNumber"]);
+
+            var delta = JsonNode.Parse(Assert.Single(File.ReadAllLines(Path.Combine(second, ExportShareDelivery.DeltaFile))))!;
+            Assert.Equal("changed", (string?)delta["op"]);
+            Assert.Contains(delta["customer"]!["meteringPoints"]!.AsArray(), m => (string?)m!["remark"] == "Changed in Settl");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
             await tenant.DisposeAsync();
         }
     }

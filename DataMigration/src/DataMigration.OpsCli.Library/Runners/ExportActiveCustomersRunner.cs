@@ -34,6 +34,10 @@ public class ExportActiveCustomersRunOptions
     /// each customer gets the agreements on its exported metering points and joint invoice numbers;
     /// a file that cannot be read fails the run.</summary>
     public string? PaymentAgreementsCsv { get; set; }
+
+    /// <summary>Write JSON Lines: one customer object per line, no envelope. The form the share
+    /// delivery writes and diffs (<see cref="ExportShareDelivery"/>).</summary>
+    public bool JsonLines { get; set; }
 }
 
 /// <summary>
@@ -143,17 +147,21 @@ public class ExportActiveCustomersRunner
         await using var writer = new Utf8JsonWriter(stream, writeOptions);
         var writeLock = new SemaphoreSlim(1, 1);
 
-        writer.WriteStartObject();
-        writer.WriteString("generatedAt", DateTime.UtcNow);
-        writer.WriteString("settlBaseUrl", _reader.Settings.BaseUrl);
-        writer.WriteString("selection", (options.CustomerNumbers.Length > 0
-            ? "customer numbers given on the command line"
-            : "customers linked today to an electricity metering point in delivery (market v3, children skipped)")
-            + "; only links to active metering points are kept");
-        writer.WriteBoolean("pseudonymised", options.Pseudonymise);
-        writer.WriteString("shape", options.Raw ? "raw Settl responses" : "customer example (Customer_405013)");
-        writer.WritePropertyName("customers");
-        writer.WriteStartArray();
+        var lineOptions = new JsonSerializerOptions { Encoder = JsonOutput.HumanReadable };
+        if (!options.JsonLines)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("generatedAt", DateTime.UtcNow);
+            writer.WriteString("settlBaseUrl", _reader.Settings.BaseUrl);
+            writer.WriteString("selection", (options.CustomerNumbers.Length > 0
+                ? "customer numbers given on the command line"
+                : "customers linked today to an electricity metering point in delivery (market v3, children skipped)")
+                + "; links to active metering points that have not ended are kept");
+            writer.WriteBoolean("pseudonymised", options.Pseudonymise);
+            writer.WriteString("shape", options.Raw ? "raw Settl responses" : "customer examples (Customer_405013, Customer_397697)");
+            writer.WritePropertyName("customers");
+            writer.WriteStartArray();
+        }
 
         var done = 0;
         var withErrors = 0;
@@ -196,7 +204,16 @@ public class ExportActiveCustomersRunner
                     // down to the approved shape. Inside the lock: the scrambler is not thread-safe.
                     pseudonymiser?.Apply(customer);
                     var output = options.Raw ? customer : CustomerExportProjection.Project(customer);
-                    output.WriteTo(writer);
+                    if (options.JsonLines)
+                    {
+                        await writer.FlushAsync(token);
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(output.ToJsonString(lineOptions) + "\n");
+                        await stream.WriteAsync(bytes, token);
+                    }
+                    else
+                    {
+                        output.WriteTo(writer);
+                    }
                     var n = ++done;
                     if (n % 100 == 0) await writer.FlushAsync(token);
                     if (n % 50 == 0 || n == customerIds.Count)
@@ -209,11 +226,15 @@ public class ExportActiveCustomersRunner
             });
 
 
-        writer.WriteEndArray();
-        writer.WriteNumber("customerCount", done);
-        writer.WriteNumber("customersWithReadErrors", withErrors);
-        writer.WriteEndObject();
+        if (!options.JsonLines)
+        {
+            writer.WriteEndArray();
+            writer.WriteNumber("customerCount", done);
+            writer.WriteNumber("customersWithReadErrors", withErrors);
+            writer.WriteEndObject();
+        }
         await writer.FlushAsync(ct);
+        await stream.FlushAsync(ct);
 
         _log($"Wrote {done} customer(s) to {options.OutputPath} ({withErrors} with read errors)");
         if (pseudonymiser != null)
