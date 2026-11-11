@@ -69,6 +69,8 @@ public static class MeteringPointMeterExcelWriter
         date.Style.DateFormat.Format = "yyyy-mm-dd";
         Cell("CountryCode").Value = "DK";
         Cell("EstimatedAnnualVolume").Value = row.EstimatedAnnualVolume;
+        // Settl rejects a volume without its unit: "QuantityUnit must be set if EstimatedAnnualVolume is set" (featuretest, 2026-11-11).
+        Cell("QuantityUnit").Value = "kWh";
         Cell("MeterReadingOccurrence").Value = row.Meter.Occurrence;
         if (SeriesSuffix(row.Meter.Occurrence) is { } suffix)
             Cell("MeasuredTimeSeriesName").Value = $"{row.MeteringPointIdentification}_{suffix}";
