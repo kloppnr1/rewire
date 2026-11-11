@@ -285,6 +285,7 @@ var exportActiveCustomersOption = new Option<string[]>("--customer")
 var exportActiveLimitOption = new Option<int>("--limit") { Description = "Stop after this many customers (0 = all)" };
 var exportActiveParallelOption = new Option<int>("--parallel") { Description = "Customers read concurrently", DefaultValueFactory = _ => 8 };
 var exportActivePrettyOption = new Option<bool>("--pretty") { Description = "Indent the JSON (much bigger file)" };
+var exportActivePaymentAgreementsOption = new Option<string?>("--payment-agreements") { Description = "Settl 'Payment Agreement' CSV export; attaches each customer's payment agreements by metering point and joint invoice number" };
 var exportActiveRawOption = new Option<bool>("--raw") { Description = "Write the Settl responses whole instead of the customer example shape (much bigger)" };
 var exportActivePseudonymiseOption = new Option<bool>("--pseudonymise") { Description = "Replace CPR, CVR, names, addresses, email, phone and other identifiers with consistent fake values (sample data)" };
 
@@ -298,7 +299,8 @@ var exportActiveCustomersCommand = new Command("export-active-customers",
     exportActiveParallelOption,
     exportActivePrettyOption,
     exportActivePseudonymiseOption,
-    exportActiveRawOption
+    exportActiveRawOption,
+    exportActivePaymentAgreementsOption
 };
 
 exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -322,6 +324,7 @@ exportActiveCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             Pretty = parseResult.GetValue(exportActivePrettyOption),
             Pseudonymise = parseResult.GetValue(exportActivePseudonymiseOption),
             Raw = parseResult.GetValue(exportActiveRawOption),
+            PaymentAgreementsCsv = parseResult.GetValue(exportActivePaymentAgreementsOption),
         }, cancellationToken);
     }
     catch (Exception ex)

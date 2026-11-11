@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DataMigration.OpsCli.Reporting;
 using DataMigration.OpsCli.Services;
 using DataMigration.SettlApi.Clients;
 
@@ -28,6 +29,11 @@ public class ExportActiveCustomersRunOptions
     /// <summary>Write the Settl responses whole instead of the approved customer shape
     /// (<see cref="CustomerExportProjection"/>).</summary>
     public bool Raw { get; set; }
+
+    /// <summary>Settl 'Payment Agreement' CSV export (no API endpoint for payment agreements). When set,
+    /// each customer gets the agreements on its exported metering points and joint invoice numbers;
+    /// a file that cannot be read fails the run.</summary>
+    public string? PaymentAgreementsCsv { get; set; }
 }
 
 /// <summary>
@@ -110,6 +116,21 @@ public class ExportActiveCustomersRunner
         }
         _names = names;
 
+        PaymentAgreementIndex? agreements = null;
+        if (!string.IsNullOrWhiteSpace(options.PaymentAgreementsCsv))
+        {
+            try
+            {
+                agreements = new PaymentAgreementIndex(new SettlCsvParser().Parse(options.PaymentAgreementsCsv));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                _log($"ERROR: reading payment agreements {options.PaymentAgreementsCsv} failed: {ex.Message}");
+                return 1;
+            }
+            _log($"Payment agreements: {agreements.Count} row(s) read");
+        }
+
         if (options.Limit > 0 && customerIds.Count > options.Limit)
             customerIds = customerIds.Take(options.Limit).ToList();
         _log($"Exporting {customerIds.Count} customer(s) [selection: {sw.Elapsed:mm\\:ss}]");
@@ -147,6 +168,7 @@ public class ExportActiveCustomersRunner
                 try
                 {
                     customer = await ExportCustomerAsync(customerId, token);
+                    if (agreements != null) customer["paymentAgreements"] = agreements.For(customer);
                 }
                 catch (Exception ex) when (!token.IsCancellationRequested)
                 {
@@ -397,6 +419,51 @@ public class ExportActiveCustomersRunner
             result.Add(copy);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Payment agreements from the Settl CSV, by metering point identification and by joint invoice
+    /// number. A row with a metering point belongs to that point; a row without one belongs to the
+    /// joint invoice number it names.
+    /// </summary>
+    private sealed class PaymentAgreementIndex(IReadOnlyList<SettlCsvRecord> rows)
+    {
+        private readonly ILookup<string, SettlCsvRecord> _byMeteringPoint = rows
+            .Where(r => r.MeteringpointId != null)
+            .ToLookup(r => r.MeteringpointId!, StringComparer.Ordinal);
+        private readonly ILookup<string, SettlCsvRecord> _byJointInvoice = rows
+            .Where(r => r.MeteringpointId == null && !string.IsNullOrEmpty(r.JointInvoiceNumber))
+            .ToLookup(r => r.JointInvoiceNumber!, StringComparer.Ordinal);
+
+        public int Count => rows.Count;
+
+        public JsonArray For(JsonObject customer)
+        {
+            var points = new HashSet<string>(StringComparer.Ordinal);
+            var jointInvoices = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var mp in customer["meteringPoints"] as JsonArray ?? [])
+            {
+                if ((mp?["billing"]?["MeteringPointIdentification"] ?? mp?["market"]?["Identification"]?["MeteringPointIdentification"])
+                    ?.GetValue<string>() is { Length: > 0 } identification)
+                    points.Add(identification);
+                if (mp?["billing"]?["BillingConfiguration"]?["JointInvoiceNumber"]?.GetValue<string>() is { Length: > 0 } joint)
+                    jointInvoices.Add(joint);
+            }
+            var result = new JsonArray();
+            foreach (var row in points.Order().SelectMany(p => _byMeteringPoint[p])
+                         .Concat(jointInvoices.Order().SelectMany(j => _byJointInvoice[j])))
+                result.Add(new JsonObject
+                {
+                    ["MeteringPointIdentification"] = row.MeteringpointId,
+                    ["JointInvoiceNumber"] = string.IsNullOrEmpty(row.JointInvoiceNumber) ? null : row.JointInvoiceNumber,
+                    ["ExternalCustomerNumber"] = row.ExternalCustomerNumber,
+                    ["PaymentMethod"] = row.PaymentMethod,
+                    ["PaymentAgreementNumber"] = row.PaymentAgreementNumber,
+                    ["AgreementType"] = row.AgreementType,
+                    ["LastUpdated"] = row.LastUpdated,
+                });
+            return result;
+        }
     }
 
     /// <summary>

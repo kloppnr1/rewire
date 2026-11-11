@@ -39,6 +39,8 @@ public sealed class ExportPseudonymiser
         // Payment and invoicing references
         "AccountNumber", "RegNumber", "Iban", "AgreementIdentifier", "OrderIdentifier", "ElectronicNumber",
         "BuyerReference", "BuyerReferenceIdentifier", "BookkeepingReference",
+        // Payment agreements from the Settl CSV (export-active-customers --payment-agreements)
+        "ExternalCustomerNumber", "PaymentAgreementNumber",
     };
 
     /// <summary>Names and free text: replaced by a placeholder carrying a short consistent tag.</summary>

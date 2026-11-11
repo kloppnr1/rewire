@@ -132,4 +132,8 @@ public class SettlCsvRecord
     public string AgreementType { get; set; } = null!;
     public string? MeteringpointId { get; set; }
     public string? JointInvoiceNumber { get; set; }
+
+    /// <summary>The CSV's "Last Updated", as written by Settl (Danish local time), in ISO form
+    /// <c>yyyy-MM-ddTHH:mm:ss</c>. Null when the export has no such column.</summary>
+    public string? LastUpdated { get; set; }
 }

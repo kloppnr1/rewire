@@ -29,6 +29,27 @@ public class SettlCsvParserTests
     }
 
     [Fact]
+    public void Keeps_last_updated_as_iso_local_time()
+    {
+        var records = _parser.ParseContent(Csv(ValidHeader, ValidDataRow));
+
+        Assert.Equal("2026-06-08T09:51:01", Assert.Single(records).LastUpdated);
+    }
+
+    [Fact]
+    public void Last_updated_is_null_when_the_export_has_no_such_column()
+    {
+        var header = "Payment Agreement Number,Payment Method,External Customer Number," +
+                     "Customer Name,Payer Name,Agreement Type,Metering Point Id,Joint Invoice number";
+        var row = "B12853,FI-Kort,E12853,Gribskov Kommune,Gribskov Kommune,Metering Point Payment Agreement,571313179102390039,";
+
+        var record = Assert.Single(_parser.ParseContent(Csv(header, row)));
+
+        Assert.Null(record.LastUpdated);
+        Assert.Equal("571313179102390039", record.MeteringpointId);
+    }
+
+    [Fact]
     public void Parses_alphanumeric_metering_point_id()
     {
         // Water metering points are prefixed with a letter (e.g. "V105254701"), unlike

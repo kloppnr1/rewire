@@ -20,6 +20,7 @@ public class SettlCsvParser
     private const string ColAgreementType          = "agreement type";
     private const string ColMeteringpointId        = "metering point id";
     private const string ColJointInvoiceNumber     = "joint invoice number";
+    private const string ColLastUpdated            = "last updated";
 
     public List<SettlCsvRecord> Parse(string filePath)
     {
@@ -58,6 +59,7 @@ public class SettlCsvParser
         var meteringpointIdx    = RequireColumn(headers, ColMeteringpointId);
         var payerNameIdx        = RequireColumn(headers, ColPayerName);
         var jointInvoiceIdx     = RequireColumn(headers, ColJointInvoiceNumber);
+        var lastUpdatedIdx      = OptionalColumn(headers, ColLastUpdated);
 
         var records = new List<SettlCsvRecord>();
         while (csv.Read())
@@ -86,7 +88,8 @@ public class SettlCsvParser
                 PayerName = csv.GetField(payerNameIdx)?.Trim(),
                 AgreementType = csv.GetField(agreementTypeIdx)?.Trim() ?? "",
                 MeteringpointId = meteringpoint,
-                JointInvoiceNumber = csv.GetField(jointInvoiceIdx)?.Trim()
+                JointInvoiceNumber = csv.GetField(jointInvoiceIdx)?.Trim(),
+                LastUpdated = lastUpdatedIdx < 0 ? null : NullIfEmpty(csv.GetField(lastUpdatedIdx)?.Trim()),
             });
         }
 
@@ -101,8 +104,10 @@ public class SettlCsvParser
         return semicolonCount >= commaCount ? ";" : ",";
     }
 
+    // "08.06.2026, 09.51.01" — the date and time hold a comma, so the parser rewrites the value to
+    // ISO "2026-06-08T09:51:01" before CSV parsing, keeping the column in place.
     private static readonly Regex DatePrefix = new(
-        @"^""?\d{2}\.\d{2}\.\d{4},\s*\d{2}\.\d{2}\.\d{2}""?,\s*",
+        @"^""?(?<d>\d{2})\.(?<m>\d{2})\.(?<y>\d{4}),\s*(?<H>\d{2})\.(?<M>\d{2})\.(?<S>\d{2})""?,\s*",
         RegexOptions.Compiled);
 
     private static string SanitizeCsvContent(string content)
@@ -114,8 +119,6 @@ public class SettlCsvParser
 
         var header = lines[0].TrimEnd('\r');
         var hasLastUpdated = header.StartsWith("Last Updated", StringComparison.OrdinalIgnoreCase);
-        if (hasLastUpdated)
-            header = Regex.Replace(header, @"^Last Updated\s*,\s*", "", RegexOptions.IgnoreCase);
         header = Regex.Replace(header, @",Currency(?=,|$)", "", RegexOptions.IgnoreCase);
         sb.AppendLine(header);
 
@@ -142,7 +145,10 @@ public class SettlCsvParser
                 line = line.Replace("\"\"", "\"");
             }
 
-            line = DatePrefix.Replace(line, "", 1);
+            var prefix = DatePrefix.Match(line);
+            line = prefix.Success
+                ? $"{prefix.Groups["y"]}-{prefix.Groups["m"]}-{prefix.Groups["d"]}T{prefix.Groups["H"]}:{prefix.Groups["M"]}:{prefix.Groups["S"]}," + line[prefix.Length..]
+                : "," + line;
             line = Regex.Replace(line, @",([A-Z]{3}),(?=(?:Meter(?:ing)? Point|Joint) )", ",");
 
             sb.AppendLine(line);
@@ -150,6 +156,16 @@ public class SettlCsvParser
 
         return sb.ToString();
     }
+
+    private static int OptionalColumn(string[] headers, string columnName)
+    {
+        for (int i = 0; i < headers.Length; i++)
+            if (string.Equals(headers[i].Trim(), columnName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return -1;
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static int RequireColumn(string[] headers, string columnName)
     {

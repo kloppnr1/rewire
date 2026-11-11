@@ -51,6 +51,17 @@ public static class CustomerExportProjection
             ["contracts"] = new JsonArray(contracts.Select(c => (JsonNode?)Contract(c)).ToArray()),
             ["priceLists"] = new JsonArray((raw["priceLists"]?["CustomerPriceListAssociations"] as JsonArray ?? [])
                 .Select(a => (JsonNode?)PriceList(a, contracts)).ToArray()),
+            ["paymentAgreements"] = new JsonArray((raw["paymentAgreements"] as JsonArray ?? [])
+                .Select(a => (JsonNode?)new JsonObject
+                {
+                    ["meteringPoint"] = Value(a?["MeteringPointIdentification"]),
+                    ["jointInvoiceNumber"] = Value(a?["JointInvoiceNumber"]),
+                    ["externalCustomerNumber"] = Value(a?["ExternalCustomerNumber"]),
+                    ["paymentMethod"] = Value(a?["PaymentMethod"]),
+                    ["agreementNumber"] = Value(a?["PaymentAgreementNumber"]),
+                    ["agreementType"] = Value(a?["AgreementType"]),
+                    ["lastUpdated"] = Value(a?["LastUpdated"]),
+                }).ToArray()),
             ["extraInvoiceLines"] = new JsonArray((raw["extraInvoiceLines"] as JsonArray ?? [])
                 .Select(l => (JsonNode?)ExtraInvoiceLine(l)).ToArray()),
             ["errors"] = raw["errors"]?.DeepClone(),

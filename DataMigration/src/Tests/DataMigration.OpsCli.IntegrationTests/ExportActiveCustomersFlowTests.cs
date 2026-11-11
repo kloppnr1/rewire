@@ -319,6 +319,75 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
         }
     }
 
+    [Fact]
+    public async Task Payment_agreements_from_the_settl_csv_follow_the_metering_point_or_joint_invoice()
+    {
+        var tenant = new ProvisioningFixture();
+        await tenant.InitializeAsync();
+        StartDelivery(tenant);
+        var csv = Path.Combine(Path.GetTempPath(), $"payment-agreements-{Guid.NewGuid():N}.csv");
+        try
+        {
+            var api = tenant.Settl.Api;
+            var customerId = api.Customers.Keys.Single();
+            var mp = api.CustomerMpLinks[customerId]
+                .Select(l => api.MeteringPoints[Guid.Parse((string)l["MeteringPointId"]!)])
+                .First(m => m.InDelivery);
+            // The billing version create wrote, now with a joint invoice number.
+            var billing = mp.BillingConfiguration!;
+            billing["JointInvoice"] = true;
+            billing["JointInvoiceNumber"] = "J-100";
+
+            // Settl's export layout: Last Updated first, a Currency column the parser drops.
+            await File.WriteAllTextAsync(csv, string.Join("\n",
+                "Last Updated,Payment Agreement Number,Payment Method,External Customer Number," +
+                "Customer Name,Payer Name,Currency,Agreement Type,Metering Point Id,Joint Invoice number",
+                $"\"06.11.2026, 10.15.00\",B100,FIK,E100,Test A/S,Test A/S,DKK,Metering Point Payment Agreement,{mp.Identification},",
+                "\"05.11.2026, 08.00.00\",B200,PBS,E200,Test A/S,Test A/S,DKK,Joint Invoice Payment Agreement,,J-100",
+                "\"04.11.2026, 08.00.00\",B300,PBS,E300,Other,Other,DKK,Metering Point Payment Agreement,571313100000000999,"));
+
+            var (exitCode, document) = await ExportAsync(tenant, raw: false, paymentAgreements: csv);
+
+            Assert.Equal(0, exitCode);
+            var customer = Assert.Single(document["customers"]!.AsArray())!;
+            var agreements = customer["paymentAgreements"]!.AsArray();
+            Assert.Equal(["B100", "B200"], agreements.Select(a => (string)a!["agreementNumber"]!).ToArray());
+
+            var byPoint = agreements[0]!;
+            Assert.Equal(mp.Identification, (string?)byPoint["meteringPoint"]);
+            Assert.Equal("E100", (string?)byPoint["externalCustomerNumber"]);
+            Assert.Equal("FIK", (string?)byPoint["paymentMethod"]);
+            Assert.Equal("2026-11-06T10:15:00", (string?)byPoint["lastUpdated"]);
+
+            var byJointInvoice = agreements[1]!;
+            Assert.Null(byJointInvoice["meteringPoint"]);
+            Assert.Equal("J-100", (string?)byJointInvoice["jointInvoiceNumber"]);
+        }
+        finally
+        {
+            File.Delete(csv);
+            await tenant.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Missing_payment_agreement_file_fails_the_run()
+    {
+        var settl = fixture.Settl;
+        var runner = new ExportActiveCustomersRunner(
+            settl.RawReader, settl.MeteringPointClient, settl.CustomerLinkLookup, settl.CustomerClient, log: _ => { });
+        var output = Path.Combine(Path.GetTempPath(), $"export-active-customers-{Guid.NewGuid():N}.json");
+
+        var exitCode = await runner.RunAsync(new ExportActiveCustomersRunOptions
+        {
+            OutputPath = output,
+            PaymentAgreementsCsv = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.csv"),
+        });
+
+        Assert.Equal(1, exitCode);
+        Assert.False(File.Exists(output));
+    }
+
     private static JsonObject MarketPriceListOn(Guid priceList, string identification, string type, string owner,
         string start, string end) => new()
     {
@@ -345,7 +414,8 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
         Assert.True(ok, error);
     }
 
-    private static async Task<(int ExitCode, JsonObject Document)> ExportAsync(ProvisioningFixture tenant, bool raw)
+    private static async Task<(int ExitCode, JsonObject Document)> ExportAsync(ProvisioningFixture tenant, bool raw,
+        string? paymentAgreements = null)
     {
         var path = Path.Combine(Path.GetTempPath(), $"export-active-customers-{Guid.NewGuid():N}.json");
         try
@@ -359,6 +429,7 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
                 OutputPath = path,
                 Raw = raw,
                 Parallelism = 2,
+                PaymentAgreementsCsv = paymentAgreements,
             });
             var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
             if (document["customers"] is not JsonArray { Count: > 0 })

@@ -73,4 +73,24 @@ public class ExportPseudonymiserTests
         Assert.StartsWith("Fastpris Name-", node["contracts"]![0]!["ContractDescription"]!.GetValue<string>());
         Assert.StartsWith("Refusion Street-", node["extraInvoiceLines"]![0]!["Data"]!["Text"]!.GetValue<string>());
     }
+
+    [Fact]
+    public void Payment_agreement_identifiers_are_replaced_and_the_metering_point_matches()
+    {
+        var node = JsonNode.Parse(Sample)!;
+        node["paymentAgreements"] = JsonNode.Parse("""
+            [ { "MeteringPointIdentification": "571313115242231955", "ExternalCustomerNumber": "E12853",
+                "PaymentAgreementNumber": "B12853", "PaymentMethod": "FIK" } ]
+            """);
+        new ExportPseudonymiser().Apply(node);
+        var json = node.ToJsonString();
+
+        Assert.DoesNotContain("E12853", json);
+        Assert.DoesNotContain("B12853", json);
+        var agreement = node["paymentAgreements"]![0]!;
+        Assert.Equal("FIK", agreement["PaymentMethod"]!.GetValue<string>());
+        Assert.Equal(
+            node["meteringPoints"]![0]!["billing"]!["MeteringPointIdentification"]!.GetValue<string>(),
+            agreement["MeteringPointIdentification"]!.GetValue<string>());
+    }
 }
