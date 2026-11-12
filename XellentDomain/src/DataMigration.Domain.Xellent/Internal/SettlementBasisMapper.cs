@@ -10,7 +10,7 @@ namespace DataMigration.Domain.Xellent.Internal;
 /// <summary>
 /// Maps Xellent rate / billing-history data into a domain <see cref="SettlementBasis"/>
 /// for a single metering point in a date range. Mirrors the query shapes used by
-/// <c>NewSettlement.XellentSettlement.Api/Services/CorrectionService.cs</c> but produces
+/// <c>XellentSettlement.Api/Services/CorrectionService.cs</c> but produces
 /// generic Domain.Engros types instead of Settl-specific DTOs.
 /// </summary>
 internal sealed class SettlementBasisMapper

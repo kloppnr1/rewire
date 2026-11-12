@@ -71,7 +71,7 @@ CVR. Derfor scopes kandidat-load til CVR, ikke hele dataarea'et:
 - Reference-date: default i dag, override via `--reference-date`. (Drift = Settl-snapshot
   vs Xellent nu; kontrakter endt siden migration er legitim drift.) `--profile`/`--accounts`
   kan valgfrit narrowe; `--no-fan-out` slår checket fra.
-- Genbrug (NuGet `NewSettlement.XellentDomain.*` + lokal Migration.Library):
+- Genbrug (NuGet `XellentDomain.*` + lokal Migration.Library):
   `AccountRepresentativeResolver` (`DataMigration.Domain.Xellent`), `XellentDomainMapper`,
   `SettlMappingService` (`DataMigration.Migration.Services`). Mønster fra
   `ReportPayerDiffRunner.cs`.

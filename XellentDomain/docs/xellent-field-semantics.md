@@ -28,7 +28,7 @@ contract or installation collapses distinct product/period rows. Source:
 [`XellentDbContext`](../src/DataMigration.XellentData/XellentDbContext.cs).
 
 DataMigration's
-[`MeteringPointStrategyFactory`](../../NewSettlement.DataMigration/src/DataMigration.Migration.Library/Services/MeteringPointStrategy/MeteringPointStrategyFactory.cs)
+[`MeteringPointStrategyFactory`](../../DataMigration/src/DataMigration.Migration.Library/Services/MeteringPointStrategy/MeteringPointStrategyFactory.cs)
 classifies `El-ekstern`/`El-Ekstern`, `El`, `FI`, `Tele`, `Supply`, and `Service`
 as delpoint categories, using a case-insensitive set. XellentDomain's
 [`ContractMapper`](../src/DataMigration.Domain.Xellent/Internal/ContractMapper.cs)
@@ -73,16 +73,16 @@ five-field parent identity. The explicit relation table stores
 `SECONDARYATTACHMENTNUM`/`SECONDARYDELPOINTNUM`, together with company, category,
 data area, dates, `RELATIONTYPE`, and `ATTACHMENT`. Both endpoints are joined on
 the complete delpoint key in
-[`TimeSeriesExtractionService`](../../NewSettlement.TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs)
+[`TimeSeriesExtractionService`](../../TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs)
 and CustomerSupport's
-[`context`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
+[`context`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
 The code does not supply a complete meaning for every relation-type value.
 
 ## Dates, open periods, and version history
 
 | Column family | Convention found in the code | Source |
 |---|---|---|
-| Contract/part end dates | `1900-01-01` means no end date. CustomerSupport's `Active()` checks only end date, so it also admits future starts; add the start predicate for an as-of question. | [Query extensions](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentQueryExtensions.cs) |
+| Contract/part end dates | `1900-01-01` means no end date. CustomerSupport's `Active()` checks only end date, so it also admits future starts; add the start predicate for an as-of question. | [Query extensions](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentQueryExtensions.cs) |
 | Meter type periods and meter trade end dates | The current-row queries use `1900-01-01`. This is not a uniqueness guarantee. | Query extensions; `MeteringPointMapper` |
 | Billing-method period end date | CustomerSupport uses `2154-12-31` at midnight. XellentDomain instead selects the latest `STARTDATE <= reference date` per delpoint in its billing-method lookup. Preserve this difference when reproducing an application's answer. | Query extensions; `MeteringPointMapper` |
 | Reading-resolution periods | XellentDomain's lookup selects the latest start per delpoint. TimeSeriesMigration retains the dated periods when selecting historical resolutions. | `MeteringPointMapper`; `TimeSeriesExtractionService` |
@@ -101,10 +101,10 @@ later than today; it does not check the start date. Its strict `>` differs from
 the `>=` in `XellentQueryExtensions.Active()`. Thus a future agreement can show
 as active, and an agreement ending today can be treated differently by the two
 readers. These are application definitions, not a universal supply-state rule.
-Source: [`ContractService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/ContractService.cs).
+Source: [`ContractService`](../../CustomerSupport/src/CustomerSupport.Api/Services/ContractService.cs).
 
 **Dated delivery report:** Dashboard's
-[`XellentDeliveryOnDate`](../../NewSettlement.MigrationDashboard/src/Dashboard.Api/Services/XellentDeliveryOnDate.cs)
+[`XellentDeliveryOnDate`](../../MigrationDashboard/src/Dashboard.Api/Services/XellentDeliveryOnDate.cs)
 checks both contract and part start/end dates on the requested day. Its point-type
 selection is restricted to consumption/production points and uses the currently
 open type period, so it does not reconstruct every historical point-type change.
@@ -142,7 +142,7 @@ value), `CONSUMPTION`, `CONSUMPTIONPERDAY`, `READINGMETHODNUM`, `READINGSTATUS`,
 `REASONTOREADING`, and `QUANTITYCODEVALUE`.
 
 CustomerSupport's
-[`TimeSeriesService.GetReadingsTimeSeriesAsync`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/TimeSeriesService.cs)
+[`TimeSeriesService.GetReadingsTimeSeriesAsync`](../../CustomerSupport/src/CustomerSupport.Api/Services/TimeSeriesService.cs)
 interprets `REASONTOREADING` as follows:
 
 | Code | Interpretation in that application |
@@ -197,7 +197,7 @@ The same method derives display values and flags:
 - The displayed annual estimate is positive `CONSUMPTIONPERDAY * 365`, rounded to
   one decimal. It is derived separately from the delpoint annual-estimate field.
 
-Source: [`TimeSeriesService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/TimeSeriesService.cs).
+Source: [`TimeSeriesService`](../../CustomerSupport/src/CustomerSupport.Api/Services/TimeSeriesService.cs).
 
 `EXU_READINGTABLEEXT.EXPECTEDCONSUMPTIONPERYEAR` is an annual estimate, not the
 measured interval consumption. The mapper chooses the latest `READINGDATE` with
@@ -213,7 +213,7 @@ Source: [`MeteringPointMapper`](../src/DataMigration.Domain.Xellent/Internal/Met
 | `EMS_TIMESERIESVALUES.QUALITYOFVALUE` | 0 Machine-approved reading; other codes are not labeled by the current Xellent enum | [QualityOfValue](../src/DataMigration.XellentData/Enums/QualityOfValue.cs) |
 | `EXU_BILLINGMETHODPERIOD.BILLINGMETHOD` | 1 and 3 map to Flex; 2 maps to NonProfiled | `ExtractionMappings.MapBillingMethod` |
 | `EXU_METERTABLETRADE.METERINGPOINTDHSUBTYPE` | 1 Physical; 2 Virtual; 3 Calculated | `ExtractionMappings.MapMeteringPointSubTypeFromDhCode` |
-| `EXU_METERPOINTSTATUSPERIOD.METERPOINTSTATUS` | 5 Created ("Oprettet"); other codes are not defined by this source | [DrainMeterState.OprettetStatus](../../NewSettlement.MigrationDashboard/src/Dashboard.Api/Services/DrainMeterState.cs) |
+| `EXU_METERPOINTSTATUSPERIOD.METERPOINTSTATUS` | 5 Created ("Oprettet"); other codes are not defined by this source | [DrainMeterState.OprettetStatus](../../MigrationDashboard/src/Dashboard.Api/Services/DrainMeterState.cs) |
 | `EXU_AGREEMENTTABLE.EMS_AGREEMENTSTATUSEBIX` | 5 Delivery ended ("Leverance ophørt") | [Entity comment](../src/DataMigration.XellentData/Entities/ExuAgreementTable.cs) |
 | `EXU_DELPOINTCONTACTINFOTABLE.CONTACTTYPE` | 4 is treated as the legal contact; do not assume a unique row per point/start date | `MeteringPointMapper.LoadDelpointContactPointsAsync` |
 
@@ -244,7 +244,7 @@ rows. Select the company, header/resolution, version, and time interval explicit
 before aggregating. CustomerSupport's `EmsTimeseries` class currently omits
 `COMPANYID`, whereas XellentDomain maps it. Sources:
 [`TimeSeriesMapper`](../src/DataMigration.Domain.Xellent/Internal/TimeSeriesMapper.cs),
-[`TimeSeriesExtractionService`](../../NewSettlement.TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs),
+[`TimeSeriesExtractionService`](../../TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs),
 and [column reference](xellent-schema-reference.md#ems_timeseries).
 
 **End boundary difference:** `TimeSeriesMapper.LoadAsync` currently includes
@@ -263,7 +263,7 @@ and reports the mismatch; it does not create measured quarter-hour values from
 hourly data. These are the extractor's interpretation rules.
 
 DataMigration's
-[`ReportMeterHistoryRunner`](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Runners/ReportMeterHistoryRunner.cs)
+[`ReportMeterHistoryRunner`](../../DataMigration/src/DataMigration.OpsCli.Library/Runners/ReportMeterHistoryRunner.cs)
 normally omits points with fewer than two distinct resolutions, unless
 `IncludeSingleResolution` is set. It merges consecutive equal-resolution rows
 and derives each end from the next resolution change, leaving the last open.
@@ -280,7 +280,7 @@ and charge type identifier only. Its charge-definition entity omits the category
 and market-version columns and is keyless. The latter query is evidence for that
 application's behavior, not a proof that two columns uniquely identify every
 charge definition. See CustomerSupport's
-[`relationship #19`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
+[`relationship #19`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
 
 `EXU_DELPOINTPRICEELEMENTR25046` distinguishes `RELATIONVALIDFROM/TO` from
 `VALIDINMARKETFROM/TOEXCL`. CustomerSupport's charge definition additionally maps
@@ -369,7 +369,7 @@ identify the intended interpretation instead of claiming one universal meaning.
 Sources: [contract entity](../src/DataMigration.XellentData/Entities/ExuContractTable.cs)
 and [existing findings](xellent-datamodel.md).
 
-[`CustomerTransactionService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/CustomerTransactionService.cs)
+[`CustomerTransactionService`](../../CustomerSupport/src/CustomerSupport.Api/Services/CustomerTransactionService.cs)
 labels `CUSTTRANS.TRANSTYPE` 0 None, 1 Payment, 2 Settlement/clearing, 3 Interest,
 4 Reminder, 5 Invoice, 6 Credit note, 7 Advance. `AMOUNTCUR` is paired with
 `CURRENCYCODE`. Keep currency in any grouping; that service's running-balance
@@ -377,7 +377,7 @@ calculation does not establish that arbitrary accounts contain only one currency
 
 ### Invoice lists, service icons, and account balances
 
-[`InvoiceService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/InvoiceService.cs)
+[`InvoiceService`](../../CustomerSupport/src/CustomerSupport.Api/Services/InvoiceService.cs)
 has different scopes for different actions:
 
 | Action | Implemented selection or interpretation |
@@ -391,7 +391,7 @@ has different scopes for different actions:
 The icons are derived from agreement data, not posted invoice lines. Different
 icons or list contents can reflect those selection rules. They do not alone prove
 different billed services or missing invoice records. CustomerSupport exposes these
-actions through [`CustomersController`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Controllers/CustomersController.cs).
+actions through [`CustomersController`](../../CustomerSupport/src/CustomerSupport.Api/Controllers/CustomersController.cs).
 
 `CustomerTransactionService` calculates the account balance as the sum of fetched
 transaction amounts and a running balance in transaction order. It applies no due-date
@@ -400,7 +400,7 @@ displayed balance is therefore not, by that calculation alone, an overdue-debt
 figure or proof that a particular invoice has been settled.
 
 In SettlInvoicePdfUpload,
-[`PdfResolver`](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs)
+[`PdfResolver`](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs)
 separately looks for a file for each invoice already in its input and marks the
 file reference missing when no match is found. This is direct evidence that an
 invoice record and PDF availability are separate facts.
@@ -442,8 +442,8 @@ Source: [`CustomerMapper`](../src/DataMigration.Domain.Xellent/Internal/Customer
 `CUSTTABLE.EXU_TECHNICGROUP4` joins `EXU_GROUPTABLE.GROUPNUM` with data area.
 It is distinct from the installation/category attribute
 `EXU_UTILITYINSTALLATION.TECHNICGROUP1`. Sources:
-[`TechnicGroupClusterReader`](../../NewSettlement.MigrationDashboard/src/Dashboard.Api/Services/TechnicGroupClusterReader.cs)
-and [`CustomerSearchService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/CustomerSearchService.cs).
+[`TechnicGroupClusterReader`](../../MigrationDashboard/src/Dashboard.Api/Services/TechnicGroupClusterReader.cs)
+and [`CustomerSearchService`](../../CustomerSupport/src/CustomerSupport.Api/Services/CustomerSearchService.cs).
 The mapped alternative-customer code records 6 CPR and 2 CVR, with 0 when no
 alternative number is registered; this is metadata about identifier meaning,
 not a reason to retrieve personal identifiers for an investigation.
@@ -458,7 +458,7 @@ contact rows for one metering point; `STARTDATE` alone is not a reliable winner.
 
 `DOCUREF` contains both party and referenced-record identifiers plus optional
 document value/type links. CustomerSupport's
-[`CustomerDocumentService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/CustomerDocumentService.cs)
+[`CustomerDocumentService`](../../CustomerSupport/src/CustomerSupport.Api/Services/CustomerDocumentService.cs)
 looks up documents through `PARTYID`, left joins `VALUERECID = DOCUVALUE.RECID`,
 and resolves `DOCUTYPE` using `TYPEID` and the requested data area. A document can
 be a note without an attached file. That service does not establish a general
@@ -474,7 +474,7 @@ counts or proof that every customer interaction has been displayed.
 
 `VDOSALESJOURNALENTRY` is keyed by data area and sequence number; `FUNCTION_`
 maps to the C# property `Function`. CustomerSupport's
-[`SalesJournalService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/SalesJournalService.cs)
+[`SalesJournalService`](../../CustomerSupport/src/CustomerSupport.Api/Services/SalesJournalService.cs)
 reads back an entry by a reference in `TECHNICTEXT1`.
 `VDOSALESJOURNALPRODUCT` is keyed by data area and product ID and contains
 `PRODUCTTYPE`/`ACTIVE`. The reviewed entity/context does not declare a relationship
@@ -510,7 +510,7 @@ deleted part.
 | CustomerSupport configures invoice-line `LINENUM` with fluent `HasPrecision(28,12)` | The generated column list captures class annotations and keys; this additional fluent type facet is documented here. |
 
 Sources: [shared context](../src/DataMigration.XellentData/XellentDbContext.cs),
-[CustomerSupport context](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs),
+[CustomerSupport context](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs),
 and the entity links in the [column reference](xellent-schema-reference.md).
 
 The references cover the **53 distinct tables mapped by these two contexts**.

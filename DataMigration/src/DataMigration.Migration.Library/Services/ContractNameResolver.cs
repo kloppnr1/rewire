@@ -18,7 +18,7 @@ namespace DataMigration.Migration.Services;
 /// <item><b>Electricity product + linked charger's product</b>
 /// (<see cref="CreateOptions.ElectricityChargerContractMap"/>). Decided per metering point, not per
 /// account: fires for every MP an EV charger is linked to unambiguously (see <c>EvCharger</c> in
-/// <c>NewSettlement.XellentDomain</c> — with several candidate MPs, the postal-code tie-break in
+/// <c>XellentDomain</c> — with several candidate MPs, the postal-code tie-break in
 /// <c>BuildEvChargerLookups</c> links each installation to the one MP whose delpoint postal code
 /// matches its own, and leaves what it cannot settle on the account), each with its own
 /// charger(s); and for every MP of an account that has no charger data at all (the

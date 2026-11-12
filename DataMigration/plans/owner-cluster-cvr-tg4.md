@@ -5,7 +5,7 @@
 
 ### Hvad der beviser at det virker
 
-1. **Build** — `dotnet build NewSettlement.DataMigration.sln` → 0 errors.
+1. **Build** — `dotnet build DataMigration.sln` → 0 errors.
 2. **Unit tests** — `dotnet test src/Tests/DataMigration.Migration.Tests/DataMigration.Migration.Tests.csproj` → alle grønne.
 3. **Xellent integration tests** (kør lokalt, kræver xel2012):
    `dotnet test src/Tests/DataMigration.Xellent.IntegrationTests/DataMigration.Xellent.IntegrationTests.csproj`

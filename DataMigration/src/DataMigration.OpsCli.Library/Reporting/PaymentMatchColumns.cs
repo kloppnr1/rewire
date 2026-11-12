@@ -20,7 +20,7 @@ namespace DataMigration.OpsCli.Reporting;
 /// and every metering point has one of those by construction. A header reading "Aftale-ID" was
 /// therefore ambiguous in the one direction that matters: "Målepunkter med egen aftale" could be
 /// read as "all of them". Spell it out. See <c>docs/xellent-datamodel.md</c> in
-/// NewSettlement.XellentDomain.</para>
+/// XellentDomain.</para>
 /// </summary>
 public static class PaymentMatchColumns
 {

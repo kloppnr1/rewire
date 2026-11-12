@@ -40,7 +40,7 @@ dotnet run --project src/DataMigration.OpsCli -- generate-seed --account <acct> 
 Forventet: payer findes i Settl (lookup går på paddet 6-cifret form). Før fix: payer ikke fundet.
 
 ## Kontekst
-`CustomerNumberPolicy.PadForEnv` padder allerede CustomerNumber til 6 cifre i production. Samme regel skal gælde Settl PayerIdentification — både i create-flow (så API-kaldet rammer med paddet form) og i OpsCli read-runners der laver lookup mod Settl. Hele logikken bliver i dette repo; `NewSettlement.SettlClient` røres ikke.
+`CustomerNumberPolicy.PadForEnv` padder allerede CustomerNumber til 6 cifre i production. Samme regel skal gælde Settl PayerIdentification — både i create-flow (så API-kaldet rammer med paddet form) og i OpsCli read-runners der laver lookup mod Settl. Hele logikken bliver i dette repo; `SettlClient` røres ikke.
 
 ## Beslutninger (afklaret med bruger)
 - Samme regel som `CustomerNumberPolicy.PadForEnv` — ingen ny policy-klasse, ingen ny længde.

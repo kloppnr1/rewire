@@ -1,12 +1,12 @@
-# NewSettlement.XellentDomain
+# XellentDomain
 
-Producer-repoet i bunden af afhængighedsgrafen. Alt hvad der ændres her, når ud i hvert andet NewSettlement-repo gennem NuGet. Behandl enhver ændring af en offentlig type eller signatur som en tværgående begivenhed.
+Producer-repoet i bunden af afhængighedsgrafen. Alt hvad der ændres her, når ud i hvert andet repo gennem NuGet. Behandl enhver ændring af en offentlig type eller signatur som en tværgående begivenhed.
 
 ## Projekter og pakker
 
 | Projekt | Pakke | Indhold |
 |---|---|---|
-| `DataMigration.Core` | `NewSettlement.XellentDomain.Core` | Fælles modeller og hjælpere — konstanter, WarningCollector, CSV |
+| `DataMigration.Core` | `XellentDomain.Core` | Fælles modeller og hjælpere — konstanter, WarningCollector, CSV |
 | `DataMigration.Domain` | `…Domain` | Kildeuafhængig domænemodel (Customer, Contract, MeteringPoint …) |
 | `DataMigration.Domain.Engros` | `…Domain.Engros` | Engros-typer (afregningsgrundlag) |
 | `DataMigration.Domain.TimeSeries` | `…Domain.TimeSeries` | Tidsserie-typer (målte målepunktsværdier) |
@@ -15,7 +15,7 @@ Producer-repoet i bunden af afhængighedsgrafen. Alt hvad der ændres her, når 
 
 Assembly- og namespace-navne hedder stadig `DataMigration.*`, så consumers' `using`-linjer virker uændret. Repoet hed tidligere UtilityData; ældre dokumenter bruger det navn.
 
-Unit tests ligger i `src/Tests/`. Den levende Xellent-regressionssuite bor i `NewSettlement.DataMigration`, fordi den kører hele extraction-pipelinen.
+Unit tests ligger i `src/Tests/`. Den levende Xellent-regressionssuite bor i `DataMigration`, fordi den kører hele extraction-pipelinen.
 
 ## Hvad repoet ejer
 
@@ -35,7 +35,7 @@ Serien er i dag **0.8.x**. CI publicerer `{version}-preview.{BuildId}` ved hver 
 
 Skal consumers hente en ændring: bump `VersionPrefix` — og tjek feedet først. Sætter du prefix under en eksisterende preview, bliver floating consumers ved med at hente den gamle, højere version.
 
-**Serie-skift floater ikke.** En consumer med `0.7.*-*` følger ikke med til 0.8.x. Skifter du serie, skal hver consumer rettes i hånden — find dem med et grep efter `NewSettlement.XellentDomain` i `*.csproj` og `Directory.Packages.props` på tværs af repos.
+**Serie-skift floater ikke.** En consumer med `0.7.*-*` følger ikke med til 0.8.x. Skifter du serie, skal hver consumer rettes i hånden — find dem med et grep efter `XellentDomain` i `*.csproj` og `Directory.Packages.props` på tværs af repos.
 
 **Pak aldrig lokalt for at teste en tværgående ændring.** Lokal `dotnet pack` giver `-dev`, som sorterer under feedets `-preview.{BuildId}`, så floating refs ignorerer pakken. Flowet er: bump → commit → vent på CI → restore i consumer.
 

@@ -59,6 +59,6 @@ totals or PDFs; authoritative payment/settlement allocations are still needed.
 ## Evidence when more detail is needed
 
 - [Invoice query](../../src/DataMigration.Domain.Xellent/XellentInvoiceQueries.cs).
-- [BlobUploader](../../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/BlobUploader.cs) and [PdfResolver](../../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs).
+- [BlobUploader](../../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/BlobUploader.cs) and [PdfResolver](../../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs).
 - [Ten invoice scenarios](../invoice-history-after-electricity.md): read the relevant numbered case and its source links.
 - Customer/family mapping disputed: [Customers and contracts](customers-contracts.md). Shared payer/reference changes: [Billing and Settl](billing-settl.md).

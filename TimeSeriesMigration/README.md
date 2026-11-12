@@ -1,4 +1,4 @@
-# NewSettlement.TimeSeriesMigration
+# TimeSeriesMigration
 
 Moves metering point time series from Xellent to Settl: reads the points from Xellent, posts them to Settl, and registers an externally invoiced period per metering point.
 
@@ -312,9 +312,9 @@ In CI/deploy, the pipeline writes the same paths into `appsettings.json` directl
 ## Project Structure
 
 - **TimeSeries.Cli** — the CLI (`snapshot`, `post`, `progress`, `resolution-changes`, `switch-import`, `extract`)
-- **TimeSeries.Migration** — the runner, Xellent extraction and the snapshot store; published as the `NewSettlement.TimeSeriesMigration` package (used by MigrationDashboard)
-- **TimeSeries.Core** — shared DTOs; published as `NewSettlement.TimeSeriesMigration.Core`
-- Xellent and Settl access come from the `NewSettlement.XellentDomain.*` and `NewSettlement.SettlClient.Api` packages
+- **TimeSeries.Migration** — the runner, Xellent extraction and the snapshot store; published as the `TimeSeriesMigration` package (used by MigrationDashboard)
+- **TimeSeries.Core** — shared DTOs; published as `TimeSeriesMigration.Core`
+- Xellent and Settl access come from the `XellentDomain.*` and `SettlClient.Api` packages
 
 ## Deploy
 

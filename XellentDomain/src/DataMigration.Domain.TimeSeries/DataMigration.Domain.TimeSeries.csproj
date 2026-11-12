@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.Domain.TimeSeries</PackageId>
+    <PackageId>XellentDomain.Domain.TimeSeries</PackageId>
     <Description>Time-series domain types: raw measured metering point values (hourly/quarterly/etc.).</Description>
   </PropertyGroup>
 

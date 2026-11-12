@@ -8,10 +8,10 @@
 ### Trin 1 — Build (begge repos)
 Kør (SettlClient først, derefter DataMigration efter NuGet-restore):
 ```
-# i NewSettlement.SettlClient
+# i SettlClient
 dotnet build
 dotnet test src/Tests/DataMigration.SettlClient.Tests
-# i NewSettlement.DataMigration (efter consumer-restore mod ny preview)
+# i DataMigration (efter consumer-restore mod ny preview)
 dotnet build
 dotnet test src/DataMigration.Migration.Library.Tests   # hvis findes
 ```
@@ -29,7 +29,7 @@ Ny test verificerer:
 ### Trin 3 — create dry-run mod featuretest (ingen adfærdsændring her)
 Kør:
 ```
-# i NewSettlement.DataMigration
+# i DataMigration
 dotnet run --project src/DataMigration.Migration -- create <profil> --env featuretest --dry-run
 ```
 Forventet: identisk output som før (featuretest paddes ikke).
@@ -52,12 +52,12 @@ For `production` har Xellent både 5- og 6-cifrede kundenumre; Settl `production
 - Mål-længder: `production`=6, `production-vhel`=5. `featuretest`/`production-hev`/øvrige = ingen normalisering.
 - For lange / ikke-numeriske numre i normaliseret env → **hard fail** (kast, stop kørsel).
 - Når et nummer faktisk paddes (length < mål) → **warning** logges (uændrede numre giver ingen warning).
-- Create-padding lægges i producer-pakken `NewSettlement.SettlClient` (ren adskillelse rå AccountNumber vs Settl CustomerNumber). OpsCli read-runners paddes in-repo.
+- Create-padding lægges i producer-pakken `SettlClient` (ren adskillelse rå AccountNumber vs Settl CustomerNumber). OpsCli read-runners paddes in-repo.
 - Gælder alt der rører Settl: create + read-runners der slår op på Accountnum.
 
 ## Ændringer
 
-### Fase A — `NewSettlement.SettlClient` (producer-pakke, separat repo)
+### Fase A — `SettlClient` (producer-pakke, separat repo)
 *(Kræver at SettlClient-repoet er ledigt; bekræftes før start.)*
 - Ny intern helper `CustomerNumberFormatter.Pad(string accountNumber, int? targetLength, out bool wasPadded)`: når `targetLength` er sat → kræv all-digits og `length <= targetLength` (ellers kast), returnér `PadLeft(targetLength, '9')` og sæt `wasPadded=true` hvis input var kortere; når `null` → returnér uændret, `wasPadded=false`.
 - Når `wasPadded` → log warning ("CustomerNumber {raw} padded til {paddet} for env"). I pakken: via `_logLine` + tilføj til `warnings`-listen der returneres fra `MigrateAsync`.
@@ -70,7 +70,7 @@ For `production` har Xellent både 5- og 6-cifrede kundenumre; Settl `production
   - Payer-fallback (linje 154) røres IKKE (kun kundenummer i scope).
 - Bump `Directory.Build.props` `<VersionPrefix>` 0.7.0 → 0.7.1 (tjek feed: sæt højere end eksisterende previews). Commit develop → vent på CI-preview.
 
-### Fase B — `NewSettlement.DataMigration` (consumer)
+### Fase B — `DataMigration` (consumer)
 - Ny `CustomerNumberPolicy` i `DataMigration.Migration.Library` (nåbar fra både Migration + OpsCli.Library):
   - `int? LengthForEnv(string env)` → production=6, production-vhel=5, ellers null.
   - `string Pad(string accountNumber, int? targetLength, out bool wasPadded)` (samme regel som pakkens; bevidst lille duplikat — dokumentér at de to skal holdes ens).

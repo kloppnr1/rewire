@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.SettlClient.Api</PackageId>
+    <PackageId>SettlClient.Api</PackageId>
     <Description>Settl REST API client (customers, payers, metering points, contracts, settlement groups, time-series).</Description>
   </PropertyGroup>
 

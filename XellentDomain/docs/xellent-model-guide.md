@@ -145,7 +145,7 @@ TimeSeriesMigration consume the XellentDomain package and add query behavior.
 ## Relationships grounded in C#
 
 The relationship numbers in the source of
-[`XellentDatabaseModelContext`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs)
+[`XellentDatabaseModelContext`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs)
 cover 31 EF relationships. The rows below also cite XellentDomain query code
 where it clarifies the path. `1:N` describes the modeled direction; whether
 every parent has children must be checked in the data.
@@ -189,11 +189,11 @@ XellentDomain context may require an explicit LINQ join. The
 mainly configures keys and does not declare this navigation graph.
 
 For additional query examples already used by applications, see
-[`TimeSeriesExtractionService`](../../NewSettlement.TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs)
+[`TimeSeriesExtractionService`](../../TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs)
 for delpoint periods and time series,
-[`ReportMeterHistoryRunner`](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Runners/ReportMeterHistoryRunner.cs)
+[`ReportMeterHistoryRunner`](../../DataMigration/src/DataMigration.OpsCli.Library/Runners/ReportMeterHistoryRunner.cs)
 for meter history, and
-[`CustomerSearchService`](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/CustomerSearchService.cs)
+[`CustomerSearchService`](../../CustomerSupport/src/CustomerSupport.Api/Services/CustomerSearchService.cs)
 for installation category attributes. These are evidence for relationships;
 their application filters answer narrower questions than the general model.
 

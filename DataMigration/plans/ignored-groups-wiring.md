@@ -5,10 +5,10 @@
 
 ## Verifikation (start her)
 
-### Trin 1 — pakke-side (NewSettlement.UtilityData)
+### Trin 1 — pakke-side (UtilityData)
 Kør:
 ```
-cd C:\Users\sen.makj\source\repos\NewSettlement.XellentDomain
+cd C:\Users\sen.makj\source\repos\XellentDomain
 dotnet build
 dotnet test
 ```
@@ -39,7 +39,7 @@ Verificér: en profil med IgnoredGroups sætter ikke de konti i en merge-gruppe;
 
 ## Ændringer
 
-### Pakke (NewSettlement.UtilityData) — merge + pakkens egen owner-cluster
+### Pakke (UtilityData) — merge + pakkens egen owner-cluster
 - `AccountRepresentativeResolver.ResolveAsync`: nyt valgfrit `ignoredGroupNumbers`-param. Fingerprint-path: hent TG4, spring edge-tilføjelse over → standalone. Legacy-path: `KeyOf` returnerer accountnum når TG4 ignoreret.
 - `CustomerMapper.MapAsync`: send `_options.IgnoredGroupNumbers` videre.
 - `XellentDomainMapper.BuildOwnerClustersAsync`: udelad ignoreret TG4 (konsistens for loadResult.OwnerClusters).

@@ -1,6 +1,6 @@
 # rewire
 
-A single .NET 9 solution that combines four NewSettlement repositories as folders, with their git history kept:
+A single .NET 9 solution that combines four repositories as folders, with their git history kept:
 
 | Folder | Contents |
 |--------|----------|

@@ -3,7 +3,7 @@
 Diagrammet i `domain-model.md` rejser en række spørgsmål for en ny læser:
 relationer der ligner redundans, FK'er der ser ud til at gå begge veje, felter
 der duplikeres på flere entiteter. Dette dokument samler hvert spørgsmål, den
-rationale der findes i den primære konsument (`NewSettlement.DataMigration`),
+rationale der findes i den primære konsument (`DataMigration`),
 og hvor modellen stadig efterlader læseren i tvivl.
 
 Princip: hvis modellen kræver et eksternt dokument for at give mening, er det et

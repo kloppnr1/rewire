@@ -56,7 +56,7 @@ Settlement groups (member-missing) **er allerede dækket** — ingen ny kode; gr
 - Semantik-flag: dette gør apply til en "re-migrér denne repræsentant" for de targets — bredere end ét felt, men idempotent. Beskriv i CLI-output.
 
 ### 4. Payer core-felter — CROSS-REPO (høj risiko)
-- **Sibling-repo `NewSettlement.SettlClient`** (separat session — bekræft repo'et er ledigt): ny `UpdatePayerCoreAsync(payerId, coreLeafPatches)` der spejler `UpdatePayerBillingAsync` (flad PUT, ikke wrapped).
+- **Sibling-repo `SettlClient`** (separat session — bekræft repo'et er ledigt): ny `UpdatePayerCoreAsync(payerId, coreLeafPatches)` der spejler `UpdatePayerBillingAsync` (flad PUT, ikke wrapped).
 - **ÅBEN BLOKER:** den sikre flade PUT sætter `PayerInformation=null` (nested round-trip fejler Settl-validering). Felter UNDER `PayerInformation.*` (navn/adresse) kan derfor formentlig **ikke** opdateres ad denne vej. Undersøg i SettlClient-repo'et hvilke payer-core-felter der reelt er skrivbare flat; afgræns apply til dem. Hvis kun top-level flade felter er mulige → meld tilbage før kodning.
 - DataMigration-wiring (dette repo): `ApplyPayerCoreAsync` mod den nye wrapper, samme read-modify-write som billing.
 - Sekvens: SettlClient bump → CI-preview → `dotnet restore --force` her → wire + test.

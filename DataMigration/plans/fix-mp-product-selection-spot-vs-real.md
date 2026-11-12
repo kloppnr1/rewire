@@ -78,7 +78,7 @@ Selv med korrekt "aktiv på reference-dato"-udvælgelse er nogle søskende-MP'er
 ## Ændringer
 
 ### Tier 1 — korrekthed (domæne-neutral, kan shippes nu — løser B + C)
-I `NewSettlement.UtilityData`, `Internal/ContractMapper.cs`:
+I `UtilityData`, `Internal/ContractMapper.cs`:
 - **Tilføj `Startdate`-loft** til del-query (el + vand): kandidat kun hvis `Startdate <= referenceDate` OG (`Enddate == 1900-01-01` ELLER `Enddate >= referenceDate`). Lukker fremtidige dele ude (B → 41714's MP rammer `V ErhVari`).
 - **Vælg netop én del pr. MP:** gruppér kandidater på `Meteringpoint`, vælg den hvis `[Startdate, Enddate]` dækker `referenceDate` (åben slut = dækker altid); flere overlappende → senest-startende vinder (deterministisk). Emit ét assignment pr. MP (C).
 - Følgeop i `ContractNameResolver.ResolvePerMeteringPoint` (dette repo): bekræft ét link pr. MP; fjern afhængigheden af `TryAdd` first-wins.

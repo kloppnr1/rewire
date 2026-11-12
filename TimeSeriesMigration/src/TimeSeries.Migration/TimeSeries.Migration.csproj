@@ -10,9 +10,8 @@
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.TimeSeriesMigration</PackageId>
-    <Description>Reusable time-series migration runner library extracted from NewSettlement.TimeSeriesMigration CLI. Contains TimeSeriesRunner, extraction/simulation/normalization services, Settl clients, and profile loader for hosting in-process from a dashboard or other API host.</Description>
-    <PackageProjectUrl>https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.TimeSeriesMigration</PackageProjectUrl>
+    <PackageId>TimeSeriesMigration</PackageId>
+    <Description>Reusable time-series migration runner library extracted from TimeSeriesMigration CLI. Contains TimeSeriesRunner, extraction/simulation/normalization services, Settl clients, and profile loader for hosting in-process from a dashboard or other API host.</Description>
   </PropertyGroup>
 
   <ItemGroup>

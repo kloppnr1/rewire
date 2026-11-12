@@ -8,7 +8,7 @@
 
 Trin 1 — dry-run mod featuretest (læser kun; ingen mutationer i denne kommando):
 ```
-cd C:\Users\sen.makj\source\repos\NewSettlement.DataMigration\src\DataMigration.OpsCli
+cd C:\Users\sen.makj\source\repos\DataMigration\src\DataMigration.OpsCli
 dotnet run -- payment-match "<sti-til-settl-csv>" --all-accounts --type mb --env featuretest
 ```
 

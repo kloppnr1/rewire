@@ -13,7 +13,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.XellentData</PackageId>
+    <PackageId>XellentDomain.XellentData</PackageId>
     <Description>EF Core entities and DbContext for the Xellent (Dynamics AX 2009) database.</Description>
   </PropertyGroup>
 

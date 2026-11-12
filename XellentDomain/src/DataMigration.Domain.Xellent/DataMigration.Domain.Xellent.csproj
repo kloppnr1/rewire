@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.Domain.Xellent</PackageId>
+    <PackageId>XellentDomain.Domain.Xellent</PackageId>
     <Description>Xellent (Dynamics AX 2009) loader that maps Xellent entities into the source-agnostic domain model.</Description>
   </PropertyGroup>
 

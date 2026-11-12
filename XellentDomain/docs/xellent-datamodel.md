@@ -61,7 +61,7 @@ Kanonisk implementering: `XellentPbsContractReader.FetchAsync`.
 
 Delpoint-kæden gælder el (og FI, Tele, Supply, Service). Vand, Varme, Kloak og
 Charge hænger på `EXU_INSTALLATION` i stedet, uden delpoint. Se
-`MeteringPointStrategyFactory.DelpointCategories` i `NewSettlement.DataMigration`.
+`MeteringPointStrategyFactory.DelpointCategories` i `DataMigration`.
 
 ---
 

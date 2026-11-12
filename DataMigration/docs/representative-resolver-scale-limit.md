@@ -15,7 +15,7 @@ exactly this failure.
 ## Why it happens
 
 `AccountRepresentativeResolver.ResolveAsync` (NuGet package
-`NewSettlement.XellentDomain.Domain.Xellent`) runs two statements per call:
+`XellentDomain.Domain.Xellent`) runs two statements per call:
 
 1. `CustTable` plus three left joins through the party-address relationship tables to the
    address table, for the street fingerprint.

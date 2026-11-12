@@ -50,7 +50,7 @@ i alle modes.
 
 ## Ændringer
 
-### Repo: NewSettlement.SettlClient (NuGet-producer — cross-repo)
+### Repo: SettlClient (NuGet-producer — cross-repo)
 - `AssignSettlementGroupsAsync`: returnér counts (added/wouldAdd, skippedExisting, failed)
   i stedet for `void`. Dry-run tæller "would add" som added.
 - `SettlMigrationResult`: tilføj felter `SettlementGroupsAdded`, `SettlementGroupsSkippedExisting`,
@@ -58,7 +58,7 @@ i alle modes.
 - `MigrateAsync`: tildel counts fra `AssignSettlementGroupsAsync` til result-record.
 - Bump `VersionPrefix` i `Directory.Build.props`. Commit til develop → vent på CI-preview.
 
-### Repo: NewSettlement.DataMigration (her)
+### Repo: DataMigration (her)
 - `dotnet restore --force` → træk ny SettlClient-preview (floating ref).
 - `CreateRunner` aggregering (linje ~675-702): `report.SettlementGroupsAdded += result.SettlementGroupsAdded`
   m.fl.
@@ -71,7 +71,7 @@ i alle modes.
 - Unit test for customer-keyet resolver (first-wins ved flere planer, samme som MP-varianten).
 - CHANGELOG.md-række (adfærdsændring i CreateRunner).
 
-### Repo: NewSettlement.MigrationDashboard (cross-repo — separat follow-up)
+### Repo: MigrationDashboard (cross-repo — separat follow-up)
 - `dotnet restore --force` → ny SettlClient + DataMigration.Migration-preview.
 - FromReport-mapping: medtag `CustomerSettlementGroups` + de tre tællere.
 - React: render pr. kunde forventet gruppe; online berig med status/counts; offline kun forventet.

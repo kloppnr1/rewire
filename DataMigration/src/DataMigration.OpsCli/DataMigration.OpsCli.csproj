@@ -15,7 +15,7 @@
   <ItemGroup>
     <None Include="..\DataMigration.Migration\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Schedule- og segment-mappen ejes af hosten, som al anden datafil i disse repos.
-         BEMÆRK: Dashboard.Api har sin egen kopi (NewSettlement.MigrationDashboard/
+         BEMÆRK: Dashboard.Api har sin egen kopi (MigrationDashboard/
          src/Dashboard.Api/settlement-config.json). SettlementConfigLoader læser
          fra AppContext.BaseDirectory, så de to hosts grupperer kun ens hvis begge filer
          holdes i sync. Opdaterer du den ene, så opdatér den anden. -->

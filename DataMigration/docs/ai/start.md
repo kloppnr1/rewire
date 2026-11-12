@@ -11,8 +11,8 @@ The [migration CLI](../../src/DataMigration.Migration/Program.cs) and
 [OpsCli](../../src/DataMigration.OpsCli/Program.cs) are hosts. Reusable runners live
 in [Migration.Library](../../src/DataMigration.Migration.Library/DataMigration.Migration.Library.csproj)
 and [OpsCli.Library](../../src/DataMigration.OpsCli.Library/DataMigration.OpsCli.Library.csproj),
-which publish `NewSettlement.DataMigration.Migration` and
-`NewSettlement.DataMigration.OpsCli`. Xellent domain/data and Settl clients come
+which publish `DataMigration.Migration.Library` and
+`DataMigration.OpsCli.Library`. Xellent domain/data and Settl clients come
 from NuGet packages, not local copies. Dashboard.Api lives in MigrationDashboard;
 MigrationOps and its tracking database are retired. Follow the workspace's CI
 producer-to-consumer flow; do not create local package feeds for verification.
@@ -23,11 +23,11 @@ A Xellent account is not necessarily a Settl customer number. Resolve it through
 `AccountRepresentativeResolver` before customer lookup; searching a merged
 member directly can falsely report that the customer has not migrated.
 
-Current [resolver source](../../../NewSettlement.XellentDomain/src/DataMigration.Domain.Xellent/AccountRepresentativeResolver.cs)
+Current [resolver source](../../../XellentDomain/src/DataMigration.Domain.Xellent/AccountRepresentativeResolver.cs)
 merges transitively within a CVR when accounts share either a street fingerprint
 or a legal-contact DAR address ID plus matching normalised names/email. Lowest
 Accountnum becomes the representative. The
-[fingerprint](../../../NewSettlement.XellentDomain/src/DataMigration.Domain.Xellent/FingerprintCalculator.cs)
+[fingerprint](../../../XellentDomain/src/DataMigration.Domain.Xellent/FingerprintCalculator.cs)
 uses name, additional name, primary customer street/postcode/city and email,
 with accents, case, whitespace and selected punctuation normalised. Email affects
 both merge paths; EAN does not. A shared DAR ID alone is insufficient.
@@ -51,7 +51,7 @@ and historical ownership enrichment in the
 use this approach.
 
 Current XellentDomain source also reads account filters in
-[2,000-row query portions](../../../NewSettlement.XellentDomain/src/DataMigration.Domain.Xellent/Internal/XellentQueryLimits.cs)
+[2,000-row query portions](../../../XellentDomain/src/DataMigration.Domain.Xellent/Internal/XellentQueryLimits.cs)
 and groups after collecting all rows. These internal query chunks preserve
 cross-chunk merges. The [old scale investigation](../representative-resolver-scale-limit.md)
 still explains the failure, but its claim that the package has no protection is

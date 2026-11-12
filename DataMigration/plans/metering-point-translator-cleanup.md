@@ -3,7 +3,7 @@
 
 # MeteringPointTranslator → ren 1:1 mapping
 
-> **Multi-repo:** `NewSettlement.XellentDomain` (Repo 1), `NewSettlement.SettlClient` (Repo 2), `NewSettlement.DataMigration` (Repo 3 / her). Forudsætter at payer-refaktor branch `refactor/payer-fanout-to-domain` er committet (✓).
+> **Multi-repo:** `XellentDomain` (Repo 1), `SettlClient` (Repo 2), `DataMigration` (Repo 3 / her). Forudsætter at payer-refaktor branch `refactor/payer-fanout-to-domain` er committet (✓).
 
 ## Verifikation (start her)
 
@@ -64,7 +64,7 @@ Multi-repo, samme pattern som payer-refaktoren. Krav: bit-identisk Settl-output 
 
 ## Critical files
 
-### Repo 1 — `NewSettlement.XellentDomain` (lokal: `NewSettlement.UtilityData`)
+### Repo 1 — `XellentDomain` (lokal: `UtilityData`)
 
 **Ændret:** `src/DataMigration.Domain/MeteringPoints/Meter.cs`
 - Tilføj `int Decimals` og `int DigitsOfPrecision` (init-only, default 0).
@@ -99,7 +99,7 @@ public enum MeterReadingOccurrence
 
 **Pack:** Bump til `0.7.3-preview` via central `Directory.Build.props`. Pak alle 6 pakker (`dotnet pack` solution-niveau), kopier til `c:\tmp\local-nupkgs\`.
 
-### Repo 2 — `NewSettlement.SettlClient`
+### Repo 2 — `SettlClient`
 
 **Ændret:** `src/DataMigration.SettlClient/Internal/MeteringPointTranslator.cs`
 - Slet `start`-parameter (linje 23) — død kode. Ny signatur: `Build(MeteringPoint mp, Customer customer)`.
@@ -117,7 +117,7 @@ public enum MeterReadingOccurrence
 
 **Pack:** Bump til `0.6.0-preview` (breaking på `Build`-signatur). Husk clean + Release-build inden pack.
 
-### Repo 3 — `NewSettlement.DataMigration` (her)
+### Repo 3 — `DataMigration` (her)
 
 **Ingen kode-ændringer forventet** — `MeteringPointTranslator` kaldes kun fra SettlClient internt. Vi bumper:
 
@@ -133,7 +133,7 @@ Per memory `feedback_local_pack_workflow` + lærte noter:
 
 1. **Repo 1** (UtilityData): `dotnet build -c Release` + `dotnet pack -c Release` på solution-niveau → alle 6 pakker @ 0.7.3-preview. Kopier til `c:\tmp\local-nupkgs\`.
 2. **Repo 2** (SettlClient): Tilføj/bekræft local-temp source. `Get-ChildItem -Recurse -Directory -Include bin,obj | Remove-Item -Recurse -Force` → `dotnet build -c Release` → `dotnet pack -c Release`. Verificer at den nye DLL er i nupkg'en (`Expand-Archive` + tjek `lib/net9.0/*.dll` LastWriteTime).
-3. **Repo 3** (her): Ryd cache (`dotnet nuget locals all --clear` + `Remove-Item ~/.nuget/packages/newsettlement.settlclient` + tilsvarende for XellentDomain.*), bump csprojs, `dotnet restore --force` → build → tests.
+3. **Repo 3** (her): Ryd cache (`dotnet nuget locals all --clear` + `Remove-Item ~/.nuget/packages/settlclient` + tilsvarende for XellentDomain.*), bump csprojs, `dotnet restore --force` → build → tests.
 
 ## Risici
 

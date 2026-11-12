@@ -48,7 +48,7 @@ It only reads from Settl. It writes `output\MeteringPointMeters_V8_production_<d
 
 ## OpsCli from rewire
 
-The `NewSettlement.DataMigration` Azure DevOps pipeline deploys OpsCli from that repository, so it does not carry changes made in rewire. Until rewire has its own pipeline, deploy OpsCli by hand the same way as TimeSeries.Cli. The server's `C:\Services\DataMigration\OpsCli\appsettings.json` holds the production Xellent and Settl settings the pipeline wrote; it is never overwritten.
+The `DataMigration` Azure DevOps pipeline deploys OpsCli from that repository, so it does not carry changes made in rewire. Until rewire has its own pipeline, deploy OpsCli by hand the same way as TimeSeries.Cli. The server's `C:\Services\DataMigration\OpsCli\appsettings.json` holds the production Xellent and Settl settings the pipeline wrote; it is never overwritten.
 
 ### 1. Build
 
@@ -85,4 +85,4 @@ cd C:\Services\DataMigration\OpsCli
 
 It lists the commands. To go back: copy `C:\Services\DataMigration\OpsCli-previous` over `C:\Services\DataMigration\OpsCli`.
 
-MigrationCli (`create`) still deploys only through the `NewSettlement.DataMigration` pipeline. See [DataMigration/README.md](../DataMigration/README.md) for the commands.
+MigrationCli (`create`) still deploys only through the `DataMigration` pipeline. See [DataMigration/README.md](../DataMigration/README.md) for the commands.

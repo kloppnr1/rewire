@@ -10,9 +10,8 @@
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.DataMigration.OpsCli</PackageId>
-    <Description>Reusable OpsCli runners + report generators extracted from NewSettlement.DataMigration. Contains ReportPayersRunner, ReportMeteringPointsRunner, ReportMeterInfoRunner, ReportDeliveryStartRunner, PbsMatch + Excel exporters, and the compare/fix/state runners. Used by Dashboard.Api to call these in-process from HTTP endpoints.</Description>
-    <PackageProjectUrl>https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.DataMigration</PackageProjectUrl>
+    <PackageId>DataMigration.OpsCli.Library</PackageId>
+    <Description>Reusable OpsCli runners + report generators extracted from DataMigration. Contains ReportPayersRunner, ReportMeteringPointsRunner, ReportMeterInfoRunner, ReportDeliveryStartRunner, PbsMatch + Excel exporters, and the compare/fix/state runners. Used by Dashboard.Api to call these in-process from HTTP endpoints.</Description>
   </PropertyGroup>
 
   <ItemGroup>

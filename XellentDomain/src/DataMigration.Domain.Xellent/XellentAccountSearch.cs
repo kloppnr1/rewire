@@ -8,7 +8,7 @@ namespace DataMigration.Domain.Xellent;
 /// <summary>
 /// Searches Xellent for accounts matching criteria. Returns matched accounts with the
 /// CustTable columns + active-contract metadata callers typically need. Mirrors the
-/// query layer formerly maintained in NewSettlement.CustomerSupport/CustomerSearchService.
+/// query layer formerly maintained in CustomerSupport/CustomerSearchService.
 ///
 /// <para>Direct class (no interface) per <c>XellentDomainMapper</c> convention. For one-call
 /// usage with internal DbContext lifecycle, see <see cref="XellentAccountSearchLoader"/>.</para>

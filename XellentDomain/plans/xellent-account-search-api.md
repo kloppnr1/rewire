@@ -9,7 +9,7 @@
 - Forventet: alle tests passerer. Ny enhedstest for IXellentAccountSearch (mod InMemory eller SQLite) verificerer minimum: field-specific Name + Street-variant + alsoSearchCityZip + IncludeInactive + relevance scoring.
 
 ### Trin 2 — Bifrost-integration (kør først efter pakke er publiceret)
-- Bump `NewSettlement.XellentDomain.*` version i Bifrost
+- Bump `XellentDomain.*` version i Bifrost
 - Refactor `CustomerSearchService` så field-specific path kalder pakken; universal-query routing forbliver i Bifrost
 - Kør: `dotnet build CustomerSupport.sln` → 0 errors
 - Kør: `dotnet test src/Tests/CustomerSupport.Api.Tests/` → alle tests grønne
@@ -17,8 +17,8 @@
 
 ## Kontekst
 
-- Bifrost (`NewSettlement.CustomerSupport`) har `CustomerSearchService` (~1266 linjer) der queryer Xellent-DB direkte
-- Bruger har valgt at centralisere query-laget i `NewSettlement.XellentDomain` så Bifrost kun bruger pakken — ikke direkte EF/DbContext
+- Bifrost (`CustomerSupport`) har `CustomerSearchService` (~1266 linjer) der queryer Xellent-DB direkte
+- Bruger har valgt at centralisere query-laget i `XellentDomain` så Bifrost kun bruger pakken — ikke direkte EF/DbContext
 - `DataMigration.Domain.Xellent` har allerede `XellentDomainLoader` (account-input → domain output). Search er omvendt (criteria-input → matched accounts) og kræver nyt API
 - Bifrost beholder: UX-pattern building, universal-query routing, CVR-gruppering, post-query enrichment
 

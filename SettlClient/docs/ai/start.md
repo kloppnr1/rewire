@@ -2,8 +2,8 @@
 
 ## Ownership and evidence
 
-This repo publishes `NewSettlement.SettlClient.Api` (REST clients, namespace
-`DataMigration.SettlApi`) and `NewSettlement.SettlClient` (domain-to-Settl migration,
+This repo publishes `SettlClient.Api` (REST clients, namespace
+`DataMigration.SettlApi`) and `SettlClient` (domain-to-Settl migration,
 namespace `DataMigration.SettlClient`). See the [API project](../../src/DataMigration.SettlApi/DataMigration.SettlApi.csproj),
 [orchestrator project](../../src/DataMigration.SettlClient/DataMigration.SettlClient.csproj),
 and [orchestrator](../../src/DataMigration.SettlClient/SettlClient.cs).
@@ -97,11 +97,10 @@ are for questions about the relation itself.
 Read versions from [Directory.Build.props](../../Directory.Build.props) and package
 references, not stale prose. At this migration the prefix is `0.7.52`, local suffix
 is `dev`, and both XellentDomain references float on `0.8.*-*`.
-[CI](../../azure-pipelines.yml) builds/tests the solution and publishes unique
-`preview.{BuildId}` packages on develop/master. Follow the workspace release rules;
-do not test cross-repo changes through locally packed packages.
+No CI pipeline packs or publishes these libraries; other folders reference them
+with `ProjectReference`.
 
-For code changes run `dotnet build NewSettlement.SettlClient.slnx`, then
+For code changes run `dotnet build SettlClient.slnx`, then
 `dotnet test src/Tests/DataMigration.SettlClient.Tests/DataMigration.SettlClient.Tests.csproj`.
 This repo is a library producer, not a CLI host; verify consumer behaviour after CI
 has published a producer change. Documentation-only changes need link/source checks,

@@ -1,17 +1,17 @@
-# NewSettlement.XellentDomain
+# XellentDomain
 
-Shared utility-data library set: domain model, Xellent loader, EF entities, and helpers. Consumed via NuGet by DataMigration, MigrationOps, CustomerSupport (Bifrost), TimeSeriesMigration, and other NewSettlement repos.
+Shared utility-data library set: domain model, Xellent loader, EF entities, and helpers. Consumed via NuGet by DataMigration, MigrationOps, CustomerSupport (Bifrost), TimeSeriesMigration, and other repos.
 
 ## Projects
 
 | Project | Package id | Purpose |
 |---|---|---|
-| `DataMigration.Core` | `NewSettlement.XellentDomain.Core` | Shared models and helpers (constants, WarningCollector, CSV) |
-| `DataMigration.Domain` | `NewSettlement.XellentDomain.Domain` | Source-agnostic domain model (Customer, Contract, MeteringPoint, …) |
-| `DataMigration.Domain.Engros` | `NewSettlement.XellentDomain.Domain.Engros` | Wholesale/engros domain types (settlement basis) |
-| `DataMigration.Domain.TimeSeries` | `NewSettlement.XellentDomain.Domain.TimeSeries` | Time-series domain types (raw measured metering point values) |
-| `DataMigration.Domain.Xellent` | `NewSettlement.XellentDomain.Domain.Xellent` | Xellent → Domain mapper + Xellent query utilities (invoices, contract parts, account groupings) |
-| `DataMigration.XellentData` | `NewSettlement.XellentDomain.XellentData` | EF Core entities for the Xellent (Dynamics AX 2009) database |
+| `DataMigration.Core` | `XellentDomain.Core` | Shared models and helpers (constants, WarningCollector, CSV) |
+| `DataMigration.Domain` | `XellentDomain.Domain` | Source-agnostic domain model (Customer, Contract, MeteringPoint, …) |
+| `DataMigration.Domain.Engros` | `XellentDomain.Domain.Engros` | Wholesale/engros domain types (settlement basis) |
+| `DataMigration.Domain.TimeSeries` | `XellentDomain.Domain.TimeSeries` | Time-series domain types (raw measured metering point values) |
+| `DataMigration.Domain.Xellent` | `XellentDomain.Domain.Xellent` | Xellent → Domain mapper + Xellent query utilities (invoices, contract parts, account groupings) |
+| `DataMigration.XellentData` | `XellentDomain.XellentData` | EF Core entities for the Xellent (Dynamics AX 2009) database |
 
 Assembly + namespace names remain `DataMigration.*` so consumer `using` statements keep working unchanged.
 
@@ -19,7 +19,7 @@ Assembly + namespace names remain `DataMigration.*` so consumer `using` statemen
 
 Unit tests live under `src/Tests/` and are part of the solution. Run with `dotnet test`.
 
-The Xellent live-DB regression suite (`DataMigration.Xellent.IntegrationTests`) stays in the `NewSettlement.DataMigration` repo because it exercises the full extraction pipeline (SettlExtractionService).
+The Xellent live-DB regression suite (`DataMigration.Xellent.IntegrationTests`) stays in the `DataMigration` repo because it exercises the full extraction pipeline (SettlExtractionService).
 
 ## Build
 
