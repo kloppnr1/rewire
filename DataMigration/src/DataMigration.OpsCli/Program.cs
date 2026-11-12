@@ -901,8 +901,8 @@ var exportMissingEavExcelCommand = new Command(
     "export-missing-eav-excel",
     "Export Settl bulk-import Excel (MeteringPointMeter V8) that gives every active el MP (parent, in delivery) that " +
     "was not part of the migration an EstimatedAnnualVolume: one Update row per meter version without one, from the " +
-    "version in force at the delivery start. Part of the migration = first delivery start is a ChangeOfSupplier and " +
-    "Xellent has an account at COS-1. Reads Settl and Xellent only (read-only)")
+    "version in force at the delivery start. Part of the migration = Settl's first InDelivery=true start is day D " +
+    "(any reason) and Xellent has an El-ekstern contract running on D-1, in any company. Reads Settl and Xellent only (read-only)")
 {
     missingEavOutputOption,
     missingEavValueOption,

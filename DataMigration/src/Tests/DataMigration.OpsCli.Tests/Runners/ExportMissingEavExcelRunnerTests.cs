@@ -48,6 +48,8 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
 
         /// <summary>First delivery start reason per metering point; MoveIn (not part of the migration) when not set.</summary>
         public Dictionary<Guid, DeliveryStartReason> FirstStart { get; } = new();
+        /// <summary>Metering points whose only delivery status is InDelivery=false.</summary>
+        public HashSet<Guid> NeverInDelivery { get; } = [];
         public string? DeliveryError { get; set; }
 
         public Task<(IReadOnlyList<DeliveryStatusDto>? Statuses, string? Error)> DeliveryStatusesAsync(Guid id, CancellationToken cancellationToken) =>
@@ -55,7 +57,7 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
                 ? (null, DeliveryError)
                 : ([new DeliveryStatusDto
                 {
-                    InDelivery = true,
+                    InDelivery = !NeverInDelivery.Contains(id),
                     Period = new TimePeriodDto { Start = new DateTimeOffset(Delivery), End = DateTimeOffset.MaxValue },
                     StartReason = FirstStart.GetValueOrDefault(id, DeliveryStartReason.MoveIn),
                 }], null));
@@ -206,45 +208,45 @@ public sealed class ExportMissingEavExcelRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task PartOfTheMigration_IsLeftOut_ChangeOfSupplierWithoutXellentAccountAndMoveIn_AreNot()
+    public async Task PartOfTheMigration_IsLeftOut_WhateverReasonSettlRecordsOnTheFirstDeliveryStart()
     {
-        InSettl(Mp1, (Created, Version("Hourly")));   // ChangeOfSupplier, Xellent account at COS-1: migrated
-        InSettl(Mp2, (Created, Version("Hourly")));   // ChangeOfSupplier, no Xellent account at COS-1
-        InSettl(Mp3, (Created, Version("Hourly")));   // MoveIn
+        InSettl(Mp1, (Created, Version("Hourly")));   // ChangeOfSupplier, Xellent contract the day before: migrated
+        InSettl(Mp2, (Created, Version("Hourly")));   // Unknown, Xellent contract the day before: migrated
+        InSettl(Mp3, (Created, Version("Hourly")));   // MoveIn, no Xellent contract the day before: not migrated
         _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.ChangeOfSupplier;
-        _settl.FirstStart[IdOf(Mp2)] = DeliveryStartReason.ChangeOfSupplier;
+        _settl.FirstStart[IdOf(Mp2)] = DeliveryStartReason.Unknown;
         _origin.WithAccount.Add(Mp1);
-        _origin.WithAccount.Add(Mp2 + "0");
+        _origin.WithAccount.Add(Mp2);
 
         Assert.Equal(0, await Run());
 
-        Assert.Equal([Mp2, Mp3], Rows().Select(r => r["MeteringPointIdentification"]));
-        // Only the ChangeOfSupplier points go to Xellent, each with its first delivery date (2025-04-01 Danish).
-        Assert.Equal(new Dictionary<string, DateOnly> { [Mp1] = new(2025, 4, 1), [Mp2] = new(2025, 4, 1) }, _origin.Asked);
-        Assert.Contains(_logs, l => l.Trim() == $"1  {ExportMissingEavExcelRunner.Migrated}");
-        Assert.DoesNotContain(_logs, l => l.Contains($"MP {Mp1}:"));
+        Assert.Equal([Mp3], Rows().Select(r => r["MeteringPointIdentification"]));
+        // Every point with an InDelivery=true start goes to Xellent with that date (2025-04-01 Danish).
+        Assert.Equal(new Dictionary<string, DateOnly> { [Mp1] = new(2025, 4, 1), [Mp2] = new(2025, 4, 1), [Mp3] = new(2025, 4, 1) },
+            _origin.Asked);
+        Assert.Contains(_logs, l => l.Trim() == $"2  {ExportMissingEavExcelRunner.Migrated}");
 
         // The decisions file says why each one is in or out.
         Assert.Equal(
         [
             "MeteringPoint;FirstDeliveryStart;FirstStartReason;XellentAccountAtCosMinusOne;Result",
             $"{Mp1};2025-04-01;ChangeOfSupplier;yes;{ExportMissingEavExcelRunner.Migrated}",
-            $"{Mp2};2025-04-01;ChangeOfSupplier;no;row(s) written: 1",
-            $"{Mp3};2025-04-01;MoveIn;;row(s) written: 1",
+            $"{Mp2};2025-04-01;UnknownDeliveryStartReason;yes;{ExportMissingEavExcelRunner.Migrated}",
+            $"{Mp3};2025-04-01;MoveIn;no;row(s) written: 1",
         ], File.ReadAllLines(ExportMissingEavExcelRunner.DecisionsPath(FilePath)));
     }
 
     [Fact]
-    public async Task AnUnknownFirstDeliveryStart_IsLeftOutByHand()
+    public async Task NoInDeliveryStartInSettl_IsLeftOutByHand()
     {
         InSettl(Mp1, (Created, Version("Hourly")));
         InSettl(Mp2, (Created, Version("Hourly")));
-        _settl.FirstStart[IdOf(Mp1)] = DeliveryStartReason.Unknown;
+        _settl.NeverInDelivery.Add(IdOf(Mp1));
 
         Assert.Equal(0, await Run());
 
         Assert.Equal([Mp2], Rows().Select(r => r["MeteringPointIdentification"]));
-        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: first delivery start is UnknownDeliveryStartReason, by hand"));
+        Assert.Contains(_logs, l => l.Contains($"MP {Mp1}: left out: Settl has no InDelivery=true start, by hand"));
     }
 
     [Fact]
