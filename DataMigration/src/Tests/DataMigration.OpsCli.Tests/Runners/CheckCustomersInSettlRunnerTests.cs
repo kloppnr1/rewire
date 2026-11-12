@@ -43,10 +43,28 @@ public class CheckCustomersInSettlRunnerTests
         Assert.Equal(0, exit);
         var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         Assert.Equal(string.Join('\t', CheckCustomersInSettlRunner.Header), lines[0]);
-        Assert.StartsWith("300\t300\t300\tNotFound", lines[1]);
-        Assert.Equal("200\t100\t100\tFound\t11111111-1111-1111-1111-111111111111", lines[2]);
+        Assert.Equal("300\t300\t300\tNotFound\t\t3\t(none),El-Ekstern", lines[1]);
+        Assert.Equal("200\t100\t100\tFound\t11111111-1111-1111-1111-111111111111\t0", lines[2]);
         Assert.StartsWith("999\t\t\tNotInXellent", lines[3]);
         Assert.Equal(["100", "300"], settl.Searched.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task Active_contracts_count_open_and_future_ends_on_the_reference_date()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        Seed(dbName);
+        await using var context = NewContext(dbName);
+
+        var active = await CheckCustomersInSettlRunner.LoadActiveContractsAsync(
+            context, ["200", "300"], Area, new DateOnly(2026, 1, 1), default);
+
+        Assert.Equal(3, active["300"].Count);
+        Assert.False(active.ContainsKey("200"));
+
+        var later = await CheckCustomersInSettlRunner.LoadActiveContractsAsync(
+            context, ["300"], Area, new DateOnly(2026, 7, 1), default);
+        Assert.Equal(2, later["300"].Count);
     }
 
     // ── Settl lookup ─────────────────────────────────────────────────────────────────────────
@@ -139,8 +157,24 @@ public class CheckCustomersInSettlRunnerTests
         AddAddress(ctx, "P200", 2, "Fiktivvej 1", "8000", "Aarhus");
         AddAddress(ctx, "P300", 3, "Andenvej 2", "8900", "Randers");
         AddAddress(ctx, "P400", 4, "Tredjevej 3", "8600", "Silkeborg");
+        // 300: open El-Ekstern (no end date), El-Ekstern ending in the future, open umbrella
+        // (no category), and one that ended. 200: ended only. 100 (the representative): open,
+        // which must not leak onto member 200's row.
+        ctx.ExuContractTables.AddRange(
+            Contract("C1", "300", "El-Ekstern", DataMigration.Core.MigrationConstants.EndDateNull),
+            Contract("C2", "300", "El-Ekstern", new DateTime(2026, 6, 30)),
+            Contract("C3", "300", "", DataMigration.Core.MigrationConstants.EndDateNull),
+            Contract("C4", "300", "El-Ekstern", new DateTime(2025, 12, 31)),
+            Contract("C5", "200", "El-Ekstern", new DateTime(2025, 3, 31)),
+            Contract("C6", "100", "El-Ekstern", DataMigration.Core.MigrationConstants.EndDateNull));
         ctx.SaveChanges();
     }
+
+    private static ExuContractTable Contract(string num, string account, string category, DateTime end) => new()
+    {
+        Contractnum = num, Dataareaid = Area, Custaccount = account, Name = "", Companyid = "FOR",
+        Deliverycategory = category, Contractstartdate = new DateTime(2020, 1, 1), Contractenddate = end,
+    };
 
     private static CustTable Cust(string account, string cvr, string name, string email, string partyId) => new()
     {

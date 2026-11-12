@@ -38,7 +38,14 @@ public sealed record CustomerPresenceRow(
     string? SearchedCustomerNumber,
     CustomerPresence Status,
     Guid? SettlCustomerId,
-    string? Detail);
+    string? Detail)
+{
+    /// <summary>Xellent contracts on this account that are still open on the reference date. Expected to be 0.</summary>
+    public int ActiveXellentContracts { get; init; }
+
+    /// <summary>Delivery categories of those contracts, distinct and sorted; "(none)" for a contract without one (umbrella contract).</summary>
+    public string[] ActiveContractCategories { get; init; } = [];
+}
 
 /// <summary>
 /// Read-only: for each Xellent Accountnum, says whether its Settl customer exists.
@@ -55,7 +62,8 @@ public sealed record CustomerPresenceRow(
 public sealed class CheckCustomersInSettlRunner
 {
     public static readonly string[] Header =
-        ["Account", "Representative", "SearchedCustomerNumber", "Status", "SettlCustomerId", "Detail"];
+        ["Account", "Representative", "SearchedCustomerNumber", "Status", "SettlCustomerId",
+         "ActiveXellentContracts", "ActiveContractCategories", "Detail"];
 
     private readonly Func<XellentDbContext> _contextFactory;
     private readonly ISettlCustomerClient _customerClient;
@@ -91,19 +99,43 @@ public sealed class CheckCustomersInSettlRunner
         _log($"=== check-customers-in-settl: env={options.Environment} dataArea={options.DataAreaId} accounts={options.Accounts.Length} ===");
 
         Dictionary<string, string> representatives;
+        Dictionary<string, List<string>> openContracts;
         await using (var context = _contextFactory())
+        {
             representatives = await ResolveRepresentativesAsync(context, options, ct);
+            openContracts = await LoadActiveContractsAsync(context, options.Accounts, options.DataAreaId, options.ReferenceDate, ct);
+        }
 
-        var rows = await LookupAsync(options.Accounts, representatives, options.Environment, options.Parallelism, ct);
+        var rows = (await LookupAsync(options.Accounts, representatives, options.Environment, options.Parallelism, ct))
+            .Select(r => openContracts.TryGetValue(r.Account, out var categories)
+                ? r with
+                {
+                    ActiveXellentContracts = categories.Count,
+                    ActiveContractCategories = categories
+                        .Select(c => string.IsNullOrWhiteSpace(c) ? "(none)" : c.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Order(StringComparer.OrdinalIgnoreCase)
+                        .ToArray(),
+                }
+                : r)
+            .ToList();
 
         await output.WriteLineAsync(string.Join('\t', Header));
         foreach (var row in rows)
             await output.WriteLineAsync(string.Join('\t',
                 row.Account, row.Representative ?? "", row.SearchedCustomerNumber ?? "", row.Status.ToString(),
-                row.SettlCustomerId?.ToString() ?? "", Clean(row.Detail)));
+                row.SettlCustomerId?.ToString() ?? "",
+                row.ActiveXellentContracts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                string.Join(',', row.ActiveContractCategories), Clean(row.Detail)));
 
         foreach (var group in rows.GroupBy(r => r.Status).OrderBy(g => g.Key))
             _log($"  {group.Key}: {group.Count()}");
+
+        var withActive = rows.Count(r => r.ActiveXellentContracts > 0);
+        if (withActive > 0)
+            _log($"  WARNING: {withActive} account(s) still have active Xellent contracts on {options.ReferenceDate:yyyy-MM-dd} (expected none); see ActiveXellentContracts");
+        else
+            _log($"  No account has an active Xellent contract on {options.ReferenceDate:yyyy-MM-dd}");
 
         return rows.Any(r => r.Status == CustomerPresence.Error) ? 2 : 0;
     }
@@ -171,6 +203,34 @@ public sealed class CheckCustomersInSettlRunner
         var merged = representatives.Count(kv => kv.Key != kv.Value);
         _log($"  Merged into another representative: {merged}");
         return representatives;
+    }
+
+    /// <summary>
+    /// Account → delivery category of each Xellent contract still open on <paramref name="referenceDate"/>:
+    /// no end date (the 1900-01-01 sentinel) or an end date on or after it. A contract that starts
+    /// later also counts. Contracts of every delivery category count, umbrella contracts included.
+    /// Accounts with none are left out.
+    /// </summary>
+    public static async Task<Dictionary<string, List<string>>> LoadActiveContractsAsync(
+        XellentDbContext context, IReadOnlyList<string> accounts, string dataAreaId, DateOnly referenceDate, CancellationToken ct)
+    {
+        var day = referenceDate.ToDateTime(TimeOnly.MinValue);
+        var noDate = DataMigration.Core.MigrationConstants.EndDateNull;
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var chunk in accounts.Chunk(1000))
+        {
+            var batch = await context.ExuContractTables.AsNoTracking()
+                .Where(c => c.Dataareaid == dataAreaId && chunk.Contains(c.Custaccount)
+                    && (c.Contractenddate == noDate || c.Contractenddate >= day))
+                .Select(c => new { c.Custaccount, c.Deliverycategory })
+                .ToListAsync(ct);
+            foreach (var c in batch)
+            {
+                if (!result.TryGetValue(c.Custaccount, out var list)) result[c.Custaccount] = list = [];
+                list.Add(c.Deliverycategory ?? "");
+            }
+        }
+        return result;
     }
 
     /// <summary>
