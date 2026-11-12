@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using DataMigration.XellentData;
 using System.CommandLine;
 using System.Text.Json;
 using DataMigration.Domain.Customers;
@@ -2042,9 +2043,9 @@ pullStateSourcesCommand.SetAction(async (parseResult, cancellationToken) =>
                 {
                     var date = DateOnly.FromDateTime(pullReferenceDate ?? DateTime.Today);
                     if (scope.ReferenceDate != date) throw new ArgumentException("Scoped refresh must retain its reference date; use a new directory.");
-                    var checkOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<DataMigration.XellentData.XellentDbContext>()
+                    var checkOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<XellentDbContext>()
                         .UseSqlServer(connectionString, o => o.UseCompatibilityLevel(110)).Options;
-                    await using var checkDb = new DataMigration.XellentData.XellentDbContext(checkOptions);
+                    await using var checkDb = new XellentDbContext(checkOptions);
                     var resolved = await StatePullScope.ResolveAsync(entries, checkDb, DataAreaIdForEnv(settlEnv), date, baseIgnoredGroups, cancellationToken);
                     if (!scope.SameResolution(resolved)) throw new ArgumentException("Resolved scope changed; capture into a new directory.");
                 }
@@ -2052,9 +2053,9 @@ pullStateSourcesCommand.SetAction(async (parseResult, cancellationToken) =>
             else
             {
                 if (only == "settl") throw new ArgumentException("A first scoped capture requires Xellent scope resolution; --only settl needs an existing scoped snapshot.");
-                var dbOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<DataMigration.XellentData.XellentDbContext>()
+                var dbOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<XellentDbContext>()
                     .UseSqlServer(connectionString, o => o.UseCompatibilityLevel(110)).Options;
-                await using var db = new DataMigration.XellentData.XellentDbContext(dbOptions);
+                await using var db = new XellentDbContext(dbOptions);
                 scope = await StatePullScope.ResolveAsync(entries, db, DataAreaIdForEnv(settlEnv),
                     DateOnly.FromDateTime(pullReferenceDate ?? DateTime.Today), baseIgnoredGroups, cancellationToken);
             }
@@ -2614,6 +2615,76 @@ reportDeliveryStartCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 rootCommand.Subcommands.Add(reportDeliveryStartCommand);
+
+// === check-customers-in-settl command (read-only) ===
+var checkCustEnvOption = new Option<string>("--env") { Description = "Settl environment to check (featuretest, production, production-hev, production-vhel)" };
+var checkCustFileOption = new Option<string?>("--file") { Description = "File with Xellent Accountnums: one per line, or separated by comma, semicolon or whitespace" };
+var checkCustAccountsOption = new Option<string?>("--accounts") { Description = "Comma-separated Accountnums (instead of, or as well as, --file)" };
+var checkCustDataAreaOption = new Option<string?>("--data-area") { Description = "Override Xellent DataAreaId (default: from --env)" };
+var checkCustReferenceDateOption = new Option<DateTime?>("--reference-date") { Description = "Date the merge address is read at (default: today)" };
+var checkCustLegacyTg4Option = new Option<bool>("--legacy-tg4-merge") { Description = "Use the legacy CVR+TechnicGroup4 merge (for profiles with Extraction.LegacyTg4Merge=true)" };
+var checkCustParallelOption = new Option<int>("--parallel") { Description = "Concurrent Settl lookups", DefaultValueFactory = _ => 8 };
+var checkCustOutputOption = new Option<string?>("--output") { Description = "Output TSV path (default: timestamped file in cwd)" };
+
+var checkCustomersCommand = new Command("check-customers-in-settl",
+    "Read-only: for each Xellent Accountnum, resolve its representative and say whether that customer exists in Settl. TSV with identifiers and status only.")
+{
+    checkCustEnvOption, checkCustFileOption, checkCustAccountsOption, checkCustDataAreaOption,
+    checkCustReferenceDateOption, checkCustLegacyTg4Option, checkCustParallelOption, checkCustOutputOption,
+};
+
+checkCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
+{
+    try
+    {
+        var text = "";
+        var file = parseResult.GetValue(checkCustFileOption);
+        if (file != null) text += await File.ReadAllTextAsync(file, cancellationToken) + "\n";
+        text += parseResult.GetValue(checkCustAccountsOption) ?? "";
+        var accounts = CheckCustomersInSettlRunner.ParseAccounts(text);
+        if (accounts.Length == 0)
+        {
+            Console.Error.WriteLine("ERROR: give accounts with --file and/or --accounts");
+            return 1;
+        }
+
+        var referenceDate = parseResult.GetValue(checkCustReferenceDateOption);
+        var options = new CheckCustomersInSettlRunOptions
+        {
+            Accounts = accounts,
+            Environment = settlEnv,
+            DataAreaId = parseResult.GetValue(checkCustDataAreaOption) ?? DataAreaIdForEnv(settlEnv),
+            ReferenceDate = referenceDate is { } d ? DateOnly.FromDateTime(d) : DateOnly.FromDateTime(DateTime.Today),
+            LegacyTg4Merge = parseResult.GetValue(checkCustLegacyTg4Option),
+            Parallelism = parseResult.GetValue(checkCustParallelOption),
+        };
+
+        var contextOptions = new DbContextOptionsBuilder<XellentDbContext>()
+            .UseXellent(connectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(120); })
+            .Options;
+        var runner = new CheckCustomersInSettlRunner(
+            () => new XellentDbContext(contextOptions),
+            serviceProvider.GetRequiredService<ISettlCustomerClient>(),
+            baseIgnoredGroups,
+            Console.Error.WriteLine);
+
+        var outputPath = parseResult.GetValue(checkCustOutputOption)
+            ?? $"check-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.tsv";
+        int exitCode;
+        await using (var output = new StreamWriter(outputPath, append: false, System.Text.Encoding.UTF8))
+            exitCode = await runner.RunAsync(options, output, cancellationToken);
+        Console.Error.WriteLine($"Output written to {outputPath}");
+        return exitCode;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine($"ERROR: {ex.Message}");
+        Console.ResetColor();
+        return 1;
+    }
+});
+rootCommand.Subcommands.Add(checkCustomersCommand);
 
 // === reconcile command (env-wide) ===
 var reconcileEnvOption = new Option<string>("--env") { Description = "Target environment (featuretest, production, production-hev, production-vhel)" };
