@@ -44,7 +44,7 @@ cd C:\Services\DataMigration\TimeSeriesCli
 .\TimeSeries.Cli.exe switch-import --env production --correct --in output\resolution-switches-production-imported.csv
 ```
 
-It only reads from Settl. It writes `output\MeteringPointMeters_V8_production_<date>_correction.xlsx`, which is checked and then imported into Settl by hand.
+It only reads from Settl. It writes `output\MeteringPointMeters_V8_production_<date>_correction.xlsx`, which is checked and then imported into Settl by hand. Next to it are `..._correction_backup.csv`, every meter entry as Settl held it before the import (keep it), and `..._correction_metertype.csv`, the MeterType to set by hand in Settl after the import, because the template cannot carry it.
 
 ## OpsCli from rewire
 

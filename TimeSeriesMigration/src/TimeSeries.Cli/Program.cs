@@ -232,7 +232,9 @@ var switchImportParallelOption = new Option<int>("--parallel")
 var switchImportCorrectOption = new Option<bool>("--correct")
 {
     Description = "Write the correction for switches already imported without EstimatedAnnualVolume and meter values: " +
-                  "rows for the versions up to the first that still has them, with that version's values"
+                  "rows for the versions up to the first that still has them, with that version's values. Also writes " +
+                  "<workbook>_backup.csv (every meter entry as Settl holds it now) and <workbook>_metertype.csv " +
+                  "(the MeterType to set by hand: the template has no column for it)"
 };
 var switchImportCommand = new Command("switch-import",
     "Write Settl's MeteringPointMeters_V8 import workbook for the resolution switches post --all listed: " +

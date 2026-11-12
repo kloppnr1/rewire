@@ -23,8 +23,12 @@ public interface ISwitchImportSettlReader
 /// <summary>What switch-import copies from a Settl MeterCharacteristics version into its import row.</summary>
 public sealed record MeterEntry(double? EstimatedAnnualVolume, IReadOnlyList<MeterValues> Meters);
 
-/// <summary>One meter of a MeterCharacteristics version.</summary>
-public sealed record MeterValues(string Occurrence, int DigitsOfPrecision, int Decimals, double? MultiplicationFactor, string? Ampere);
+/// <summary>
+/// One meter of a MeterCharacteristics version. MeterType is read for the backup and the by-hand list only: the import
+/// template has no column for it.
+/// </summary>
+public sealed record MeterValues(string Occurrence, int DigitsOfPrecision, int Decimals, double? MultiplicationFactor, string? Ampere,
+    string? MeterType = null);
 
 public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPoints)
     : ISwitchImportSettlReader
@@ -49,7 +53,7 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
         var characteristics = mp.MeterCharacteristics;
         var volume = characteristics?.EstimatedAnnualVolume is { IsEmpty: false } eav ? eav.Value : (double?)null;
         var meters = characteristics?.Meters
-            .Select(m => new MeterValues(m.MeterReadingOccurrence ?? "", m.DigitsOfPrecision, m.Decimals, m.MultiplicationFactor, m.Ampere))
+            .Select(m => new MeterValues(m.MeterReadingOccurrence ?? "", m.DigitsOfPrecision, m.Decimals, m.MultiplicationFactor, m.Ampere, m.MeterType))
             .ToList() ?? [];
         return (new MeterEntry(volume, meters), null);
     }
@@ -71,7 +75,10 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
 /// <para>
 /// With <c>correct</c> it writes the correction for switches imported before the rows carried those values: for each
 /// Settl version from the earliest up to the first one that still has an EstimatedAnnualVolume or an Ampere, an Update
-/// row with that version's own date, MeterReadingOccurrence and series, and that first version's values.
+/// row with that version's own date, MeterReadingOccurrence and series, and that first version's values. Every
+/// version read is saved first to <c>&lt;workbook&gt;_backup.csv</c>, so what Settl held before the import is kept.
+/// The template has no MeterType column, so the import cannot set or overwrite it; <c>&lt;workbook&gt;_metertype.csv</c>
+/// lists each version that lacks one, with the MeterType to set by hand in Settl.
 /// </para>
 /// </summary>
 public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<string> log)
@@ -81,6 +88,8 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
 
     public const string MetersFilePrefix = "MeteringPointMeters_V8";
     public const string CorrectionSuffix = "_correction";
+    public const string BackupSuffix = "_backup";
+    public const string MeterTypeSuffix = "_metertype";
 
     /// <summary>A row of resolution-switches: the metering point, ChangeDate and the switched-to MeterReadingOccurrence.</summary>
     internal sealed record SwitchRow(string MeteringPoint, DateOnly ChangeDate, string NewOccurrence);
@@ -90,13 +99,21 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
 
     /// <summary>Per metering point: the rows that go in the file, or why none do, and what the output says about them.</summary>
     internal sealed record Outcome(string MeteringPoint, string Result, IReadOnlyList<ImportRow>? Rows = null,
-        IReadOnlyList<string>? Notes = null)
+        IReadOnlyList<string>? Notes = null, IReadOnlyList<Version>? Versions = null)
     {
+        /// <summary>Every MeterCharacteristics version read (correction only), for the backup and the MeterType list.</summary>
+        public IReadOnlyList<Version> Versions { get; } = Versions ?? [];
         public IReadOnlyList<ImportRow> Rows { get; } = Rows ?? [];
         public IReadOnlyList<string> Notes { get; } =
             [.. Notes ?? [], .. (Rows ?? []).Where(r => r.Values.Meters.Count != 1)
                 .Select(r => $"{r.Values.Meters.Count} meters at {r.Date:yyyy-MM-dd}, meter columns left empty")];
     }
+
+    /// <summary>A Settl MeterCharacteristics version: its Danish start date and what holds from it.</summary>
+    internal sealed record Version(DateOnly Date, MeterEntry Entry);
+
+    /// <summary>A version whose meter must get a MeterType by hand; MeterType null when no version has one.</summary>
+    internal sealed record MeterTypeFix(string MeteringPoint, DateOnly Date, string? MeterType);
 
     /// <summary>Hour or Quarter, as the file names them.</summary>
     internal sealed record Resolution(string Occurrence, string SeriesSuffix)
@@ -165,12 +182,32 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         var metersPath = Path.Combine(outputDirectory,
             $"{MetersFilePrefix}_{environment}_{stamp}{(correct ? CorrectionSuffix : "")}.xlsx");
         var importRows = imports.SelectMany(o => o.Rows).ToList();
+        string? backupPath = null, meterTypePath = null;
+        var meterTypeFixes = new List<MeterTypeFix>();
+        if (correct)
+        {
+            // The backup goes first: it is what Settl holds before the workbook is imported.
+            backupPath = Path.ChangeExtension(metersPath, null) + BackupSuffix + ".csv";
+            WriteBackup(backupPath, outcomes);
+            meterTypeFixes = outcomes.SelectMany(MeterTypeFixes).ToList();
+            meterTypePath = Path.ChangeExtension(metersPath, null) + MeterTypeSuffix + ".csv";
+            WriteMeterTypeFixes(meterTypePath, meterTypeFixes);
+            foreach (var mp in meterTypeFixes.GroupBy(f => f.MeteringPoint))
+                log(mp.First().MeterType is { } type
+                    ? $"  MP {mp.Key}: set MeterType {type} by hand at {string.Join(", ", mp.Select(f => f.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))}"
+                    : $"  MP {mp.Key}: no Settl meter entry has a MeterType, set it by hand at {string.Join(", ", mp.Select(f => f.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))}");
+        }
         WriteMeters(metersPath, importRows);
 
         log("");
         foreach (var g in outcomes.GroupBy(o => o.Result).OrderByDescending(g => g.Count()))
             log($"  {g.Count(),5}  {g.Key}");
+        if (backupPath != null)
+            log($"Backup: {outcomes.Sum(o => o.Versions.Count)} meter entr(ies) of {outcomes.Count(o => o.Versions.Count > 0)} metering point(s) as Settl holds them now → {Path.GetFullPath(backupPath)}");
         log($"MeteringPointMeters: {importRows.Count} row(s) for {imports.Count} metering point(s) → {Path.GetFullPath(metersPath)}");
+        if (meterTypePath != null)
+            log($"MeterType by hand (not in the template; set it after the import): {meterTypeFixes.Count} meter entr(ies) of " +
+                $"{meterTypeFixes.Select(f => f.MeteringPoint).Distinct().Count()} metering point(s) → {Path.GetFullPath(meterTypePath)}");
         return 0;
     }
 
@@ -243,23 +280,24 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         if (ordered.Count == 0)
             return new Outcome(mp, "left out: no meter entry in Settl");
 
-        var versions = new List<(DateOnly Date, MeterEntry Entry)>();
+        var versions = new List<Version>();
         foreach (var start in ordered)
         {
             var (entry, error) = await settl.MeterEntryAtAsync(marketId, start.AddHours(1), cancellationToken);
             if (error != null || entry == null)
                 return new Outcome(mp, $"ERROR: meter entry at {ToDanishDate(start):yyyy-MM-dd} failed: {error}");
-            versions.Add((ToDanishDate(start), entry));
+            versions.Add(new Version(ToDanishDate(start), entry));
         }
+        Outcome LeftOut(string result) => new(mp, result, Versions: versions);
 
         if (!(versions[0].Entry.Meters.Count > 0 && versions[0].Entry.Meters.All(m => m.Occurrence == oldResolution.Occurrence)))
-            return new Outcome(mp, "left out: not imported yet (Settl's earliest meter entry is not the old resolution), use switch-import");
+            return LeftOut("left out: not imported yet (Settl's earliest meter entry is not the old resolution), use switch-import");
         if (versions.All(v => v.Date != row.ChangeDate))
-            return new Outcome(mp, "left out: Settl has no meter entry on ChangeDate, check by hand");
+            return LeftOut("left out: Settl has no meter entry on ChangeDate, check by hand");
 
         var sourceIndex = versions.FindIndex(v => HasValues(v.Entry));
         if (sourceIndex < 0)
-            return new Outcome(mp, "left out: no Settl meter entry has an EstimatedAnnualVolume or an Ampere");
+            return LeftOut("left out: no Settl meter entry has an EstimatedAnnualVolume or an Ampere");
         var source = versions[sourceIndex];
 
         var rows = new List<ImportRow>();
@@ -267,7 +305,7 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
         {
             var occurrences = entry.Meters.Select(m => m.Occurrence).Distinct().ToList();
             if (occurrences is not [var occurrence] || Resolution.FromSettl(occurrence) is not { } resolution)
-                return new Outcome(mp, $"left out: meter entry at {date:yyyy-MM-dd} has no single Hourly or QuarterHourly reading, by hand");
+                return LeftOut($"left out: meter entry at {date:yyyy-MM-dd} has no single Hourly or QuarterHourly reading, by hand");
             // Meter values only when both versions have one meter; the row names no meter.
             var meters = entry.Meters.Count == 1 && source.Entry.Meters.Count == 1
                 ? [source.Entry.Meters[0] with { Occurrence = occurrence }]
@@ -275,10 +313,66 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
             rows.Add(new ImportRow(mp, date, resolution, new MeterEntry(source.Entry.EstimatedAnnualVolume, meters)));
         }
         if (rows.Count == 0)
-            return new Outcome(mp, "left out: Settl's history already has the values");
+            return LeftOut("left out: Settl's history already has the values");
 
         return new Outcome(mp, "Import", rows,
-            [$"values from Settl's meter entry at {source.Date:yyyy-MM-dd} → {string.Join(", ", rows.Select(r => r.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))}"]);
+            [$"values from Settl's meter entry at {source.Date:yyyy-MM-dd} → {string.Join(", ", rows.Select(r => r.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))}"],
+            versions);
+    }
+
+    /// <summary>
+    /// The versions of one metering point whose single meter has no MeterType. The template has no MeterType column, so
+    /// the import neither sets nor overwrites it: these are set by hand. The MeterType to set is that of the first
+    /// version that has one, like the other values. Versions with several meters are left to the person.
+    /// </summary>
+    internal static IEnumerable<MeterTypeFix> MeterTypeFixes(Outcome outcome)
+    {
+        var source = outcome.Versions
+            .Select(v => v.Entry.Meters is [var m] ? m.MeterType : null)
+            .FirstOrDefault(t => !string.IsNullOrEmpty(t));
+        foreach (var version in outcome.Versions)
+            if (version.Entry.Meters is [var meter] && string.IsNullOrEmpty(meter.MeterType))
+                yield return new MeterTypeFix(outcome.MeteringPoint, version.Date, source);
+    }
+
+    private static readonly System.Text.Encoding CsvEncoding = new System.Text.UTF8Encoding(true);
+
+    private static string Csv(params object?[] fields) => string.Join(";", fields.Select(f => f switch
+    {
+        null => "",
+        double d => d.ToString(CultureInfo.InvariantCulture),
+        DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        _ => f.ToString(),
+    }));
+
+    /// <summary>
+    /// Every MeterCharacteristics version read, one line per meter (a version without meters gets one line with the
+    /// meter columns empty). Semicolons, a BOM and CRLF, so it opens in Danish Excel.
+    /// </summary>
+    private static void WriteBackup(string path, IEnumerable<Outcome> outcomes)
+    {
+        var text = new System.Text.StringBuilder();
+        text.Append(Csv("MeteringPointId", "Date", "EstimatedAnnualVolume", "MeterCount", "MeterReadingOccurrence", "MeterType",
+            "DigitsOfPrecision", "Decimals", "MultiplicationFactor", "Ampere")).Append("\r\n");
+        foreach (var outcome in outcomes)
+            foreach (var (date, entry) in outcome.Versions)
+            {
+                if (entry.Meters.Count == 0)
+                    text.Append(Csv(outcome.MeteringPoint, date, entry.EstimatedAnnualVolume, 0)).Append("\r\n");
+                foreach (var m in entry.Meters)
+                    text.Append(Csv(outcome.MeteringPoint, date, entry.EstimatedAnnualVolume, entry.Meters.Count, m.Occurrence,
+                        m.MeterType, m.DigitsOfPrecision, m.Decimals, m.MultiplicationFactor, m.Ampere)).Append("\r\n");
+            }
+        File.WriteAllText(path, text.ToString(), CsvEncoding);
+    }
+
+    private static void WriteMeterTypeFixes(string path, IEnumerable<MeterTypeFix> fixes)
+    {
+        var text = new System.Text.StringBuilder();
+        text.Append(Csv("MeteringPointId", "Date", "SetMeterType")).Append("\r\n");
+        foreach (var f in fixes)
+            text.Append(Csv(f.MeteringPoint, f.Date, f.MeterType)).Append("\r\n");
+        File.WriteAllText(path, text.ToString(), CsvEncoding);
     }
 
     private static bool HasValues(MeterEntry entry) =>

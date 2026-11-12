@@ -237,6 +237,11 @@ The file starts with the two header rows of Settl's template (`MeteringPointMete
 
 The first production import (2026-11-09) filled only the columns that change, and Settl's new history has no `EstimatedAnnualVolume` or meter values from the earliest entry up to the next version it already had. `--correct` reads every MeterCharacteristics version of each metering point in the file. The first version with an `EstimatedAnnualVolume` or an `Ampere` is the source. Each earlier version that lacks either gets an `Update` row with its own date, `MeterReadingOccurrence` and series, and the source's values (as above). The output names the source date and the rows per metering point. Review it: the values are the ones Settl holds later, not necessarily what held back then.
 
+Two CSV files go next to the workbook (semicolons, a BOM, CRLF), written before it and only when nothing failed:
+
+- `<workbook>_backup.csv`: every MeterCharacteristics version read, as Settl holds it before the import. One line per meter: `MeteringPointId;Date;EstimatedAnnualVolume;MeterCount;MeterReadingOccurrence;MeterType;DigitsOfPrecision;Decimals;MultiplicationFactor;Ampere`. Metering points that are left out are backed up too, unless Settl has no entry for them. Keep it until the import has been checked.
+- `<workbook>_metertype.csv`: `MeteringPointId;Date;SetMeterType`. The template has no `MeterType` column (`MeterMethod` is something else), so the import can neither set nor overwrite it, and the 2026-11-09 import left versions without one (production 570715000001565587). Each version with one meter and no MeterType is listed. `SetMeterType` is the MeterType of the first version that has one, and stays empty when none has. Set these by hand in Settl. Versions with several meters are not listed.
+
 Left out, and named in the output: the earliest entry is not the old resolution yet (not imported, use `switch-import`), no version on `ChangeDate`, no version with values, or nothing missing. A metering point whose earliest entry was the old resolution before any import also looks imported, so pass `--in` with a file of only the imported metering points (same columns as `resolution-switches-<env>.csv`).
 
 ```powershell
