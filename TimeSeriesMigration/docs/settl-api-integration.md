@@ -121,9 +121,9 @@ Options class: `src/TimeSeries.SettlApi/Configuration/SettlApiOptions.cs`.
 Swagger JSONs are not duplicated in this repo. For full schemas, read from DataMigration's docs (read-only):
 
 ```
-C:\Users\sen.makj\source\repos\NewSettlement.DataMigration\docs\billing_internal_api.json
-C:\Users\sen.makj\source\repos\NewSettlement.DataMigration\docs\market_internal_api.json
-C:\Users\sen.makj\source\repos\NewSettlement.DataMigration\docs\settl-api-swagger.json
+C:\Users\sen.makj\source\repos\DataMigration\docs\billing_internal_api.json
+C:\Users\sen.makj\source\repos\DataMigration\docs\market_internal_api.json
+C:\Users\sen.makj\source\repos\DataMigration\docs\settl-api-swagger.json
 ```
 
 Or query Settl's live swagger endpoint if available.

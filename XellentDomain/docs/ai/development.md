@@ -12,17 +12,16 @@ This repo owns six NuGet packages. Source project and namespace names remain
 
 | Source project under `src/` | Package |
 |---|---|
-| `DataMigration.Core` | `NewSettlement.XellentDomain.Core` |
-| `DataMigration.Domain` | `NewSettlement.XellentDomain.Domain` |
-| `DataMigration.Domain.Engros` | `NewSettlement.XellentDomain.Domain.Engros` |
-| `DataMigration.Domain.TimeSeries` | `NewSettlement.XellentDomain.Domain.TimeSeries` |
-| `DataMigration.Domain.Xellent` | `NewSettlement.XellentDomain.Domain.Xellent` |
-| `DataMigration.XellentData` | `NewSettlement.XellentDomain.XellentData` |
+| `DataMigration.Core` | `XellentDomain.Core` |
+| `DataMigration.Domain` | `XellentDomain.Domain` |
+| `DataMigration.Domain.Engros` | `XellentDomain.Domain.Engros` |
+| `DataMigration.Domain.TimeSeries` | `XellentDomain.Domain.TimeSeries` |
+| `DataMigration.Domain.Xellent` | `XellentDomain.Domain.Xellent` |
+| `DataMigration.XellentData` | `XellentDomain.XellentData` |
 
 The source projects' `.csproj` files define `PackageId`.
 [Directory.Build.props](../../Directory.Build.props) defines `VersionPrefix` and
-`VersionSuffix`. [CI](../../azure-pipelines.yml) builds and tests the solution,
-then publishes preview packages on `develop` and `master`.
+`VersionSuffix`. No CI pipeline packs or publishes these libraries.
 
 Before changing or removing a public type or signature, search current consumer
 source and report affected callers. Consumers are DataMigration, MigrationDashboard,
@@ -61,11 +60,11 @@ are here; references to multiple definitions in older documentation are historic
 ## Verify code changes
 
 From this repo root, build and run the four unit test projects in
-[the solution](../../NewSettlement.XellentDomain.slnx):
+[the solution](../../XellentDomain.slnx):
 
 ```powershell
-dotnet build NewSettlement.XellentDomain.slnx
-dotnet test NewSettlement.XellentDomain.slnx --no-build
+dotnet build XellentDomain.slnx
+dotnet test XellentDomain.slnx --no-build
 ```
 
 The projects under `src/Tests/` are `DataMigration.Core.Tests`,

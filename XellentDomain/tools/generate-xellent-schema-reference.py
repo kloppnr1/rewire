@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
 SOURCES = (
     ("XellentDomain", ROOT / "src/DataMigration.XellentData"),
-    ("CustomerSupport", WORKSPACE / "NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel"),
+    ("CustomerSupport", WORKSPACE / "CustomerSupport/src/CustomerSupport.XellentDatabaseModel"),
 )
 SCALAR = {"bool", "byte", "short", "int", "long", "float", "double", "decimal", "string", "DateTime", "DateOnly", "TimeOnly", "Guid", "byte[]"}
 
@@ -124,7 +124,7 @@ def main():
     for table, entry in sorted(tables.items()):
         lines.extend(["", f"## {table}", ""])
         for label, (class_name, columns, key, key_source, path) in entry.items():
-            relative = Path("..") / path.relative_to(ROOT) if path.is_relative_to(ROOT) else Path("../../NewSettlement.CustomerSupport") / path.relative_to(WORKSPACE / "NewSettlement.CustomerSupport")
+            relative = Path("..") / path.relative_to(ROOT) if path.is_relative_to(ROOT) else Path("../../CustomerSupport") / path.relative_to(WORKSPACE / "CustomerSupport")
             prefix = "X" if label == "XellentDomain" else "CS"
             lines.append(f"- **{prefix}:** [`{class_name}`]({relative.as_posix()}) — EF key: " + (", ".join(f"`{c}`" for c in key) if key else "keyless / unspecified") + f" ({key_source}).")
         lines.extend(["", "| SQL column | C# property / model | Type and mapping |", "|---|---|---|"])

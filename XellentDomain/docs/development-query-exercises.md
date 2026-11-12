@@ -132,7 +132,7 @@ CustomerSupport interprets reading reason 1 as replacement; the reviewed model
 does not provide a complete label set for meter-journal `JOURNALTYPE`. Keep the
 raw meter and counter identities. A register difference across replacement is
 not automatically consumption. [Implementation](../examples/XellentInvestigationQueries/InvestigationQueries.cs),
-[reading entity](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTable.cs),
+[reading entity](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTable.cs),
 and [reading semantics](xellent-field-semantics.md#readings-meters-and-units).
 
 **Assessment:** The model correctly directs the developer to two EF contexts
@@ -167,7 +167,7 @@ long history, also intersect the relevant dated agreement and reading-resolution
 periods. This query only establishes what is **stored** for the supplied scope.
 [Implementation](../examples/XellentInvestigationQueries/InvestigationQueries.cs),
 [field semantics](xellent-field-semantics.md#time-series-header-selection), and
-[historical extraction](../../NewSettlement.TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs).
+[historical extraction](../../TimeSeriesMigration/src/TimeSeries.Migration/Services/TimeSeriesExtractionService.cs).
 
 Convert **both local midnights** to UTC. Adding 24 hours to the first UTC
 boundary would select the wrong part of a transition day. The runnable example
@@ -253,10 +253,10 @@ var billedHeatLines = await (
 ).ToListAsync(ct);
 ```
 
-The `(DATAAREAID, INVOICEID)` join matches the [context relationship](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
+The `(DATAAREAID, INVOICEID)` join matches the [context relationship](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/XellentDatabaseModelContext.cs).
 The line category is a recorded field. A line's amount and currency should be
 kept together; this selection alone does not calculate an unpaid balance or
-prove the service period. [Posted line entity](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs)
+prove the service period. [Posted line entity](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs)
 and [invoice semantics](xellent-field-semantics.md#invoices-payments-and-customer-transactions).
 
 **Assessment:** The documentation identifies the correct model and join. The
@@ -373,8 +373,8 @@ relationship or residual open amount per invoice. The account-balance service
 simply sums account transactions. The next development step is to identify the
 authoritative open-transaction or settlement-allocation source and its date
 semantics, then extend the model before claiming this answer.
-[Transaction entity](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTrans.cs),
-[account-balance reader](../../NewSettlement.CustomerSupport/src/CustomerSupport.Api/Services/CustomerTransactionService.cs),
+[Transaction entity](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTrans.cs),
+[account-balance reader](../../CustomerSupport/src/CustomerSupport.Api/Services/CustomerTransactionService.cs),
 and [invoice/payment semantics](xellent-field-semantics.md#invoices-payments-and-customer-transactions).
 
 **Assessment:** Insufficient evidence for exact invoice-level unpaid amounts.

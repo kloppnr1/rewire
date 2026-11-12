@@ -11,7 +11,7 @@
   `BuyerReferenceIdentifier` — IKKE samme navn.
 
 ### Trin 1 — SettlClient build + unit tests (kør efter DTO + create-wiring)
-Kør i `NewSettlement.SettlClient`:
+Kør i `SettlClient`:
 ```
 dotnet build
 dotnet test src/Tests/DataMigration.SettlClient.Tests
@@ -20,7 +20,7 @@ Forventet: 0 build errors; alle tests passed.
 
 ### Trin 2 — vent på CI-preview af SettlClient.Api/SettlClient
 Efter commit+push til `develop`: verificér i ADO at pipeline har publiceret
-`{version}-preview.{BuildId}` til feed `NewSettlement`. Derefter i `NewSettlement.DataMigration`:
+`{version}-preview.{BuildId}` til NuGet-feedet. Derefter i `DataMigration`:
 ```
 dotnet nuget locals http-cache --clear
 dotnet restore --force
@@ -28,7 +28,7 @@ dotnet restore --force
 Verificér: `src/DataMigration.OpsCli.Library/obj/project.assets.json` peger på den nye preview-version.
 
 ### Trin 3 — DataMigration build + unit tests
-Kør i `NewSettlement.DataMigration`:
+Kør i `DataMigration`:
 ```
 dotnet build
 dotnet test src/Tests/DataMigration.Migration.Tests
@@ -63,13 +63,13 @@ findes nu i featuretest, så MP-niveau-feltet skal wires gennem hele kæden (cre
 
 ## Ændringer
 
-### NewSettlement.XellentDomain — INGEN ændring
+### XellentDomain — INGEN ændring
 - `ApplyMpBillingOverrides` sammenligner allerede hele `BuyerInvoicingReferences`-record'en
   (value-equality over alle 4 felter inkl. `BuyerReferenceIdentifier`) og skriver hele
   contract-blokken på MP ved afvigelse. MP.BuyerInvoicing.BuyerReferenceIdentifier populeres
   korrekt i forvejen.
 
-### NewSettlement.SettlClient
+### SettlClient
 - `MeteringPointModels.cs`: tilføj `public string? BuyerReference { get; set; }` til
   `MeteringPointPaymentConfigurationDto` (serialiseres som `BuyerReference` — matcher live API).
 - `SettlClient.cs` `EnsureBillingConfigAsync`: tilføj `buyerReference`-parameter, inkludér i
@@ -80,7 +80,7 @@ findes nu i featuretest, så MP-niveau-feltet skal wires gennem hele kæden (cre
 - Bump `VersionPrefix` i `Directory.Build.props` (tjek feed for højeste eksisterende preview først).
 - Commit til `develop`, vent på CI-preview.
 
-### NewSettlement.DataMigration
+### DataMigration
 - `FixPaymentConfigRunner.cs` Phase B (`RunMpPhaseAsync`):
   - Candidate-filter (~linje 259): tilføj `|| !string.IsNullOrEmpty(mp.BuyerInvoicing?.BuyerReferenceIdentifier)`.
   - Læs `existingBuyerRef = pc?.BuyerReference`; diff mod `mpRefs?.BuyerReferenceIdentifier`.

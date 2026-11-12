@@ -1,13 +1,13 @@
-# NewSettlement.SettlClient — Settl REST API client
+# SettlClient — Settl REST API client
 
 This repo is the **only** Settl REST API client in the workspace. It publishes two
 NuGet packages consumed by DataMigration, MigrationDashboard, TimeSeriesMigration and
 CustomerSupport:
 
-- `NewSettlement.SettlClient.Api` (`DataMigration.SettlApi`) — REST client (customers,
+- `SettlClient.Api` (`DataMigration.SettlApi`) — REST client (customers,
   payers, metering points, contracts, settlement groups). HTTP plumbing in
   `Clients/SettlApiClientBase.cs`; one client class per entity under `Clients/`.
-- `NewSettlement.SettlClient` (`DataMigration.SettlClient`) — Domain→Settl migration
+- `SettlClient` (`DataMigration.SettlClient`) — Domain→Settl migration
   orchestrator (`SettlClient`, translators under `Internal/`).
 
 See the workspace CLAUDE.md (`source/repos`) for the full repo map, NuGet floating-ref
@@ -23,7 +23,7 @@ claim. Put new contract knowledge there, not here.
 ## Working rules
 
 - Commit to `develop`, never `master`. When the user is working in this repo, commit each finished change as soon as its gates are green; push only when she asks. Expert agents still do not commit.
-- Code changes: `dotnet build NewSettlement.SettlClient.slnx`, then
+- Code changes: `dotnet build SettlClient.slnx`, then
   `dotnet test src/Tests/DataMigration.SettlClient.Tests/DataMigration.SettlClient.Tests.csproj`.
   Docs-only changes need link and source checks, not a build.
 - This repo is a library, not a CLI host. A consumer can only be verified after CI has

@@ -13,8 +13,8 @@ hang under the representative's customer; their Accountnum exists nowhere
 in Settl.
 
 Source of truth: `FingerprintCalculator.cs` + `AccountRepresentativeResolver.cs`
-in NuGet package `NewSettlement.XellentDomain.Domain.Xellent` (repo
-`NewSettlement.XellentDomain`) — moved out of this repo. The resolver builds a
+in NuGet package `XellentDomain.Domain.Xellent` (repo
+`XellentDomain`) — moved out of this repo. The resolver builds a
 union-find over two edges: a street-fingerprint edge (`S|Cvr|fp`) and a
 legal-contact DAR-id edge (`D|Cvr|nameKey|darId`). Same-CVR accounts merge
 when they share *either* edge. Email is folded into the fingerprint on both

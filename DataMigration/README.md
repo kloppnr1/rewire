@@ -1,10 +1,10 @@
-# NewSettlement.DataMigration
+# DataMigration
 
 Tools for migrating customer master data from Xellent (Dynamics AX 2009) to Settl via the Settl REST API. Built around a per-customer `create` pipeline that runs either headless via CLI or interactively via a web dashboard.
 
 ## Payment-match rules
 
-For reports supplied with a list of MP IDs, see the [complete MobilePay and PBS rules](https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/NewSettlement.MigrationDashboard?path=/README.md&version=GBmaster&_a=preview) under **MP-list payment reports: current rules**. They cover private and business agreement selection, cross-commodity searches, the water/heat business error, matching to Settl E-numbers and report fields.
+For reports supplied with a list of MP IDs, see the [complete MobilePay and PBS rules](https://dev.azure.com/verdo365/Verdo%20Agile%20Development/_git/MigrationDashboard?path=/README.md&version=GBmaster&_a=preview) under **MP-list payment reports: current rules**. They cover private and business agreement selection, cross-commodity searches, the water/heat business error, matching to Settl E-numbers and report fields.
 
 ## What's here
 
@@ -12,7 +12,7 @@ For reports supplied with a list of MP IDs, see the [complete MobilePay and PBS 
 
 | Project | Description |
 |---|---|
-| [DataMigration.Api](src/DataMigration.Api/) | .NET 9 web API med Swagger UI (`/swagger`). Hosts `CreateRunner` in-process og eksponerer migrations-endpoints + CSV-download endpoints for `report-*` kommandoerne. Deployed as Windows Service `DataMigration.MigrationDashboard` on port 5050. Frontend lever i separat repo [`NewSettlement.MigrationDashboard`](https://verdo365.visualstudio.com/Verdo%20Agile%20Development/_git/NewSettlement.MigrationDashboard). |
+| [DataMigration.Api](src/DataMigration.Api/) | .NET 9 web API med Swagger UI (`/swagger`). Hosts `CreateRunner` in-process og eksponerer migrations-endpoints + CSV-download endpoints for `report-*` kommandoerne. Deployed as Windows Service `DataMigration.MigrationDashboard` on port 5050. Frontend lever i separat repo [`MigrationDashboard`](https://verdo365.visualstudio.com/Verdo%20Agile%20Development/_git/MigrationDashboard). |
 
 ### CLIs
 
@@ -46,7 +46,7 @@ dotnet run --project src/DataMigration.OpsCli -- report-meteringpoints --env pro
 # Generate HTML migration report from Xellent extraction (no API calls)
 dotnet run --project src/DataMigration.OpsCli -- report my-profile --env production
 
-# Start the API (http://localhost:5050) — frontend lever i NewSettlement.MigrationDashboard
+# Start the API (http://localhost:5050) — frontend lever i MigrationDashboard
 dotnet run --project src/DataMigration.Api
 ```
 
@@ -86,12 +86,12 @@ This repo used to contain many more tools. Parts have been split out over time:
 
 | Repo | What it owns |
 |---|---|
-| [NewSettlement.MigrationOps](https://verdo365.visualstudio.com/Verdo%20Agile%20Development/_git/NewSettlement.MigrationOps) | PDF invoice archive, migration tracking DB, Xellent notes CLI. Host of `DataMigration.Tracking` and all PDF/PdfIndex/PdfExport/XellentNotes/TrackingCli projects (moved out April 2026). OpsCli was moved out in the same split and moved **back** into this repo on 2026-04-15 — see `src/DataMigration.OpsCli/PORTED-FROM.md` |
-| NewSettlement.CustomerSupport | Bifrost customer support web app. **Reads `migration-tracking.db` directly** from the MigrationOps deployment |
-| NewSettlement.TimeSeriesMigration | Time series extraction + Settl posting (moved out 2026-04-13) |
-| NewSettlement.XellentSettlement | Legacy settlement code (moved out earlier) |
-| NewSettlement.UtilityOperations | ExportIsmobileRunner (moved out earlier) |
-| NewSettlement.Tools | DataMigration.Analysis (moved out earlier) |
+| [MigrationOps](https://verdo365.visualstudio.com/Verdo%20Agile%20Development/_git/MigrationOps) | PDF invoice archive, migration tracking DB, Xellent notes CLI. Host of `DataMigration.Tracking` and all PDF/PdfIndex/PdfExport/XellentNotes/TrackingCli projects (moved out April 2026). OpsCli was moved out in the same split and moved **back** into this repo on 2026-04-15 — see `src/DataMigration.OpsCli/PORTED-FROM.md` |
+| CustomerSupport | Bifrost customer support web app. **Reads `migration-tracking.db` directly** from the MigrationOps deployment |
+| TimeSeriesMigration | Time series extraction + Settl posting (moved out 2026-04-13) |
+| XellentSettlement | Legacy settlement code (moved out earlier) |
+| UtilityOperations | ExportIsmobileRunner (moved out earlier) |
+| Tools | DataMigration.Analysis (moved out earlier) |
 
 ## Documentation
 

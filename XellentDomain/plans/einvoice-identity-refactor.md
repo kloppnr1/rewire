@@ -7,7 +7,7 @@
 Brugeren kører i UtilityData-roden:
 
 ```powershell
-dotnet build NewSettlement.UtilityData.sln
+dotnet build UtilityData.sln
 dotnet test src/Tests/DataMigration.Domain.Tests/DataMigration.Domain.Tests.csproj
 dotnet test src/Tests/DataMigration.Domain.Engros.Tests/DataMigration.Domain.Engros.Tests.csproj
 dotnet test src/Tests/DataMigration.Domain.Xellent.Tests/DataMigration.Domain.Xellent.Tests.csproj

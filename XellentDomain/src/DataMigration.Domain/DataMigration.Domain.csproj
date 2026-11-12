@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.Domain</PackageId>
+    <PackageId>XellentDomain.Domain</PackageId>
     <Description>Source-agnostic domain model for utility data (Customer, Contract, MeteringPoint, Product, OwnerCluster, CustomerSnapshot).</Description>
   </PropertyGroup>
 

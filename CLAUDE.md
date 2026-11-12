@@ -1,15 +1,15 @@
 # rewire
 
-Four NewSettlement repos as folders of one .NET 9 solution, with their git history. The folders reference each other with `ProjectReference`. Nothing is published as a package inside this repo.
+Four repos as folders of one .NET 9 solution, with their git history. The folders reference each other with `ProjectReference`. Nothing is published as a package inside this repo.
 
 ## Folders
 
 | Folder | Was | What it is | Guide |
 |--------|-----|------------|-------|
-| `XellentDomain/` | NewSettlement.XellentDomain | Core, Domain and XellentData libraries | [CLAUDE.md](XellentDomain/CLAUDE.md), [start](XellentDomain/docs/ai/start.md) |
-| `SettlClient/` | NewSettlement.SettlClient | Typed Settl HTTP client and API contracts | [CLAUDE.md](SettlClient/CLAUDE.md), [start](SettlClient/docs/ai/start.md) |
-| `DataMigration/` | NewSettlement.DataMigration | MigrationCli (`create`) and OpsCli | [CLAUDE.md](DataMigration/CLAUDE.md), [start](DataMigration/docs/ai/start.md) |
-| `TimeSeriesMigration/` | NewSettlement.TimeSeriesMigration | Time series extract and Settl post | [CLAUDE.md](TimeSeriesMigration/CLAUDE.md), [start](TimeSeriesMigration/docs/ai/start.md) |
+| `XellentDomain/` | XellentDomain | Core, Domain and XellentData libraries | [CLAUDE.md](XellentDomain/CLAUDE.md), [start](XellentDomain/docs/ai/start.md) |
+| `SettlClient/` | SettlClient | Typed Settl HTTP client and API contracts | [CLAUDE.md](SettlClient/CLAUDE.md), [start](SettlClient/docs/ai/start.md) |
+| `DataMigration/` | DataMigration | MigrationCli (`create`) and OpsCli | [CLAUDE.md](DataMigration/CLAUDE.md), [start](DataMigration/docs/ai/start.md) |
+| `TimeSeriesMigration/` | TimeSeriesMigration | Time series extract and Settl post | [CLAUDE.md](TimeSeriesMigration/CLAUDE.md), [start](TimeSeriesMigration/docs/ai/start.md) |
 
 Read the folder's own guide before changing it. The folder files still describe NuGet packages, floating refs and per-repo branches. In this repo that is out of date: a change in one folder reaches the others at the next build.
 

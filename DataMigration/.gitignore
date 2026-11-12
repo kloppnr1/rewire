@@ -364,7 +364,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-/NewSettlement.DataMigration.SettlImportService/DataImports
 node_modules
 dist
 # CLI runtime data and output (SQLite databases, exports, etc.)

@@ -28,7 +28,7 @@ acceptance constraints. They require comparison with the actual target state.
 Sources: [PayerMapper](../../src/DataMigration.Domain.Xellent/Internal/PayerMapper.cs),
 [MeteringPointMapper](../../src/DataMigration.Domain.Xellent/Internal/MeteringPointMapper.cs),
 [XellentDomainMapper](../../src/DataMigration.Domain.Xellent/XellentDomainMapper.cs), and
-[SettlClient](../../../NewSettlement.SettlClient/src/DataMigration.SettlClient/SettlClient.cs).
+[SettlClient](../../../SettlClient/src/DataMigration.SettlClient/SettlClient.cs).
 
 ## Payment evidence
 

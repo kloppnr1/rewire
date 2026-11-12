@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.SettlClient</PackageId>
+    <PackageId>SettlClient</PackageId>
     <Description>Domain → Settl migration orchestrator. Translates DataMigration.Domain Customer aggregates to Settl API calls (customer, payer, metering point, contract links, billing config, exemptions).</Description>
   </PropertyGroup>
 

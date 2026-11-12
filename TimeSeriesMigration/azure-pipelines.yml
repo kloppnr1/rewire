@@ -1,4 +1,4 @@
-# Unified deployment pipeline for NewSettlement.TimeSeriesMigration
+# Unified deployment pipeline for TimeSeriesMigration
 # Push to develop: build + pack TimeSeries NuGets (Migration + Core) + deploy TimeSeriesCli to Staging (svdkra1vudv03)
 # Push to master:  build + pack NuGets + deploy CLI to Production (SVDKRA1VBIFROST)
 # Manual run:      build + deploy CLI to chosen environment
@@ -6,7 +6,7 @@
 # Deploy target:
 #   C:\Services\DataMigration\TimeSeriesCli\               (CLI)
 #
-# Dashboard.Api (Windows Service) er flyttet til NewSettlement.MigrationDashboard repo
+# Dashboard.Api (Windows Service) er flyttet til MigrationDashboard repo
 # og deploys derfra. Denne pipeline pakker stadig TimeSeries.Migration + TimeSeries.Core
 # som NuGets, så Dashboard.Api kan referere dem.
 
@@ -55,7 +55,7 @@ stages:
             displayName: 'Restore NuGet packages'
             inputs:
               command: 'restore'
-              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              projects: 'TimeSeriesMigration.slnx'
               feedsToUse: 'config'
               nugetConfigPath: 'nuget.config'
 
@@ -63,40 +63,16 @@ stages:
             displayName: 'Build solution'
             inputs:
               command: 'build'
-              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              projects: 'TimeSeriesMigration.slnx'
               arguments: '--configuration Release --no-restore'
 
           - task: DotNetCoreCLI@2
             displayName: 'Run tests'
             inputs:
               command: 'test'
-              projects: 'NewSettlement.TimeSeriesMigration.slnx'
+              projects: 'TimeSeriesMigration.slnx'
               arguments: '--configuration Release --no-build'
               publishTestResults: true
-
-          # Pack + push NuGets (Core + Migration) til NewSettlement-feed.
-          # VersionPrefix lever i Directory.Build.props (0.1.0); CI tilfojer
-          # VersionSuffix=preview.{BuildId} -> 0.1.0-preview.{BuildId} (unik per commit).
-          - powershell: |
-              $artifact = "$(Build.ArtifactStagingDirectory)"
-              dotnet pack src/TimeSeries.Core/TimeSeries.Core.csproj `
-                -c Release --no-build -o "$artifact/nuget" `
-                /p:VersionSuffix=preview.$(Build.BuildId)
-              dotnet pack src/TimeSeries.Migration/TimeSeries.Migration.csproj `
-                -c Release --no-build -o "$artifact/nuget" `
-                /p:VersionSuffix=preview.$(Build.BuildId)
-            displayName: 'Pack TimeSeries NuGets'
-
-          - task: NuGetCommand@2
-            displayName: 'Push TimeSeries NuGets'
-            condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/develop'), eq(variables['Build.SourceBranch'], 'refs/heads/master')))
-            inputs:
-              command: 'push'
-              packagesToPush: '$(Build.ArtifactStagingDirectory)/nuget/*.nupkg'
-              nuGetFeedType: 'internal'
-              publishVstsFeed: 'Verdo Agile Development/NewSettlement'
-              # BuildId garanterer unik version per commit; konflikt = reelt bug.
-              allowPackageConflicts: false
 
           - powershell: |
               $artifact = "$(Build.ArtifactStagingDirectory)"
@@ -156,7 +132,7 @@ stages:
                       SETTL_FT_USERNAME: $(Settl_featuretest_Username)
                       SETTL_FT_PASSWORD: $(Settl_featuretest_Password)
 
-                # Dashboard.Api deploy fjernet — flyttet til NewSettlement.MigrationDashboard repo
+                # Dashboard.Api deploy fjernet — flyttet til MigrationDashboard repo
 
   # Stage 3: Deploy to Production
   - stage: Deploy_Production
@@ -229,4 +205,4 @@ stages:
                       SETTL_HEV_USERNAME: $(Settl_production_hev_Username)
                       SETTL_HEV_PASSWORD: $(Settl_production_hev_Password)
 
-                # Dashboard.Api deploy fjernet — flyttet til NewSettlement.MigrationDashboard repo
+                # Dashboard.Api deploy fjernet — flyttet til MigrationDashboard repo

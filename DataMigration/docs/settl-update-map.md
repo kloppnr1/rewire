@@ -18,7 +18,7 @@ Kun master-data update-endpoints for MeteringPoint:
 - `PUT /api/v1/meteringPoints/{id}/meteringPoint` (billing)
 - `PUT /api/v3/meteringPoints/{id}` (market)
 
-Cross-refereret mod NuGet `NewSettlement.SettlClient.Api` (Models/), `src/DataMigration.Migration/`
+Cross-refereret mod NuGet `SettlClient.Api` (Models/), `src/DataMigration.Migration/`
 og `src/DataMigration.OpsCli/`. Bruges af `.claude/skills/post-migration-fix/` som
 primær lookup.
 

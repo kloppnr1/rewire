@@ -2,11 +2,9 @@
 # Push til master: build, test, deploy Migration + OpsCli til Staging og Production
 # Manuel kørsel: build, test, deploy selected services til Staging og Production
 #
-# Library NuGets pakkes af azure-pipelines-libs.yml (separat pipeline).
-#
-# NOTE: MigrationDashboard (Windows Service) er flyttet til NewSettlement.MigrationDashboard
+# NOTE: MigrationDashboard (Windows Service) er flyttet til MigrationDashboard-repoet
 # (projekt Dashboard.Api). Den deploys herfra er fjernet 2026-05-13 efter cutover.
-# PDF/Tracking/Notes services har flyttet til NewSettlement.MigrationOps.
+# PDF/Tracking/Notes services har flyttet til MigrationOps.
 
 trigger:
   branches:
@@ -21,7 +19,7 @@ parameters:
     type: boolean
     default: true
 
-  # OpsCli ported from NewSettlement.MigrationOps (Plan A, 2026-04-15).
+  # OpsCli ported from MigrationOps (Plan A, 2026-04-15).
   # This repo is now the single owner of C:\Services\DataMigration\OpsCli\.
   # MO's pipeline has the matching deployOpsCli parameter pinned to false.
   - name: deployOpsCli
@@ -75,8 +73,6 @@ stages:
               projects: 'DataMigration.sln'
               arguments: '--configuration Release --no-build'
               publishTestResults: true
-
-          # Library NuGets pakkes og pushes af azure-pipelines-libs.yml — IKKE her.
 
           # Publish CLI artifacts for deployment
           - powershell: |
@@ -198,7 +194,7 @@ stages:
                       SETTL_FT_PASSWORD: $(Settl_featuretest_Password)
 
                 # MigrationDashboard deploy fjernet 2026-05-13 — Dashboard.Api lever nu i
-                # NewSettlement.MigrationDashboard repo'et og deploys derfra.
+                # MigrationDashboard repo'et og deploys derfra.
 
 
   # Stage 3: Deploy to Production after Staging succeeds
@@ -347,5 +343,5 @@ stages:
                       SETTL_HEV_PASSWORD: $(Settl_production_hev_Password)
 
                 # MigrationDashboard deploy fjernet 2026-05-13 — Dashboard.Api lever nu i
-                # NewSettlement.MigrationDashboard repo'et og deploys derfra.
+                # MigrationDashboard repo'et og deploys derfra.
 

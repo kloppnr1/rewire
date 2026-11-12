@@ -427,18 +427,18 @@ exist. A source category or source end date alone does not establish target stat
 ## Source references
 
 - **S1:** [MeteringPointMapper](../src/DataMigration.Domain.Xellent/Internal/MeteringPointMapper.cs), installation/electricity group derivation and `DemoteSingletonJointGroups`.
-- **S2:** [SettlMappingService.MeteringPoints](../../NewSettlement.DataMigration/src/DataMigration.Migration.Library/Services/SettlMappingService.MeteringPoints.cs), `ExtractAccountMeteringPointMappingAsync`.
+- **S2:** [SettlMappingService.MeteringPoints](../../DataMigration/src/DataMigration.Migration.Library/Services/SettlMappingService.MeteringPoints.cs), `ExtractAccountMeteringPointMappingAsync`.
 - **S3:** [PayerMapper](../src/DataMigration.Domain.Xellent/Internal/PayerMapper.cs), `Build` and invoice-reference handling.
 - **S4:** [XellentDomainMapper](../src/DataMigration.Domain.Xellent/XellentDomainMapper.cs), contract loading and `PayerMapper.Build`.
-- **S5:** [SettlClient](../../NewSettlement.SettlClient/src/DataMigration.SettlClient/SettlClient.cs), `MigrateAsync` customer/payer reuse, water/heat lookup, billing configuration, relationship checks, `ResolvePayerRouting`, and `AssignSettlementGroupsAsync`.
+- **S5:** [SettlClient](../../SettlClient/src/DataMigration.SettlClient/SettlClient.cs), `MigrateAsync` customer/payer reuse, water/heat lookup, billing configuration, relationship checks, `ResolvePayerRouting`, and `AssignSettlementGroupsAsync`.
 - **S6:** [CustomerMapper](../src/DataMigration.Domain.Xellent/Internal/CustomerMapper.cs), representative reselection, `FetchBillingChannelInfoAsync`, and `FetchMobilePayAsync`.
-- **S7:** [SettlementGroupExpectationResolver](../../NewSettlement.DataMigration/src/DataMigration.Migration.Library/Services/SettlementGroupExpectationResolver.cs), customer-scoped expected memberships.
-- **S8:** [MigrationState](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Data/MigrationState.cs), `MigratedAccount.DeliveryCategories` and `SourceAccounts`.
+- **S7:** [SettlementGroupExpectationResolver](../../DataMigration/src/DataMigration.Migration.Library/Services/SettlementGroupExpectationResolver.cs), customer-scoped expected memberships.
+- **S8:** [MigrationState](../../DataMigration/src/DataMigration.OpsCli.Library/Data/MigrationState.cs), `MigratedAccount.DeliveryCategories` and `SourceAccounts`.
 - **S9:** [Invoice and payment semantics](xellent-field-semantics.md#invoices-payments-and-customer-transactions) and [development exercise D10](development-query-exercises.md#d10-what-is-the-exact-unpaid-amount-of-each-invoice-after-partial-payments).
-- **S10:** [PayerTranslator](../../NewSettlement.SettlClient/src/DataMigration.SettlClient/Internal/PayerTranslator.cs), primary flag, billing channels, reference fields, and earliest-contract start.
-- **S11:** [MobilePaySettlMatchService](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Reporting/MobilePaySettlMatchService.cs), electricity-scoped target population and separate payment-agreement comparison.
-- **S12:** [PbsMatchService](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Reporting/PbsMatchService.cs), point and joint-invoice agreement matching.
-- **S13:** [PayerModels](../../NewSettlement.SettlClient/src/DataMigration.SettlApi/Models/PayerModels.cs) and [MeteringPointModels](../../NewSettlement.SettlClient/src/DataMigration.SettlApi/Models/MeteringPointModels.cs), effective dates, histories, and billing/payment configuration versions.
-- **S14:** [OwnerClusterResolver](../../NewSettlement.DataMigration/src/DataMigration.Migration.Library/Services/OwnerClusterResolver.cs), `ResolveOwnerAsync` and `IdempotencyAnchors`.
+- **S10:** [PayerTranslator](../../SettlClient/src/DataMigration.SettlClient/Internal/PayerTranslator.cs), primary flag, billing channels, reference fields, and earliest-contract start.
+- **S11:** [MobilePaySettlMatchService](../../DataMigration/src/DataMigration.OpsCli.Library/Reporting/MobilePaySettlMatchService.cs), electricity-scoped target population and separate payment-agreement comparison.
+- **S12:** [PbsMatchService](../../DataMigration/src/DataMigration.OpsCli.Library/Reporting/PbsMatchService.cs), point and joint-invoice agreement matching.
+- **S13:** [PayerModels](../../SettlClient/src/DataMigration.SettlApi/Models/PayerModels.cs) and [MeteringPointModels](../../SettlClient/src/DataMigration.SettlApi/Models/MeteringPointModels.cs), effective dates, histories, and billing/payment configuration versions.
+- **S14:** [OwnerClusterResolver](../../DataMigration/src/DataMigration.Migration.Library/Services/OwnerClusterResolver.cs), `ResolveOwnerAsync` and `IdempotencyAnchors`.
 - **S15:** [ExuContractTable](../src/DataMigration.XellentData/Entities/ExuContractTable.cs), current main-contract reference.
 - **S16:** [MobilePayResolver](../src/DataMigration.Domain.Xellent/Internal/MobilePayResolver.cs), `CandidateCount` counts distinct agreement IDs, with main/sub provenance retained.

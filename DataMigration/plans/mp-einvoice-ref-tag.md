@@ -22,13 +22,13 @@ MP-niveau e-faktura-referencer (`MeteringPoint.BuyerInvoicing`, allerede korrekt
 
 ## Ændringer
 
-### NewSettlement.DataMigration (producer — først)
+### DataMigration (producer — først)
 - `MigrationReport`: nyt felt `MpBillingOverrides` (dict `mpId` → {OrderIdentifier, AgreementIdentifier, BuyerReferenceIdentifier}).
 - `CreateRunner`: populer fra `loadResult.MeteringPoints` hvor `mp.BuyerInvoicing != null` (samme mønster som `MpProductNums`/`MpBillingExemptions`).
 - Bump `VersionPrefix` (libs.yml-pakke) → commit develop → vent CI-preview.
 - CHANGELOG-række (rører `create`-adfærd/report-shape).
 
-### NewSettlement.MigrationDashboard (consumer — efter CI-preview)
+### MigrationDashboard (consumer — efter CI-preview)
 - `dotnet restore --force` → træk ny `DataMigration.Migration`-preview.
 - `Dashboard.Api/Models/MigrationDtos.cs`: 3 felter på `DryRunMeteringPointDto`, populeret fra `report.MpBillingOverrides` (samme sted som exemption-mapping).
 - `dashboard/src/data/api.ts`: 3 felter på `DryRunMeteringPoint`.

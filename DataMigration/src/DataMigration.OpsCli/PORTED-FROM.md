@@ -1,6 +1,6 @@
-# Ported from NewSettlement.MigrationOps
+# Ported from MigrationOps
 
-This project was moved from `NewSettlement.MigrationOps/src/DataMigration.OpsCli/` to `NewSettlement.DataMigration/src/DataMigration.OpsCli/` on 2026-04-14.
+This project was moved from `MigrationOps/src/DataMigration.OpsCli/` to `DataMigration/src/DataMigration.OpsCli/` on 2026-04-14.
 
 ## Why the move
 
@@ -24,4 +24,4 @@ git -C <path-to-MigrationOps> log --all --oneline -- src/DataMigration.OpsCli/<f
 ## Related planning docs
 
 - `docs/post-migration-fixes.md` — pattern reference for authoring `fix-*` commands (also moved from MO).
-- `.claude/plans/modular-imagining-deer.md` (in `NewSettlement.MigrationOps`) — full move plan and findings.
+- `.claude/plans/modular-imagining-deer.md` (in `MigrationOps`) — full move plan and findings.

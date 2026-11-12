@@ -80,7 +80,7 @@ differences and the important codes, units, dates, and history rules.
 ## ADDRESS
 
 - **X:** [`Address`](../src/DataMigration.XellentData/Entities/Address.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
-- **CS:** [`Address`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Address.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`Address`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Address.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -99,7 +99,7 @@ differences and the important codes, units, dates, and history rules.
 ## ADDRESSZIPCODE
 
 - **X:** [`AddressZipCode`](../src/DataMigration.XellentData/Entities/AddressZipCode.cs) — EF key: `DATAAREAID`, `COUNTRYREGIONID`, `ZIPCODE`, `COUNTY` (Fluent HasKey).
-- **CS:** [`AddressZipCode`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/AddressZipCode.cs) — EF key: `DATAAREAID`, `COUNTRYREGIONID`, `ZIPCODE`, `COUNTY` (Fluent HasKey).
+- **CS:** [`AddressZipCode`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/AddressZipCode.cs) — EF key: `DATAAREAID`, `COUNTRYREGIONID`, `ZIPCODE`, `COUNTY` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -124,7 +124,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTINVOICEBACKORDERLINE
 
-- **CS:** [`CustInvoiceBackorderLine`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceBackorderLine.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`CustInvoiceBackorderLine`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceBackorderLine.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -145,7 +145,7 @@ differences and the important codes, units, dates, and history rules.
 ## CUSTINVOICEJOUR
 
 - **X:** [`CustInvoiceJour`](../src/DataMigration.XellentData/Entities/CustInvoiceJour.cs) — EF key: `DATAAREAID`, `INVOICEID` (PrimaryKey attribute).
-- **CS:** [`CustInvoiceJour`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceJour.cs) — EF key: `DATAAREAID`, `INVOICEID` (PrimaryKey attribute).
+- **CS:** [`CustInvoiceJour`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceJour.cs) — EF key: `DATAAREAID`, `INVOICEID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -166,7 +166,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTINVOICELINE
 
-- **CS:** [`CustInvoiceLine`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceLine.cs) — EF key: `DATAAREAID`, `PARENTRECID`, `LINENUM`, `RECID` (Fluent HasKey).
+- **CS:** [`CustInvoiceLine`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceLine.cs) — EF key: `DATAAREAID`, `PARENTRECID`, `LINENUM`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -186,7 +186,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTINVOICESALESLINK
 
-- **CS:** [`CustInvoiceSalesLink`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceSalesLink.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`CustInvoiceSalesLink`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceSalesLink.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -205,7 +205,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTINVOICETABLE
 
-- **CS:** [`CustInvoiceTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTable.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`CustInvoiceTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTable.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -230,7 +230,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTINVOICETRANS
 
-- **CS:** [`CustInvoiceTrans`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`CustInvoiceTrans`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -259,7 +259,7 @@ differences and the important codes, units, dates, and history rules.
 ## CUSTTABLE
 
 - **X:** [`CustTable`](../src/DataMigration.XellentData/Entities/CustTable.cs) — EF key: `DATAAREAID`, `ACCOUNTNUM` (Fluent HasKey).
-- **CS:** [`CustTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTable.cs) — EF key: `DATAAREAID`, `ACCOUNTNUM` (Fluent HasKey).
+- **CS:** [`CustTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTable.cs) — EF key: `DATAAREAID`, `ACCOUNTNUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -292,7 +292,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## CUSTTRANS
 
-- **CS:** [`CustTrans`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTrans.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+- **CS:** [`CustTrans`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustTrans.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -326,7 +326,7 @@ differences and the important codes, units, dates, and history rules.
 ## DIRPARTYADDRESSRELATIONSHI1066
 
 - **X:** [`DirPartyAddressRelationshi1066`](../src/DataMigration.XellentData/Entities/DirPartyAddressRelationshi1066.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
-- **CS:** [`DirPartyAddressRelationshi1066`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DirPartyAddressRelationshi1066.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+- **CS:** [`DirPartyAddressRelationshi1066`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DirPartyAddressRelationshi1066.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -338,7 +338,7 @@ differences and the important codes, units, dates, and history rules.
 ## DIRPARTYADDRESSRELATIONSHIP
 
 - **X:** [`DirPartyAddressRelationship`](../src/DataMigration.XellentData/Entities/DirPartyAddressRelationship.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
-- **CS:** [`DirPartyAddressRelationship`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DirPartyAddressRelationship.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+- **CS:** [`DirPartyAddressRelationship`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DirPartyAddressRelationship.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -364,7 +364,7 @@ differences and the important codes, units, dates, and history rules.
 ## DOCUREF
 
 - **X:** [`DocuRef`](../src/DataMigration.XellentData/Entities/DocuRef.cs) — EF key: `RECID` (Key attribute).
-- **CS:** [`DocuRef`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuRef.cs) — EF key: `RECID` (Key attribute).
+- **CS:** [`DocuRef`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuRef.cs) — EF key: `RECID` (Key attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -386,7 +386,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## DOCUTYPE
 
-- **CS:** [`DocuType`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuType.cs) — EF key: `DATAAREAID`, `TYPEID` (Fluent HasKey).
+- **CS:** [`DocuType`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuType.cs) — EF key: `DATAAREAID`, `TYPEID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -396,7 +396,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## DOCUVALUE
 
-- **CS:** [`DocuValue`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuValue.cs) — EF key: `RECID` (Key attribute).
+- **CS:** [`DocuValue`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/DocuValue.cs) — EF key: `RECID` (Key attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -408,7 +408,7 @@ differences and the important codes, units, dates, and history rules.
 ## EGS_METERPOINTTYPECODEPERIOD
 
 - **X:** [`EgsMeterpointTypecodeperiod`](../src/DataMigration.XellentData/Entities/EgsMeterpointTypecodeperiod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
-- **CS:** [`EgsMeterpointTypecodeperiod`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EgsMeterpointTypecodeperiod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
+- **CS:** [`EgsMeterpointTypecodeperiod`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EgsMeterpointTypecodeperiod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -425,7 +425,7 @@ differences and the important codes, units, dates, and history rules.
 ## EMS_TIMESERIES
 
 - **X:** [`EmsTimeseries`](../src/DataMigration.XellentData/Entities/EmsTimeseries.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
-- **CS:** [`EmsTimeseries`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EmsTimeseries.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`EmsTimeseries`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EmsTimeseries.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -441,7 +441,7 @@ differences and the important codes, units, dates, and history rules.
 ## EMS_TIMESERIESVALUES
 
 - **X:** [`EmsTimeseriesValues`](../src/DataMigration.XellentData/Entities/EmsTimeseriesValues.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
-- **CS:** [`EmsTimeseriesValues`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EmsTimeseriesValues.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`EmsTimeseriesValues`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/EmsTimeseriesValues.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -498,7 +498,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_AGREEMENTTABLE
 
 - **X:** [`ExuAgreementTable`](../src/DataMigration.XellentData/Entities/ExuAgreementTable.cs) — EF key: `DATAAREAID`, `AGREEMENTNUM`, `COMPANYID` (Fluent HasKey).
-- **CS:** [`ExuAgreementTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuAgreementTable.cs) — EF key: `DATAAREAID`, `AGREEMENTNUM`, `COMPANYID` (Fluent HasKey).
+- **CS:** [`ExuAgreementTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuAgreementTable.cs) — EF key: `DATAAREAID`, `AGREEMENTNUM`, `COMPANYID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -526,7 +526,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_BILLINGMETHODPERIOD
 
 - **X:** [`ExuBillingMethodPeriod`](../src/DataMigration.XellentData/Entities/ExuBillingMethodPeriod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
-- **CS:** [`ExuBillingMethodPeriod`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuBillingMethodPeriod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
+- **CS:** [`ExuBillingMethodPeriod`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuBillingMethodPeriod.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -542,7 +542,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## EXU_BILLINGPLAN
 
-- **CS:** [`ExuBillingPlan`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuBillingPlan.cs) — EF key: `DATAAREAID`, `BILLINGPLANNUM` (PrimaryKey attribute).
+- **CS:** [`ExuBillingPlan`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuBillingPlan.cs) — EF key: `DATAAREAID`, `BILLINGPLANNUM` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -574,7 +574,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_CONTRACTPARTTABLE
 
 - **X:** [`ExuContractPartTable`](../src/DataMigration.XellentData/Entities/ExuContractPartTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM`, `INSTAGREENUM`, `DELIVERYCATEGORY`, `STARTDATE`, `COMPANYID`, `PRODUCTNUM`, `AMRCODE`, `CONTRACTPARTSUBREFERENCETYPE`, `CONTRACTPARTSUBREFERENCEID` (Fluent HasKey).
-- **CS:** [`ExuContractPartTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractPartTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM`, `INSTAGREENUM`, `DELIVERYCATEGORY`, `STARTDATE`, `COMPANYID`, `PRODUCTNUM`, `AMRCODE`, `CONTRACTPARTSUBREFERENCETYPE`, `CONTRACTPARTSUBREFERENCEID` (Fluent HasKey).
+- **CS:** [`ExuContractPartTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractPartTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM`, `INSTAGREENUM`, `DELIVERYCATEGORY`, `STARTDATE`, `COMPANYID`, `PRODUCTNUM`, `AMRCODE`, `CONTRACTPARTSUBREFERENCETYPE`, `CONTRACTPARTSUBREFERENCEID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -595,7 +595,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_CONTRACTTABLE
 
 - **X:** [`ExuContractTable`](../src/DataMigration.XellentData/Entities/ExuContractTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM` (Fluent HasKey).
-- **CS:** [`ExuContractTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM` (Fluent HasKey).
+- **CS:** [`ExuContractTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractTable.cs) — EF key: `DATAAREAID`, `CONTRACTNUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -626,7 +626,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## EXU_CONTRACTTEMPLATE
 
-- **CS:** [`ExuContractTemplate`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractTemplate.cs) — EF key: `DATAAREAID`, `CONTRACTTEMPLATENUM` (PrimaryKey attribute).
+- **CS:** [`ExuContractTemplate`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuContractTemplate.cs) — EF key: `DATAAREAID`, `CONTRACTTEMPLATENUM` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -637,7 +637,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_DELPOINT
 
 - **X:** [`ExuDelpoint`](../src/DataMigration.XellentData/Entities/ExuDelpoint.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `NUM` (Fluent HasKey).
-- **CS:** [`ExuDelpoint`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpoint.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `NUM` (Fluent HasKey).
+- **CS:** [`ExuDelpoint`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpoint.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `NUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -670,7 +670,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_DELPOINT2DELPOINTRELA25505
 
 - **X:** [`ExuDelpoint2delpointrela25505`](../src/DataMigration.XellentData/Entities/ExuDelpoint2delpointrela25505.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
-- **CS:** [`ExuDelpoint2delpointrela25505`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpoint2delpointrela25505.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
+- **CS:** [`ExuDelpoint2delpointrela25505`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpoint2delpointrela25505.cs) — EF key: `DATAAREAID`, `RECID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -691,7 +691,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_DELPOINTCONTACTINFOTABLE
 
 - **X:** [`ExuDelpointContactInfoTable`](../src/DataMigration.XellentData/Entities/ExuDelpointContactInfoTable.cs) — EF key: `DATAAREAID`, `COMPANYID`, `DELIVERYCATEGORY`, `METERINGPOINT`, `CONTACTTYPE`, `STARTDATE` (Fluent HasKey).
-- **CS:** [`ExuDelpointContactInfoTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpointContactInfoTable.cs) — EF key: `DATAAREAID`, `COMPANYID`, `DELIVERYCATEGORY`, `METERINGPOINT`, `CONTACTTYPE`, `STARTDATE` (Fluent HasKey).
+- **CS:** [`ExuDelpointContactInfoTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpointContactInfoTable.cs) — EF key: `DATAAREAID`, `COMPANYID`, `DELIVERYCATEGORY`, `METERINGPOINT`, `CONTACTTYPE`, `STARTDATE` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -718,7 +718,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_DELPOINTPRICEELEMENTR25046
 
 - **X:** [`ExuDelpointPriceElementR25046`](../src/DataMigration.XellentData/Entities/ExuDelpointPriceElementR25046.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `PARTYCHARGETYPEID` (Fluent HasKey).
-- **CS:** [`ExuDelpointPriceElementR25046`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpointPriceElementR25046.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `PARTYCHARGETYPEID` (Fluent HasKey).
+- **CS:** [`ExuDelpointPriceElementR25046`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuDelpointPriceElementR25046.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `ATTACHMENTNUM`, `DELPOINTNUM`, `PARTYCHARGETYPEID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -767,7 +767,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_GROUPTABLE
 
 - **X:** [`ExuGroupTable`](../src/DataMigration.XellentData/Entities/ExuGroupTable.cs) — EF key: `DATAAREAID`, `GROUPNUM` (PrimaryKey attribute).
-- **CS:** [`ExuGroupTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuGroupTable.cs) — EF key: `DATAAREAID`, `GROUPNUM` (PrimaryKey attribute).
+- **CS:** [`ExuGroupTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuGroupTable.cs) — EF key: `DATAAREAID`, `GROUPNUM` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -778,7 +778,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_INSTALLATION
 
 - **X:** [`ExuInstallation`](../src/DataMigration.XellentData/Entities/ExuInstallation.cs) — EF key: `DATAAREAID`, `INSTNUM` (Fluent HasKey).
-- **CS:** [`ExuInstallation`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuInstallation.cs) — EF key: `DATAAREAID`, `INSTNUM` (Fluent HasKey).
+- **CS:** [`ExuInstallation`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuInstallation.cs) — EF key: `DATAAREAID`, `INSTNUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -826,7 +826,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_METERTABLETRADE
 
 - **X:** [`ExuMeterTableTrade`](../src/DataMigration.XellentData/Entities/ExuMeterTableTrade.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `AGREEMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
-- **CS:** [`ExuMeterTableTrade`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuMeterTableTrade.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `AGREEMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
+- **CS:** [`ExuMeterTableTrade`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuMeterTableTrade.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `COMPANYID`, `AGREEMENTNUM`, `DELPOINTNUM`, `STARTDATE` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -906,7 +906,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_PRICEELEMENTTABLE
 
 - **X:** [`ExuPriceElementTable`](../src/DataMigration.XellentData/Entities/ExuPriceElementTable.cs) — EF key: keyless / unspecified (Keyless).
-- **CS:** [`ExuPriceElementTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuPriceElementTable.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `PARTYCHARGETYPEID`, `VALIDINMARKETFROM` (PrimaryKey attribute).
+- **CS:** [`ExuPriceElementTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuPriceElementTable.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `PARTYCHARGETYPEID`, `VALIDINMARKETFROM` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -953,7 +953,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## EXU_READINGTABLE
 
-- **CS:** [`ExuReadingTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTable.cs) — EF key: `DATAAREAID`, `INSTNUM`, `DELIVERYCATEGORY`, `METERNUM`, `COUNTERNUM`, `READINGDATE`, `COMPANYID` (Fluent HasKey).
+- **CS:** [`ExuReadingTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTable.cs) — EF key: `DATAAREAID`, `INSTNUM`, `DELIVERYCATEGORY`, `METERNUM`, `COUNTERNUM`, `READINGDATE`, `COMPANYID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -977,7 +977,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_READINGTABLEEXT
 
 - **X:** [`ExuReadingTableExt`](../src/DataMigration.XellentData/Entities/ExuReadingTableExt.cs) — EF key: `RECID` (Fluent HasKey).
-- **CS:** [`ExuReadingTableExt`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTableExt.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
+- **CS:** [`ExuReadingTableExt`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuReadingTableExt.cs) — EF key: `DATAAREAID`, `RECID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -993,7 +993,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_STREET
 
 - **X:** [`ExuStreet`](../src/DataMigration.XellentData/Entities/ExuStreet.cs) — EF key: `DATAAREAID`, `STREETNUM`, `COUNTYNUM` (Fluent HasKey).
-- **CS:** [`ExuStreet`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuStreet.cs) — EF key: `DATAAREAID`, `STREETNUM`, `COUNTYNUM` (Fluent HasKey).
+- **CS:** [`ExuStreet`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuStreet.cs) — EF key: `DATAAREAID`, `STREETNUM`, `COUNTYNUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -1022,7 +1022,7 @@ differences and the important codes, units, dates, and history rules.
 ## EXU_UTILITYINSTALLATION
 
 - **X:** [`ExuUtilityInstallation`](../src/DataMigration.XellentData/Entities/ExuUtilityInstallation.cs) — EF key: `INSTNUM`, `DATAAREAID`, `DELIVERYCATEGORY` (Fluent HasKey).
-- **CS:** [`ExuUtilityInstallation`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuUtilityInstallation.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `INSTNUM` (Fluent HasKey).
+- **CS:** [`ExuUtilityInstallation`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/ExuUtilityInstallation.cs) — EF key: `DATAAREAID`, `DELIVERYCATEGORY`, `INSTNUM` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -1046,7 +1046,7 @@ differences and the important codes, units, dates, and history rules.
 ## INVENTTABLE
 
 - **X:** [`InventTable`](../src/DataMigration.XellentData/Entities/InventTable.cs) — EF key: keyless / unspecified (Keyless).
-- **CS:** [`InventTable`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/InventTable.cs) — EF key: `DATAAREAID`, `ITEMID` (PrimaryKey attribute).
+- **CS:** [`InventTable`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/InventTable.cs) — EF key: `DATAAREAID`, `ITEMID` (PrimaryKey attribute).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -1059,7 +1059,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## VDOSALESJOURNALENTRY
 
-- **CS:** [`Vdosalesjournalentry`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Vdosalesjournalentry.cs) — EF key: `DATAAREAID`, `SEQUENCENO` (Fluent HasKey).
+- **CS:** [`Vdosalesjournalentry`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Vdosalesjournalentry.cs) — EF key: `DATAAREAID`, `SEQUENCENO` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|
@@ -1075,7 +1075,7 @@ differences and the important codes, units, dates, and history rules.
 
 ## VDOSALESJOURNALPRODUCT
 
-- **CS:** [`Vdosalesjournalproduct`](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Vdosalesjournalproduct.cs) — EF key: `DATAAREAID`, `PRODUCTID` (Fluent HasKey).
+- **CS:** [`Vdosalesjournalproduct`](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/Vdosalesjournalproduct.cs) — EF key: `DATAAREAID`, `PRODUCTID` (Fluent HasKey).
 
 | SQL column | C# property / model | Type and mapping |
 |---|---|---|

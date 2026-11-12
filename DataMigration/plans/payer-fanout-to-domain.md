@@ -53,7 +53,7 @@ Multi-repo-refaktor (3 repos). Krav: bit-identisk Settl-output før/efter, så i
 
 ## Ændringer
 
-### Repo 1 — `NewSettlement.XellentDomain` (lokal: `NewSettlement.UtilityData`) ✅ **Færdig**
+### Repo 1 — `XellentDomain` (lokal: `UtilityData`) ✅ **Færdig**
 
 Status: paket lokalt @ `0.7.2-preview` (output i `src/local-temp/`).
 
@@ -69,12 +69,12 @@ Status: paket lokalt @ `0.7.2-preview` (output i `src/local-temp/`).
 **Test:** `src/Tests/.../Internal/PayerMapperTests.cs` (ny) — 4 tests, alle grønne (de 3 fra `PayerTranslatorTests.cs` + ekstra `PayerReference`-test).
 
 **Pack-output:**
-- `NewSettlement.XellentDomain.Domain.0.7.2-preview.nupkg`
-- `NewSettlement.XellentDomain.Domain.Xellent.0.7.2-preview.nupkg`
+- `XellentDomain.Domain.0.7.2-preview.nupkg`
+- `XellentDomain.Domain.Xellent.0.7.2-preview.nupkg`
 
 (Bemærk: pakke-navne afviger fra forventet `XellentDomain.Core.*` — det er repoets faktiske pack-output.)
 
-### Repo 2 — `NewSettlement.SettlClient`
+### Repo 2 — `SettlClient`
 
 **Ændret:** `src/DataMigration.SettlClient/Internal/PayerTranslator.cs`
 - Slet `BuildAll`.
@@ -93,13 +93,13 @@ Status: paket lokalt @ `0.7.2-preview` (output i `src/local-temp/`).
 
 **Tests:** `PayerTranslatorTests.cs` — fjern multi-payer-scenarier (de hører nu i PayerMapperTests i Domain repo). Behold ét simpelt 1:1 round-trip-test.
 
-**Pack:** `dotnet pack` → `NewSettlement.SettlClient.0.5.0-preview.nupkg` (breaking på offentlig `BuildAll`-signatur, kræver minor-bump per preview-konvention).
+**Pack:** `dotnet pack` → `SettlClient.0.5.0-preview.nupkg` (breaking på offentlig `BuildAll`-signatur, kræver minor-bump per preview-konvention).
 
-### Repo 3 — `NewSettlement.DataMigration` (dette repo)
+### Repo 3 — `DataMigration` (dette repo)
 
 **`nuget.config` / `Directory.Packages.props`:**
-- Bump `NewSettlement.XellentDomain.*` → ny preview-version.
-- Bump `NewSettlement.SettlClient` → ny preview-version.
+- Bump `XellentDomain.*` → ny preview-version.
+- Bump `SettlClient` → ny preview-version.
 
 **`src/DataMigration.Migration.Library/Services/SettlMappingService.Payers.cs`** (linje 13-27):
 ```csharp

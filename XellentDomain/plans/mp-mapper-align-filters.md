@@ -14,7 +14,7 @@ Kør (XellentDomain repo):
 ```
 dotnet pack src/DataMigration.Domain.Xellent -c Release -o ../local-temp /p:Version=0.6.1-preview-local
 ```
-Verificér i DataMigration: bump `NewSettlement.XellentDomain.Domain.Xellent` til `0.6.1-preview-local` (kun lokalt — commit IKKE).
+Verificér i DataMigration: bump `XellentDomain.Domain.Xellent` til `0.6.1-preview-local` (kun lokalt — commit IKKE).
 
 ### 3. Xellent integration tests (DataMigration repo)
 Kør:

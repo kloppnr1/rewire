@@ -43,9 +43,9 @@ dotnet run -- payment-match --type mb --all-accounts <sti-til-settl-payment-agre
 ### Dashboardet (efter CI har publiceret OpsCli-pakken)
 
 ```
-dotnet restore C:\Users\sen.makj\source\repos\NewSettlement.MigrationDashboard --force
-dotnet test C:\Users\sen.makj\source\repos\NewSettlement.MigrationDashboard\src\Dashboard.Api.Tests\Dashboard.Api.Tests.csproj
-cd C:\Users\sen.makj\source\repos\NewSettlement.MigrationDashboard\src\dashboard
+dotnet restore C:\Users\sen.makj\source\repos\MigrationDashboard --force
+dotnet test C:\Users\sen.makj\source\repos\MigrationDashboard\src\Dashboard.Api.Tests\Dashboard.Api.Tests.csproj
+cd C:\Users\sen.makj\source\repos\MigrationDashboard\src\dashboard
 npm test
 ```
 
@@ -61,9 +61,9 @@ Matchen lader i dag ikke-i-levering-målepunkter være med til at bestemme popul
 
 ## Ændringer
 
-Rækkefølgen er bundet af NuGet-flowet: ændring 0 i `NewSettlement.XellentDomain` → afvent CI-preview → ændring 1–3 her → afvent CI-preview → ændring 4 i dashboardet.
+Rækkefølgen er bundet af NuGet-flowet: ændring 0 i `XellentDomain` → afvent CI-preview → ændring 1–3 her → afvent CI-preview → ændring 4 i dashboardet.
 
-### 0. Slå `ContractNumber` og `SourceContractNumber` sammen (repo `NewSettlement.XellentDomain`)
+### 0. Slå `ContractNumber` og `SourceContractNumber` sammen (repo `XellentDomain`)
 
 - `MobilePayContract` sætter begge felter til samme værdi (`a.SourceContract`), så recorden ser ud til at bære to begreber hvor der er ét. `MobilePayRowBuilder` bruger `ContractNumber` i joint-invoice-fallbacken og `SourceContractNumber` i rapportrækken — samme streng, to navne.
 - Behold `SourceContractNumber` (navnet svarer til spørgsmålet "hvor blev aftalen fundet", og det er navnet dashboardets wire-række allerede bruger). Fjern `ContractNumber` fra recorden og fra konstruktionen i `FetchAsync`.
@@ -81,7 +81,7 @@ Rækkefølgen er bundet af NuGet-flowet: ændring 0 i `NewSettlement.XellentDoma
 
 - `InferredAccountRemark` + `accountInferred`-parameteren i `MobilePayRowClassifier.BuildRemarks`, og `inferredMpIds`-parameteren i `MobilePayRowBuilder.Build`: uden fallback kan de aldrig sættes. Fjernes sammen med deres enhedstests.
 - `MobilePayMatchStatus.NotMigrated`: allerede uopnåelig siden `e3d4cfda`, og bliver det endnu tydeligere her — `settlMpsByAccount` indeholder pr. konstruktion kun konti Settl opløste. Fjernes fra enum'et, fra `StatusLabel`-switchen i runneren og fra TS-unionen i dashboardet.
-- Begge er brud på det offentlige API i `NewSettlement.DataMigration.OpsCli`-pakken → `VersionPrefix` bumpes, og dashboardet skal følge (se ændring 4).
+- Begge er brud på det offentlige API i `DataMigration.OpsCli`-pakken → `VersionPrefix` bumpes, og dashboardet skal følge (se ændring 4).
 
 ### 2. Ejerkontrakten skal med ud af resolveren
 
@@ -95,7 +95,7 @@ Rækkefølgen er bundet af NuGet-flowet: ændring 0 i `NewSettlement.XellentDoma
 - `MobilePayMatchRunner`: tre nye kolonner efter kolonne 9, resten rykker. Kolonnetæller (14) opdateres alle steder.
 - Afviger `Kontraktslutdato` fra `COS − 1`: bemærkning på rækken og gul markering. Bør ikke kunne ske efter ændring 1 — det er en assertion i arket, ikke en forventet tilstand.
 
-### 4. Dashboardet (repo `NewSettlement.MigrationDashboard`)
+### 4. Dashboardet (repo `MigrationDashboard`)
 
 Kører i et separat repo og kan først laves når OpsCli-pakken er publiceret af CI. Rækkefølge: DataMigration `develop` → afvent CI-preview → `dotnet restore --force` i dashboardet → ændringerne nedenfor.
 

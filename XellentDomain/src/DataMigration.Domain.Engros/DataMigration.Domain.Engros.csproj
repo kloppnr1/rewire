@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.Domain.Engros</PackageId>
+    <PackageId>XellentDomain.Domain.Engros</PackageId>
     <Description>Engros (wholesale) domain types: settlement basis, price components, subscription fees.</Description>
   </PropertyGroup>
 

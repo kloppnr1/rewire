@@ -1,4 +1,4 @@
-# NewSettlement.TimeSeriesMigration
+# TimeSeriesMigration
 
 Moves metering point time series from Xellent to Settl. The workspace rules in `../CLAUDE.md` apply here too.
 
@@ -30,15 +30,15 @@ Moves metering point time series from Xellent to Settl. The workspace rules in `
 
 ## Packages and layout
 
-- Publishes `NewSettlement.TimeSeriesMigration` (from `TimeSeries.Migration`) and `NewSettlement.TimeSeriesMigration.Core` (from `TimeSeries.Core`), series 0.3.x. The version lives in `Directory.Build.props`. MigrationDashboard consumes both, and can only be verified after CI has published.
-- Consumes `NewSettlement.SettlClient.Api` (`0.7.*-*`) and `NewSettlement.XellentDomain.Domain.TimeSeries` / `.XellentData` (`0.8.*-*`). There are no local forks of either.
+- Publishes `TimeSeriesMigration` (from `TimeSeries.Migration`) and `TimeSeriesMigration.Core` (from `TimeSeries.Core`), series 0.3.x. The version lives in `Directory.Build.props`. MigrationDashboard consumes both, and can only be verified after CI has published.
+- Consumes `SettlClient.Api` (`0.7.*-*`) and `XellentDomain.Domain.TimeSeries` / `.XellentData` (`0.8.*-*`). There are no local forks of either.
 - The runner, extraction and snapshot store are in `src/TimeSeries.Migration`. `src/TimeSeries.Cli` is only `Program.cs` and config. Dashboard.Api has moved to the MigrationDashboard repo.
 
 ## Verification
 
 In this order; the exact commands are in `docs/ai/start.md`.
 
-1. Build `NewSettlement.TimeSeriesMigration.slnx`.
+1. Build `TimeSeriesMigration.slnx`.
 2. Test `TimeSeries.Core.Tests` and `TimeSeries.Cli.Tests`.
 3. Test `TimeSeries.Xellent.IntegrationTests` when the change touches extraction, Settl mapping or `post`. In rewire it is in `rewire.slnx` and runs on a seeded SQLite copy of Xellent: no VPN, no settings. Do not accept a changed golden baseline without reviewing why it changed.
 4. CLI smoke test: `dotnet run --project src/TimeSeries.Cli -- post --help --env featuretest`, then `post --dry-run`. Config loads before `--help` is parsed, so even help needs a valid environment.

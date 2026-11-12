@@ -31,8 +31,8 @@ owner-customer. CVR can vary across cluster members. Lives one level above
 representatives.
 
 Source: `FingerprintCalculator.cs` + `AccountRepresentativeResolver.cs` in
-NuGet package `NewSettlement.XellentDomain.Domain.Xellent` (repo
-`NewSettlement.XellentDomain`) — no longer in this repo. The resolver is a
+NuGet package `XellentDomain.Domain.Xellent` (repo
+`XellentDomain`) — no longer in this repo. The resolver is a
 union-find over two edges: street-fingerprint (`S|Cvr|fp`) OR legal-contact
 DAR id (`D|Cvr|nameKey|darId`); same-CVR accounts merge on either. Email is
 folded into the fingerprint on both edges.
@@ -119,7 +119,7 @@ Tidligere `fix-*` runners er fjernet (commit `3f946ac3`, 2026). Drift detekteres
 
 ## migration-state.json — unified invoice+tracking JSON
 
-**Canonical DTO:** `src/DataMigration.OpsCli/Data/MigrationState.cs` (`MigrationStateDocument`, `MigratedAccount`, `InvoiceManifestItem`). This repo is source of truth. Byte-identical forks (namespace only differs) live in `NewSettlement.SettlInvoicePdfUpload` and `NewSettlement.CustomerSupport` — changes here must propagate to both.
+**Canonical DTO:** `src/DataMigration.OpsCli/Data/MigrationState.cs` (`MigrationStateDocument`, `MigratedAccount`, `InvoiceManifestItem`). This repo is source of truth. Byte-identical forks (namespace only differs) live in `SettlInvoicePdfUpload` and `CustomerSupport` — changes here must propagate to both.
 
 **Production path:** `C:\Services\DataMigration\OpsCli\data\migration-state.json`
 
@@ -129,12 +129,12 @@ Tidligere `fix-*` runners er fjernet (commit `3f946ac3`, 2026). Drift detekteres
 
 `DataMigration.Migration` (the `create` pipeline CLI) og `DataMigration.OpsCli` (read-only ops). Sibling repos:
 
-- `NewSettlement.MigrationDashboard` — React frontend + `Dashboard.Api` (port-5050 web API; hoster CreateRunner + report-CSV-endpoints + reconcile-scan). Flyttet ud 2026, commit `747f1325`.
-- `NewSettlement.CustomerSupport` — legacy Bifrost customer support web app
-- `NewSettlement.MigrationOps` — PDF archiving + tracking + notes (PdfIndexCli/Service, PdfExportCli, XellentNotesCli, TrackingCli)
-- `NewSettlement.TimeSeriesMigration` — time series extraction + Settl posting
+- `MigrationDashboard` — React frontend + `Dashboard.Api` (port-5050 web API; hoster CreateRunner + report-CSV-endpoints + reconcile-scan). Flyttet ud 2026, commit `747f1325`.
+- `CustomerSupport` — legacy Bifrost customer support web app
+- `MigrationOps` — PDF archiving + tracking + notes (PdfIndexCli/Service, PdfExportCli, XellentNotesCli, TrackingCli)
+- `TimeSeriesMigration` — time series extraction + Settl posting
 
-**Web API:** flyttet ud af dette repo. `DataMigration.Api` blev slettet 2026-05-13; port-5050-web-API'et (CreateRunner in-process + `report-*` CSV-download-endpoints) lever nu som `Dashboard.Api` i `NewSettlement.MigrationDashboard` (sammen med React-frontenden) og deploys derfra.
+**Web API:** flyttet ud af dette repo. `DataMigration.Api` blev slettet 2026-05-13; port-5050-web-API'et (CreateRunner in-process + `report-*` CSV-download-endpoints) lever nu som `Dashboard.Api` i `MigrationDashboard` (sammen med React-frontenden) og deploys derfra.
 
 **CLIs:**
 - `DataMigration.Migration` — `create` command (customer → payer → MP → links) + CreateRunner + SettlExtractionService. **Eneste komponent der muterer Settl.**
@@ -146,9 +146,9 @@ Tidligere `fix-*` runners er fjernet (commit `3f946ac3`, 2026). Drift detekteres
 - `DataMigration.Domain.Xellent` - Xellent → Domain loader (`XellentDomainMapper`, `MapperOptions`, customer-validators under `Validation/`)
 - `DataMigration.XellentData`    - Xellent database access (EF Core, Dynamics AX 2009)
 
-**Libraries (NuGet — repo `NewSettlement.SettlClient`, feed `NewSettlement`):**
-- `NewSettlement.SettlClient.Api` (`DataMigration.SettlApi`) - Settl REST API client (customers, payers, MPs, contracts)
-- `NewSettlement.SettlClient` (`DataMigration.SettlClient`)  - Domain → Settl migration orchestrator (`SettlClient`, `ISettlClient`, translators under `Internal/`: `CustomerTranslator`, `PayerTranslator`, `MeteringPointTranslator`)
+**Libraries (folder `SettlClient`):**
+- `SettlClient.Api` (`DataMigration.SettlApi`) - Settl REST API client (customers, payers, MPs, contracts)
+- `SettlClient` (`DataMigration.SettlClient`)  - Domain → Settl migration orchestrator (`SettlClient`, `ISettlClient`, translators under `Internal/`: `CustomerTranslator`, `PayerTranslator`, `MeteringPointTranslator`)
 
 **Public API rule (Domain.Xellent):** consumers `using DataMigration.Domain.Customers;` for output-typer (`CustomerSnapshot`, `CustomerBatch`, `OwnerCluster`). Kun `XellentDomainMapper` + `MapperOptions` + validators eksponeres fra `Domain.Xellent`-namespace selv. Ingen Xellent-specifikke typer i return-shapes — gør Domain genbrugelig fra fremtidige loaders. Implementation-mappers (`CustomerMapper`, `ContractMapper`, `MeteringPointMapper`) er `internal sealed` i `Domain.Xellent.Internal`.
 
@@ -156,7 +156,7 @@ Tidligere `fix-*` runners er fjernet (commit `3f946ac3`, 2026). Drift detekteres
 
 - Xellent products and billing plans → `.claude/skills/xellent-products/`
 - Dashboard start/stop/status → `dashboard-ops`, which lives in the **MigrationDashboard** repo
-  (`NewSettlement.MigrationDashboard/.claude/skills/dashboard-ops/SKILL.md`) — read it as a file,
+  (`MigrationDashboard/.claude/skills/dashboard-ops/SKILL.md`) — read it as a file,
   or let `migrationdashboard-expert` do it. Any dashboard process on this machine is a leftover
   from a Claude session; stop it rather than working around it.
 - Settl API queries → `.claude/skills/settl-api-query/`
@@ -167,7 +167,7 @@ Tidligere `fix-*` runners er fjernet (commit `3f946ac3`, 2026). Drift detekteres
 - **Xellent live-DB regression tests** → `.claude/skills/xellent-integration-tests/`
   Run proactively after any change to extraction-layer code (SettlExtractionService,
   XellentDomainMapper, SettlClient, CreateRunner, helpers under `Services/Extraction/`
-  or translators in NuGet package `NewSettlement.SettlClient`). Project lives at
+  or translators in NuGet package `SettlClient`). Project lives at
   `src/Tests/DataMigration.Xellent.IntegrationTests/` and is **deliberately not in the
   sln** — CI has no access to `xel2012`.
 - **OpsCli live-run integration tests** — `src/Tests/DataMigration.OpsCli.IntegrationTests/`

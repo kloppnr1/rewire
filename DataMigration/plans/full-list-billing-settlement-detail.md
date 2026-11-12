@@ -71,7 +71,7 @@ SettlementMethod: **udeladt**. Payer-kanaler/EAN: ikke i scope. Kun dashboard-ra
 
 ## Ændringer
 
-### NewSettlement.DataMigration (dette repo)
+### DataMigration (dette repo)
 - Ny report-felt `MpPriceLists` på `MigrationReport`: mp-identification → liste af
   (pricelist-navn, start, slut). Genbrug navn- + slutdato-logikken fra
   `ExportCustomerPriceListsRunner` (`TranslateAmrcode` + log/tbl-end-date + go-forward) —
@@ -82,13 +82,13 @@ SettlementMethod: **udeladt**. Payer-kanaler/EAN: ikke i scope. Kun dashboard-ra
 - Intet `VersionPrefix`-bump (additivt felt; Dashboard.Api floater `0.1.*-*`).
   Commit develop → CI publisher ny `0.1.x-preview.{BuildId}` automatisk.
 
-### NewSettlement.MigrationDashboard — Dashboard.Api (cross-repo)
+### MigrationDashboard — Dashboard.Api (cross-repo)
 - `dotnet restore --force` → ny DataMigration.Migration-preview.
 - `FromReport` (MigrationDtos.cs): eksponér på report-DTO (for ALLE kunder, ikke kun de 100):
   `mpBillingExemptions` (mp→code/template/%), `customerSettlementGroups` (account→grupper),
   `mpContractLinks` (mp→navn/start/slut/joined), `mpPriceLists` (mp→navn/start/slut).
 
-### NewSettlement.MigrationDashboard — frontend (cross-repo)
+### MigrationDashboard — frontend (cross-repo)
 - `api.ts`: udvid `MigrationReport`-interface med de nye felter (inkl. dato-felter).
 - `PrintableMigrationReport.tsx` (`AccountTree` / `MpsByContract`): render de kompakte
   billing/settlement-felter **med start/slut-datoer** pr. MP + settlement-group pr. kunde.

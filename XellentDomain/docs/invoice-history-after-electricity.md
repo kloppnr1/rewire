@@ -230,16 +230,16 @@ evidence. Do not infer them from account-level categories.
 
 ## Source evidence
 
-- **I1:** [BlobUploader](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/BlobUploader.cs): account-level skip, filename comparison, manifest replacement, blob namespace, and `BuildAccountManifestJson`.
-- **I2:** [PdfExportFilter](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfExportFilter.cs): re-upload semantics.
-- **I3:** [XellentInvoiceQueries](../src/DataMigration.Domain.Xellent/XellentInvoiceQueries.cs), [CustInvoiceJour](../src/DataMigration.XellentData/Entities/CustInvoiceJour.cs), and [CustomerSupport invoice lines](../../NewSettlement.CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs).
-- **I4:** [DataMigration state](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Data/MigrationState.cs) and [PDF upload state](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/MigrationState.cs): account and invoice metadata fields.
-- **I5:** [GenerateStateFromSettlRunner](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Runners/GenerateStateFromSettlRunner.cs): COS-driven invoice enrichment, source-account assignment, company scope and history window.
-- **I6:** [ForInvoiceScope](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Services/ForInvoiceScope.cs).
-- **I7:** [InvoiceStateComparer](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Services/InvoiceStateComparer.cs) and [existing comparison documentation](../../NewSettlement.DataMigration/docs/invoice-state-comparison.md).
-- **I8:** [PdfResolver](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs): source-folder search, substring matching, and clearing unresolved filenames.
-- **I9:** [PdfExportRunner](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfExportRunner.cs) and [MissingPdfGate](../../NewSettlement.SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/MissingPdfGate.cs): local resolution precedes the re-upload manifest read.
-- **I10:** [InvoiceAccountFilter](../src/DataMigration.Domain/Customers/InvoiceAccountFilter.cs) and [CosStatePlanner](../../NewSettlement.DataMigration/src/DataMigration.OpsCli.Library/Services/CosStatePlanner.cs).
+- **I1:** [BlobUploader](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/BlobUploader.cs): account-level skip, filename comparison, manifest replacement, blob namespace, and `BuildAccountManifestJson`.
+- **I2:** [PdfExportFilter](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfExportFilter.cs): re-upload semantics.
+- **I3:** [XellentInvoiceQueries](../src/DataMigration.Domain.Xellent/XellentInvoiceQueries.cs), [CustInvoiceJour](../src/DataMigration.XellentData/Entities/CustInvoiceJour.cs), and [CustomerSupport invoice lines](../../CustomerSupport/src/CustomerSupport.XellentDatabaseModel/Entities/CustInvoiceTrans.cs).
+- **I4:** [DataMigration state](../../DataMigration/src/DataMigration.OpsCli.Library/Data/MigrationState.cs) and [PDF upload state](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/MigrationState.cs): account and invoice metadata fields.
+- **I5:** [GenerateStateFromSettlRunner](../../DataMigration/src/DataMigration.OpsCli.Library/Runners/GenerateStateFromSettlRunner.cs): COS-driven invoice enrichment, source-account assignment, company scope and history window.
+- **I6:** [ForInvoiceScope](../../DataMigration/src/DataMigration.OpsCli.Library/Services/ForInvoiceScope.cs).
+- **I7:** [InvoiceStateComparer](../../DataMigration/src/DataMigration.OpsCli.Library/Services/InvoiceStateComparer.cs) and [existing comparison documentation](../../DataMigration/docs/invoice-state-comparison.md).
+- **I8:** [PdfResolver](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfResolver.cs): source-folder search, substring matching, and clearing unresolved filenames.
+- **I9:** [PdfExportRunner](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/PdfExportRunner.cs) and [MissingPdfGate](../../SettlInvoicePdfUpload/src/DataMigration.PdfExportCli.Library/MissingPdfGate.cs): local resolution precedes the re-upload manifest read.
+- **I10:** [InvoiceAccountFilter](../src/DataMigration.Domain/Customers/InvoiceAccountFilter.cs) and [CosStatePlanner](../../DataMigration/src/DataMigration.OpsCli.Library/Services/CosStatePlanner.cs).
 
 This is a documentation/source review. No invoice data, PDFs, blob manifests, or
 Settl import results were accessed, and no upload was performed.

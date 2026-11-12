@@ -67,6 +67,6 @@ distinguishes normalisation, warning, exclusion, and exception.
 
 - [Source joins and cardinality](../xellent-model-guide.md#reading-the-model).
 - [CustomerMapper](../../src/DataMigration.Domain.Xellent/Internal/CustomerMapper.cs), representative reselection and main-contract joins.
-- [SettlClient](../../../NewSettlement.SettlClient/src/DataMigration.SettlClient/SettlClient.cs), existing customer lookup.
+- [SettlClient](../../../SettlClient/src/DataMigration.SettlClient/SettlClient.cs), existing customer lookup.
 - Payment inheritance or joint invoicing: [Billing and Settl](billing-settl.md).
 - Historical invoice placement: [Invoices](invoices.md).

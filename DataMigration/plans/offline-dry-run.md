@@ -29,9 +29,9 @@ dotnet run --project src/DataMigration.Migration -- create <vand-profil> --offli
 Dry-run laver i dag mange Settl read-kald (per-kunde customer/payer/MP-søgninger + link-GETs + contract-resolution + settlement preflight). En offline-mode springer ALLE Settl-kald over for hurtig extraction/payload-smoke-test; alt rapporteres som would-create.
 
 ## Repo-afhængighed (bekræft ledighed før start)
-1. **NewSettlement.SettlClient** (NuGet-producer) — pull develop (1 commit bag), lille ændring, bump, push, CI-vent.
-2. **NewSettlement.DataMigration** (dette repo) — hovedændringen.
-3. **NewSettlement.MigrationDashboard** (valgfri, primær kørsels-sti) — én-linje wiring af flag.
+1. **SettlClient** (NuGet-producer) — pull develop (1 commit bag), lille ændring, bump, push, CI-vent.
+2. **DataMigration** (dette repo) — hovedændringen.
+3. **MigrationDashboard** (valgfri, primær kørsels-sti) — én-linje wiring af flag.
 
 ## Ændringer
 

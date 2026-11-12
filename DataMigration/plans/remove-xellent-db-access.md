@@ -9,7 +9,7 @@ Alle fire faser gennemført (2026-05-12).
 
 ## Kontekst
 
-Xellent-databaseadgang centraliseres i `NewSettlement.UtilityData`. Dette repo
+Xellent-databaseadgang centraliseres i `UtilityData`. Dette repo
 må kun forholde sig til Domain-objekter (`XellentLoadResult`) og Settl API — ingen
 `XellentDbContext`-injection, ingen EF/SQL-queries.
 
@@ -56,7 +56,7 @@ PackageReference. Runners der laver direkte DB-opslag:
 
 ## Fase 4 — Fjern `XellentData` fra Migration-pipeline *(dette repo)* ✓
 
-- `NewSettlement.UtilityData.XellentData` PackageReference fjernet fra
+- `UtilityData.XellentData` PackageReference fjernet fra
   `DataMigration.Migration.csproj` og `DataMigration.Api.csproj` (commit `05879b7d`)
 - `src/Tests/DataMigration.Xellent.IntegrationTests/` bevares i dette repo —
   afhænger af `SettlMappingService`, `ContractNameResolver`, `ProfileLoader` fra

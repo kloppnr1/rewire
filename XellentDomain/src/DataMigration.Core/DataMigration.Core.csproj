@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
-    <PackageId>NewSettlement.XellentDomain.Core</PackageId>
-    <Description>Shared models and helpers for the NewSettlement utility-data stack (constants, WarningCollector, CSV helpers).</Description>
+    <PackageId>XellentDomain.Core</PackageId>
+    <Description>Shared models and helpers for the utility-data stack (constants, WarningCollector, CSV helpers).</Description>
   </PropertyGroup>
 
   <ItemGroup>

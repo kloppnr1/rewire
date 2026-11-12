@@ -6,7 +6,7 @@
 ### Hvad der beviser at det virker
 
 **Trin 0 — UtilityData (core-ændringen ligger her, NuGet-pakke):**
-Byg + kør Xellent integration tests efter ændringen i `NewSettlement.UtilityData`:
+Byg + kør Xellent integration tests efter ændringen i `UtilityData`:
 ```
 cd src/Tests/DataMigration.Xellent.IntegrationTests
 dotnet test
@@ -34,13 +34,13 @@ Ved merge af samme-CVR-konti lander MP'er på forkert/sekundært produkts Settl-
 
 ## Ændringer
 
-### A. `NewSettlement.UtilityData` — `Internal/ContractMapper.cs` (core)
+### A. `UtilityData` — `Internal/ContractMapper.cs` (core)
 - **Del-query (linje ~114-138 el / ~143-164 vand):** tilføj `Startdate`-loft så fremtidige dele ikke fejlagtigt inkluderes: en del er kun kandidat hvis `Startdate <= referenceDate` OG (`Enddate == 1900-01-01` ELLER `Enddate >= referenceDate`).
 - **Enkelt-udvælgelse pr. MP:** efter parts er hentet, gruppér på `Meteringpoint` og vælg **netop én** del = den hvis `[Startdate, Enddate]` dækker `referenceDate` (åben slutdato = dækker altid). Ved flere kandidater: senest-startende vinder (deterministisk). Emit én `MeteringPointAssignment` pr. MP i stedet for én pr. del.
 - **Fallback (åben beslutning, se nedenfor):** når ingen del dækker `referenceDate`.
 - Bevar eksisterende felter på assignment (Start/EndDate/AmrCode) fra den valgte del.
 
-### B. `NewSettlement.DataMigration` — `Services/ContractNameResolver.cs`
+### B. `DataMigration` — `Services/ContractNameResolver.cs`
 - `ResolvePerMeteringPoint` (linje ~148-170): når ContractMapper allerede leverer én del pr. MP, vil `links.Add`-pr-del nu naturligt give ét link pr. MP. Verificér at `TryAdd`-first-wins (linje 160) ikke længere kan ramme to forskellige produkter for samme MP. Fjern den ikke-deterministiske afhængighed.
 
 ### C. Reference-dato-konsistens (åben beslutning)

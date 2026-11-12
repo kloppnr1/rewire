@@ -2,7 +2,7 @@
 // PreToolUse hook on Bash|PowerShell: BLOCKS git commit unless the rewire
 // solution builds and the impacted tests pass.
 //
-// Copied from NewSettlement.Orchestration/.claude/hooks/verify-before-commit.js
+// Copied from Orchestration/.claude/hooks/verify-before-commit.js
 // and adapted to this one monorepo:
 //   - only runs in a repo whose root holds rewire.slnx
 //   - builds rewire.slnx (300s timeout)
