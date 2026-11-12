@@ -191,8 +191,9 @@ public class ExportMissingEavExcelRunOptions
 /// EstimatedAnnualVolume gets an Update row with its own date, so a metering point can get several rows.
 /// </para>
 /// <para>
-/// An Update row replaces the version, so each row repeats the version's MeterReadingOccurrence, series and meter
-/// values (<see cref="MeteringPointMeterExcelWriter"/>). A version whose meter cannot be carried (none, several, or no
+/// Each row repeats the version's MeterReadingOccurrence, series and meter values
+/// (<see cref="MeteringPointMeterExcelWriter"/>). An empty cell would be ignored, not blanked; the full row keeps the
+/// workbook a complete statement of the version. A version whose meter cannot be carried (none, several, or no
 /// Hourly or QuarterHourly reading) leaves the whole metering point out, by hand.
 /// </para>
 /// </summary>

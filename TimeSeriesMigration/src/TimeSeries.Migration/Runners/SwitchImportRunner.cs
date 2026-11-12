@@ -66,14 +66,15 @@ public sealed class SettlSwitchImportReader(ISettlMeteringPointClient meteringPo
 /// Two Update rows per metering point — the old MeterReadingOccurrence and series from Settl's earliest
 /// MeterCharacteristics entry, the new ones from ChangeDate. OverwriteFuture stays False. Each row also carries what
 /// Settl holds at its date (EstimatedAnnualVolume; DigitsOfPrecision, Decimals, MultiplicationFactor and Ampere of a
-/// single meter): rows with those columns empty left the new history without them (production, Systemate,
-/// 2026-11-11). MeterType is not a column of the template, so the import cannot carry it. Settl creates a series the
+/// single meter), so a version the row creates on ChangeDate has them. An empty cell is ignored by the import, not
+/// blanked (clarified 2026-11-12). MeterType is not a column of the template, so the import cannot carry it. Settl creates a series the
 /// rows name that it lacks (<c>&lt;MP&gt;_PT1H</c>, like the <c>&lt;MP&gt;_PT15M</c> it has): featuretest
 /// 571313115101027361, 2026-11-10.
 /// Left out: a switch on or before Settl's earliest entry (Settl is right already), one whose earliest entry already
 /// has the old value (imported before), and a metering point with more than one switch (by hand).
 /// <para>
-/// With <c>correct</c> it writes the correction for switches imported before the rows carried those values: for each
+/// With <c>correct</c> it fills the gaps in the history of switches imported before the rows carried those values
+/// (most gaps date from the migration, not the import): for each
 /// Settl version from the earliest up to the first one that still has an EstimatedAnnualVolume or an Ampere, an Update
 /// row with that version's own date, MeterReadingOccurrence and series, and that first version's values. Every
 /// version read is saved first to <c>&lt;workbook&gt;_backup.csv</c>, so what Settl held before the import is kept.
@@ -255,7 +256,8 @@ public sealed class SwitchImportRunner(ISwitchImportSettlReader settl, Action<st
     }
 
     /// <summary>
-    /// The correction for a switch already imported with empty value columns. Every Settl version is read; the first
+    /// The correction for a switch already imported, filling versions that lack a volume or an Ampere (mostly from the
+    /// migration: an empty import cell is ignored, not blanked). Every Settl version is read; the first
     /// that has an EstimatedAnnualVolume or an Ampere is the source, and each earlier version missing either gets a row
     /// with its own date and resolution and the source's values.
     /// </summary>

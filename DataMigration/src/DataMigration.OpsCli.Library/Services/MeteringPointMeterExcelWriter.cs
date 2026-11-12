@@ -12,9 +12,10 @@ public sealed record MeterVersionMeter(string Occurrence, int DigitsOfPrecision,
 public sealed record MeteringPointMeterRow(string MeteringPointIdentification, DateOnly Date, double EstimatedAnnualVolume, MeterVersionMeter Meter);
 
 /// <summary>
-/// Writes Settl's MeteringPointMeter import workbook (version 8) with full rows. An Update row replaces the version
-/// from its Date: a column left empty leaves the version without that value (production, Systemate, 2026-11-11). So
-/// each row repeats MeterReadingOccurrence, the measured series and the meter values next to the volume.
+/// Writes Settl's MeteringPointMeter import workbook (version 8) with full rows. The import ignores an empty cell: it
+/// does not blank the value in Settl (clarified 2026-11-12; misread on 2026-11-11 as blanking it). Each row still
+/// repeats MeterReadingOccurrence, the measured series and the meter values next to the volume, so a version the row
+/// creates on its Date has them too.
 /// </summary>
 public static class MeteringPointMeterExcelWriter
 {
