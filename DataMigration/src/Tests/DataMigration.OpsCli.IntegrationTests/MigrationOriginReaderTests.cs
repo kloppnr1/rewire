@@ -4,37 +4,54 @@ using DataMigration.OpsCli.Runners;
 namespace DataMigration.OpsCli.IntegrationTests;
 
 /// <summary>
-/// export-missing-eav-excel leaves out metering points that were part of the migration. The migration read every
-/// Xellent company, so a metering point whose contract ending at COS-1 is in another company than FOR was migrated
-/// too and must not get an EstimatedAnnualVolume row.
+/// export-missing-eav-excel leaves out metering points that were part of the migration: Xellent has an El-ekstern
+/// contract for them, in any company, running on the day before Settl's first delivery start. Running on, not ending
+/// on: the 2026-08-31 batch restamped some contract ends.
 /// </summary>
 public sealed class MigrationOriginReaderTests : IDisposable
 {
+    private static readonly DateOnly Cos = new(2026, 9, 1);
+    private static readonly DateTime DayBefore = new(2026, 8, 31);
     private readonly FakeXellent _xellent = new();
 
     public void Dispose() => _xellent.Dispose();
 
-    [Fact]
-    public async Task A_contract_ending_at_cos_minus_one_counts_in_any_company()
+    private async Task<string[]> MigratedAsync(params string[] meteringPoints)
     {
-        var cos = new DateOnly(2026, 9, 1);
-        var ended = new DateTime(2026, 8, 31);
-        _xellent.Add(XellentRows.For(new("410001", "20000001", "571313100000000101", new(2020, 1, 1), ended, Company: "for")));
-        _xellent.Add(XellentRows.For(new("410002", "20000002", "570715000000000102", new(2020, 1, 1), ended, Company: "meh")));
-        _xellent.Add(XellentRows.For(new("410003", "20000003", "571313100000000103", new(2020, 1, 1), ended, Company: "")));
-        // Contract ends on another day: not the account at COS-1.
-        _xellent.Add(XellentRows.For(new("410004", "20000004", "571313100000000104", new(2020, 1, 1), new(2026, 6, 30))));
-
         var (migrated, error) = await new XellentMigrationOriginReader(_xellent.ConnectionString)
-            .WithAccountAtCosMinusOneAsync(new Dictionary<string, DateOnly>
-            {
-                ["571313100000000101"] = cos,
-                ["570715000000000102"] = cos,
-                ["571313100000000103"] = cos,
-                ["571313100000000104"] = cos,
-            }, CancellationToken.None);
-
+            .WithAccountAtCosMinusOneAsync(meteringPoints.ToDictionary(mp => mp, _ => Cos), CancellationToken.None);
         Assert.Null(error);
-        Assert.Equal(["570715000000000102", "571313100000000101", "571313100000000103"], migrated!.Order().ToArray());
+        return [.. migrated!.Order()];
+    }
+
+    [Fact]
+    public async Task A_contract_ending_the_day_before_counts_in_any_company()
+    {
+        _xellent.Add(XellentRows.For(new("410001", "20000001", "571313100000000101", new(2020, 1, 1), DayBefore, Company: "for")));
+        _xellent.Add(XellentRows.For(new("410002", "20000002", "570715000000000102", new(2020, 1, 1), DayBefore, Company: "meh")));
+        _xellent.Add(XellentRows.For(new("410003", "20000003", "571313100000000103", new(2020, 1, 1), DayBefore, Company: "")));
+
+        Assert.Equal(["570715000000000102", "571313100000000101", "571313100000000103"],
+            await MigratedAsync("571313100000000101", "570715000000000102", "571313100000000103"));
+    }
+
+    [Fact]
+    public async Task A_contract_running_on_the_day_before_counts_even_when_its_end_was_restamped_or_is_open()
+    {
+        _xellent.Add(XellentRows.For(new("410011", "20000011", "571313100000000111", new(2020, 1, 1), new(2026, 9, 30))));
+        _xellent.Add(XellentRows.For(new("410012", "20000012", "571313100000000112", new(2020, 1, 1), XellentRows.Open)));
+
+        Assert.Equal(["571313100000000111", "571313100000000112"],
+            await MigratedAsync("571313100000000111", "571313100000000112"));
+    }
+
+    [Fact]
+    public async Task No_contract_on_the_day_before_is_not_part_of_the_migration()
+    {
+        // Ended months before (a later move-in after the migration), or started on the delivery day itself.
+        _xellent.Add(XellentRows.For(new("410021", "20000021", "571313100000000121", new(2020, 1, 1), new(2026, 6, 30))));
+        _xellent.Add(XellentRows.For(new("410022", "20000022", "571313100000000122", new(2026, 9, 1), XellentRows.Open)));
+
+        Assert.Empty(await MigratedAsync("571313100000000121", "571313100000000122", "571313100000000123"));
     }
 }
