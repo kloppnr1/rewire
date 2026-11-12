@@ -2624,10 +2624,10 @@ var checkCustDataAreaOption = new Option<string?>("--data-area") { Description =
 var checkCustReferenceDateOption = new Option<DateTime?>("--reference-date") { Description = "Date the merge address is read at (default: today)" };
 var checkCustLegacyTg4Option = new Option<bool>("--legacy-tg4-merge") { Description = "Use the legacy CVR+TechnicGroup4 merge (for profiles with Extraction.LegacyTg4Merge=true)" };
 var checkCustParallelOption = new Option<int>("--parallel") { Description = "Concurrent Settl lookups", DefaultValueFactory = _ => 8 };
-var checkCustOutputOption = new Option<string?>("--output") { Description = "Output TSV path (default: timestamped file in cwd)" };
+var checkCustOutputOption = new Option<string?>("--output") { Description = "Output path: an Excel workbook, or TSV when it ends in .tsv (default: timestamped .xlsx in cwd)" };
 
 var checkCustomersCommand = new Command("check-customers-in-settl",
-    "Read-only: for each Xellent Accountnum, resolve its representative and say whether that customer exists in Settl. TSV with identifiers and status only.")
+    "Read-only: for each Xellent Accountnum, resolve its representative, say whether that customer exists in Settl, and count its active Xellent contracts. Excel (or TSV) with identifiers and status only.")
 {
     checkCustEnvOption, checkCustFileOption, checkCustAccountsOption, checkCustDataAreaOption,
     checkCustReferenceDateOption, checkCustLegacyTg4Option, checkCustParallelOption, checkCustOutputOption,
@@ -2669,10 +2669,8 @@ checkCustomersCommand.SetAction(async (parseResult, cancellationToken) =>
             Console.Error.WriteLine);
 
         var outputPath = parseResult.GetValue(checkCustOutputOption)
-            ?? $"check-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.tsv";
-        int exitCode;
-        await using (var output = new StreamWriter(outputPath, append: false, System.Text.Encoding.UTF8))
-            exitCode = await runner.RunAsync(options, output, cancellationToken);
+            ?? $"check-customers-{settlEnv}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx";
+        var exitCode = await runner.RunToFileAsync(options, outputPath, cancellationToken);
         Console.Error.WriteLine($"Output written to {outputPath}");
         return exitCode;
     }
