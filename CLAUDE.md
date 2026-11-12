@@ -74,4 +74,4 @@ If a change edits `TimeSeries.Cli/appsettings.json`, say so, because the user mu
 
 ## Git
 
-Branch `develop`; `master` points at the same commit. Never push unless the user asks.
+Branch `develop`. Never push unless the user asks.
