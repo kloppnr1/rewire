@@ -67,6 +67,41 @@ public class CheckCustomersInSettlRunnerTests
         Assert.Equal(2, later["300"].Count);
     }
 
+    [Fact]
+    public async Task Excel_output_has_one_row_per_account_with_accounts_as_text_and_a_summary()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        Seed(dbName);
+        var settl = new FakeCustomerClient { Existing = { ["100"] = Guid.NewGuid() } };
+        var runner = new CheckCustomersInSettlRunner(() => NewContext(dbName), settl);
+        var path = Path.Combine(Path.GetTempPath(), $"check-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var exit = await runner.RunToFileAsync(Options(["300", "200", "999"]), path);
+
+            Assert.Equal(0, exit);
+            using var book = new ClosedXML.Excel.XLWorkbook(path);
+            var sheet = book.Worksheet("Customers");
+            Assert.Equal("Account", sheet.Cell(1, 1).GetString());
+            Assert.Equal("300", sheet.Cell(2, 1).GetString());
+            Assert.Equal(ClosedXML.Excel.XLDataType.Text, sheet.Cell(2, 1).DataType);
+            Assert.Equal("100", sheet.Cell(3, 2).GetString());
+            Assert.Equal("Found", sheet.Cell(3, 4).GetString());
+            Assert.Equal(3, sheet.Cell(2, 6).GetValue<int>());
+            Assert.Equal("NotInXellent", sheet.Cell(4, 4).GetString());
+            Assert.True(sheet.Cell(5, 1).IsEmpty());
+
+            var summary = book.Worksheet("Summary");
+            Assert.Equal("Total", summary.Cell(9, 1).GetString());
+            Assert.Equal(3, summary.Cell(9, 2).GetValue<int>());
+            Assert.Equal(1, summary.Cell(9, 3).GetValue<int>());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     // ── Settl lookup ─────────────────────────────────────────────────────────────────────────
 
     [Fact]

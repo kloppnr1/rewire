@@ -88,12 +88,109 @@ public sealed class CheckCustomersInSettlRunner
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
+    /// <summary>
+    /// Runs the check and writes <paramref name="outputPath"/>: an Excel workbook, or a TSV when the
+    /// path ends in <c>.tsv</c>.
+    /// </summary>
+    public async Task<int> RunToFileAsync(CheckCustomersInSettlRunOptions options, string outputPath, CancellationToken ct = default)
+    {
+        if (outputPath.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var output = new StreamWriter(outputPath, append: false, System.Text.Encoding.UTF8);
+            return await RunAsync(options, output, ct);
+        }
+
+        var rows = await CheckAsync(options, ct);
+        if (rows == null) return 1;
+        WriteExcel(outputPath, rows, options);
+        return ExitCode(rows);
+    }
+
+    /// <summary>Runs the check and writes it as TSV.</summary>
     public async Task<int> RunAsync(CheckCustomersInSettlRunOptions options, TextWriter output, CancellationToken ct = default)
+    {
+        var rows = await CheckAsync(options, ct);
+        if (rows == null) return 1;
+
+        await output.WriteLineAsync(string.Join('\t', Header));
+        foreach (var row in rows)
+            await output.WriteLineAsync(string.Join('\t', Cells(row)));
+        return ExitCode(rows);
+    }
+
+    private static int ExitCode(IEnumerable<CustomerPresenceRow> rows) =>
+        rows.Any(r => r.Status == CustomerPresence.Error) ? 2 : 0;
+
+    private static string[] Cells(CustomerPresenceRow row) =>
+    [
+        row.Account, row.Representative ?? "", row.SearchedCustomerNumber ?? "", row.Status.ToString(),
+        row.SettlCustomerId?.ToString() ?? "",
+        row.ActiveXellentContracts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        string.Join(',', row.ActiveContractCategories), Clean(row.Detail),
+    ];
+
+    /// <summary>
+    /// Writes a workbook with a "Customers" sheet (one row per input account, as a filterable table;
+    /// account numbers as text) and a "Summary" sheet (accounts per status, with active contracts).
+    /// </summary>
+    public static void WriteExcel(string path, IReadOnlyList<CustomerPresenceRow> rows, CheckCustomersInSettlRunOptions options)
+    {
+        using var book = new ClosedXML.Excel.XLWorkbook();
+        var sheet = book.AddWorksheet("Customers");
+        for (var c = 0; c < Header.Length; c++)
+            sheet.Cell(1, c + 1).Value = Header[c];
+        sheet.Range(2, 1, Math.Max(2, rows.Count + 1), 3).Style.NumberFormat.Format = "@";
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            var cells = Cells(row);
+            for (var c = 0; c < cells.Length; c++)
+            {
+                if (c == 5) sheet.Cell(r, c + 1).Value = row.ActiveXellentContracts;
+                else sheet.Cell(r, c + 1).Value = cells[c];
+            }
+            r++;
+        }
+        sheet.Range(1, 1, Math.Max(2, rows.Count + 1), Header.Length).CreateTable("Customers");
+        sheet.SheetView.FreezeRows(1);
+        sheet.Columns().AdjustToContents();
+
+        var summary = book.AddWorksheet("Summary");
+        summary.Cell(1, 1).Value = "Environment";
+        summary.Cell(1, 2).Value = options.Environment;
+        summary.Cell(2, 1).Value = "Data area";
+        summary.Cell(2, 2).Value = options.DataAreaId;
+        summary.Cell(3, 1).Value = "Reference date";
+        summary.Cell(3, 2).Value = options.ReferenceDate.ToString("yyyy-MM-dd");
+        summary.Cell(5, 1).Value = "Status";
+        summary.Cell(5, 2).Value = "Accounts";
+        summary.Cell(5, 3).Value = "With active Xellent contracts";
+        var s = 6;
+        foreach (var group in rows.GroupBy(x => x.Status).OrderBy(g => g.Key))
+        {
+            summary.Cell(s, 1).Value = group.Key.ToString();
+            summary.Cell(s, 2).Value = group.Count();
+            summary.Cell(s, 3).Value = group.Count(x => x.ActiveXellentContracts > 0);
+            s++;
+        }
+        summary.Cell(s, 1).Value = "Total";
+        summary.Cell(s, 2).Value = rows.Count;
+        summary.Cell(s, 3).Value = rows.Count(x => x.ActiveXellentContracts > 0);
+        summary.Row(5).Style.Font.Bold = true;
+        summary.Row(s).Style.Font.Bold = true;
+        summary.Columns().AdjustToContents();
+
+        book.SaveAs(path);
+    }
+
+    /// <summary>Resolves, looks up and logs a summary. Null when no accounts were given.</summary>
+    public async Task<List<CustomerPresenceRow>?> CheckAsync(CheckCustomersInSettlRunOptions options, CancellationToken ct = default)
     {
         if (options.Accounts.Length == 0)
         {
             _log("ERROR: no accounts given");
-            return 1;
+            return null;
         }
 
         _log($"=== check-customers-in-settl: env={options.Environment} dataArea={options.DataAreaId} accounts={options.Accounts.Length} ===");
@@ -120,14 +217,6 @@ public sealed class CheckCustomersInSettlRunner
                 : r)
             .ToList();
 
-        await output.WriteLineAsync(string.Join('\t', Header));
-        foreach (var row in rows)
-            await output.WriteLineAsync(string.Join('\t',
-                row.Account, row.Representative ?? "", row.SearchedCustomerNumber ?? "", row.Status.ToString(),
-                row.SettlCustomerId?.ToString() ?? "",
-                row.ActiveXellentContracts.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                string.Join(',', row.ActiveContractCategories), Clean(row.Detail)));
-
         foreach (var group in rows.GroupBy(r => r.Status).OrderBy(g => g.Key))
             _log($"  {group.Key}: {group.Count()}");
 
@@ -137,7 +226,7 @@ public sealed class CheckCustomersInSettlRunner
         else
             _log($"  No account has an active Xellent contract on {options.ReferenceDate:yyyy-MM-dd}");
 
-        return rows.Any(r => r.Status == CustomerPresence.Error) ? 2 : 0;
+        return rows;
     }
 
     /// <summary>
