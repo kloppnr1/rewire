@@ -129,4 +129,36 @@ public sealed class SettlementCheckTests
         Assert.Equal(Path.Combine("out", "state-settlement-check.csv"),
             SettlementCheck.ReportPath(Path.Combine("out", "state.json")));
     }
+
+    private static SettlementCheck.Row Row(string customer, string mp, string status) =>
+        new(new SettlementCheck.Subject(customer, customer, mp, Contract, Cos), "", null, status);
+
+    [Fact]
+    public void A_customer_is_settled_only_when_every_metering_point_is()
+    {
+        var settled = SettlementCheck.SettledCustomers(
+        [
+            Row("100001", "MP1", SettlementCheck.Settled), Row("100001", "MP2", SettlementCheck.Settled),
+            Row("100002", "MP3", SettlementCheck.Settled), Row("100002", "MP4", SettlementCheck.NotSettled),
+            Row("100003", "MP5", SettlementCheck.Settled), Row("100003", "MP6", SettlementCheck.Missing),
+        ]);
+
+        Assert.Equal(["100001"], settled);
+    }
+
+    [Fact]
+    public void A_customer_without_any_checked_metering_point_is_not_settled()
+    {
+        Assert.Empty(SettlementCheck.SettledCustomers([]));
+    }
+
+    [Fact]
+    public void ClassifyAll_matches_rows_to_each_subject_by_metering_point()
+    {
+        var other = new SettlementCheck.Subject("941589", "41589", "571313115200045327", Contract, Cos);
+        var rows = SettlementCheck.ClassifyAll([Subject(), other],
+            new([Part(7)], [Statement(CosMinusOne), Statement(new DateTime(2026, 3, 31), mp: other.MeteringPoint)]));
+
+        Assert.Equal([SettlementCheck.Settled, SettlementCheck.NotSettled], rows.Select(r => r.Status));
+    }
 }
