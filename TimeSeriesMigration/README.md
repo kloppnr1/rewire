@@ -81,7 +81,7 @@ When the values went in but the invoiced period failed, the next run sends only 
 
 `snapshot` ends with how far the migration is, e.g. `Migration: 440 of 661 metering points done (66%), 221 still to post`. Every `post --all` starts with the same line, using the done list as it is now and the total from the last snapshot.
 
-The snapshot also keeps each metering point's current payer in Settl (`settl-payer.jsonl`, 100 metering points per call), so the 6##### payer check needs no Settl calls offline.
+The snapshot also keeps each metering point's current payer in Settl (`settl-payer.jsonl`, 100 metering points per call), and, for those with a 6##### payer today, the payer at their delivery start (`settl-payer-at-delivery-start.jsonl`), so the 6##### payer check needs no Settl calls offline once a run has read them.
 
 On featuretest: 440 of 661 candidates were already in Settl. Checking the remaining 221 took 36 seconds, and 2 seconds on the next seed.
 
@@ -164,7 +164,7 @@ Each row carries a `Type` column — Parent or Child, empty where it isn't known
 | File | Reason |
 |------|--------|
 | `skip-not-installed.csv` | No values in the window and Xellent status 5 "Oprettet": no meter installed or connected. Nothing to post; not counted as posted. A metering point with a meter but no values is blocked instead |
-| `skip-payer-6-series.csv` | The metering point's current payer in Settl is in the 6##### series (six digits starting with 6); those are not migrated. Left out before `--skip` / `--limit` count |
+| `skip-payer-6-series.csv` | The metering point's payer in Settl at its delivery start is in the 6##### series (six digits starting with 6); those are not migrated. Today's payer picks the candidates; for each, the payer on its delivery start (where the window ends) decides, so one a 6##### payer took over later is posted and logged as `PAYER MP …` (production 571313114400615057, 6##### payer from 2026-11-01). A candidate whose delivery start does not resolve stays left out. Left out before `--skip` / `--limit` count. The detail column gives both payers |
 | `skip-missing-in-xellent.csv` | Nobody held the metering point in Xellent the day before delivery |
 | `skip-not-migrated.csv` | No migration in Xellent at COS − 1: not in delivery in Settl and no migration, or a contract not closed as a migration |
 | `ambiguous-revisions.csv` | More than one `InDelivery=true` delivery status |

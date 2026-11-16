@@ -54,7 +54,10 @@ public enum TimeSeriesSkipCategory
     /// </summary>
     KnownIssueXellentResolution,
 
-    /// <summary>The metering point's current payer in Settl is in the 6##### series; those are not migrated.</summary>
+    /// <summary>
+    /// The metering point's payer in Settl at its delivery start is in the 6##### series; those are not migrated. Only
+    /// metering points with a 6##### payer today are asked about; without a resolved delivery start they stay out.
+    /// </summary>
     ExcludedPayer,
 
     /// <summary>No values in the window and Xellent status 5 "Oprettet": no meter is installed or connected, so there is nothing to post.</summary>
@@ -1936,10 +1939,11 @@ public class TimeSeriesRunner
                  $"— total from the snapshot of {lastSummary.CheckedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
         }
 
-        // Metering points whose payer in Settl is in the 6##### series are not migrated.
+        // Metering points whose payer in Settl is in the 6##### series are not migrated. Today's payer only picks
+        // the candidates; the payer at each one's delivery start decides, in the loop below.
         try
         {
-            settlMeteringPoints = await LeaveOutExcludedPayersAsync(settlMeteringPoints, cancellationToken);
+            await FindExcludedPayersTodayAsync(settlMeteringPoints, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -2042,6 +2046,33 @@ public class TimeSeriesRunner
                     inDelivery = settlMeteringPoints[i].ParentInDelivery;
                 }
             }
+            // A 6##### payer today: the payer at the delivery start, where the window ends, decides. Without a resolved
+            // delivery start it stays left out, as before.
+            if (_excludedPayerToday.TryGetValue(mpGuid, out var payerToday))
+            {
+                if (revisionResolution.Outcome != RevisionResolutionOutcome.Resolved)
+                {
+                    RecordExcludedPayer(identification, mpGuid, isChild, $"payer {payerToday}");
+                    continue;
+                }
+                var deliveryStart = ToDanishDate(revisionResolution.Revision);
+                var (payerAtStart, payerError) = await GetPayerAtAsync(mpGuid, deliveryStart, cancellationToken);
+                if (payerError != null)
+                {
+                    RecordCoverageExclusion("Payer at delivery start could not be read", isChild);
+                    CountState("Failed", "Settl payer at delivery start could not be read");
+                    if (!RecordFailure($"  Payer at delivery start {deliveryStart:yyyy-MM-dd} failed for MP {identification} ({mpGuid}): {payerError}")) return 1;
+                    continue;
+                }
+                if (payerAtStart is null || ExcludedPayerPattern.IsMatch(payerAtStart))
+                {
+                    RecordExcludedPayer(identification, mpGuid, isChild,
+                        $"payer {payerToday}, at delivery start {deliveryStart:yyyy-MM-dd} {payerAtStart ?? "none"}");
+                    continue;
+                }
+                _log($"PAYER MP {identification}: {payerToday} today (6#####), {payerAtStart} at delivery start {deliveryStart:yyyy-MM-dd} — migrated");
+            }
+
             // Not in delivery and no delivery start to fall back on: never delivered, nothing to post.
             if (!inDelivery && revisionResolution.Outcome == RevisionResolutionOutcome.Error)
             {
@@ -2559,31 +2590,73 @@ public class TimeSeriesRunner
     // Payers in this series (six digits starting with 6) are not migrated.
     private static readonly System.Text.RegularExpressions.Regex ExcludedPayerPattern = new(@"^6\d{5}$");
 
-    // Leaves out metering points whose current Settl payer is in the 6##### series and lists them.
-    private async Task<List<BatchMeteringPoint>> LeaveOutExcludedPayersAsync(List<BatchMeteringPoint> meteringPoints, CancellationToken cancellationToken)
+    // Metering points whose payer in Settl today is in the 6##### series, with that payer. The loop asks for the
+    // payer at each one's delivery start: a 6##### payer that took over later does not own the window.
+    private readonly Dictionary<Guid, string> _excludedPayerToday = new();
+
+    // Finds the metering points whose current Settl payer is in the 6##### series. They stay in the list: the payer
+    // at the delivery start decides (RecordExcludedPayer / GetPayerAtAsync).
+    private async Task FindExcludedPayersTodayAsync(List<BatchMeteringPoint> meteringPoints, CancellationToken cancellationToken)
     {
+        _excludedPayerToday.Clear();
         if (_settlPayerClient == null)
         {
             _log("Payer check: not available here — metering points with a 6##### payer are NOT left out.");
-            return meteringPoints;
+            return;
         }
         var payers = await GetPayersAsync(meteringPoints.Select(m => m.Id).ToList(), 6, cancellationToken);
-        var excluded = meteringPoints
-            .Where(m => payers.TryGetValue(m.Id, out var payer) && payer is { } p && ExcludedPayerPattern.IsMatch(p))
-            .ToList();
-        if (excluded.Count == 0)
-            return meteringPoints;
-        foreach (var mp in excluded)
+        foreach (var mp in meteringPoints)
+            if (payers.TryGetValue(mp.Id, out var payer) && payer is { } p && ExcludedPayerPattern.IsMatch(p))
+                _excludedPayerToday[mp.Id] = p;
+        if (_excludedPayerToday.Count > 0)
+            _log($"Payer 6#####: {_excludedPayerToday.Count} metering point(s) have a 6##### payer today; the payer at the delivery start decides " +
+                 $"(left out: {SkipCsvFileNames[TimeSeriesSkipCategory.ExcludedPayer]})");
+    }
+
+    private void RecordExcludedPayer(string identification, Guid id, bool isChild, string detail)
+    {
+        RecordCoverageExclusion("Excluded payer (6#####)", isChild);
+        RecordSkip(TimeSeriesSkipCategory.ExcludedPayer, null, identification, id, null, null, detail);
+        CountState("Skipped", SkipReason(TimeSeriesSkipCategory.ExcludedPayer));
+        _log($"SKIP MP {identification}: 6##### payer ({detail}){TypeSuffix()}");
+    }
+
+    private const string SnapshotPayerAtDeliveryStart = "settl-payer-at-delivery-start";
+
+    /// <summary>
+    /// The metering point's payer identification in Settl on <paramref name="date"/> (Danish date, sent as Settl's
+    /// SearchDate the way generate-state-from-settl does), null when it has none. Kept in the snapshot.
+    /// </summary>
+    private async Task<(string? Payer, string? Error)> GetPayerAtAsync(Guid id, DateOnly date, CancellationToken cancellationToken)
+    {
+        var key = $"{id}|{date:yyyy-MM-dd}";
+        if (_snapshot != null && _snapshot.TryGet<PayerEntry>(SnapshotPayerAtDeliveryStart, key, out var cached) && cached != null)
+            return (cached.PayerIdentification, null);
+        if (_snapshot is { FetchMissing: false })
+            return (null, $"snapshot has no '{SnapshotPayerAtDeliveryStart}' entry for {key}");
+        var (entries, error) = await _settlPayerClient!.FindPayersForMeteringPointsAsync([id], date.ToDateTime(TimeOnly.MinValue), cancellationToken);
+        if (error != null)
+            return (null, error);
+        PickPayers(entries).TryGetValue(id, out var payer);
+        _snapshot?.Put(SnapshotPayerAtDeliveryStart, key, new PayerEntry(payer));
+        _snapshot?.CountFetched();
+        return (payer, null);
+    }
+
+    // Each metering point's payer from a payersForMeteringPoints answer. Should a metering point show up under two
+    // payers, a 6##### one wins: leaving it out is the safe side.
+    private static Dictionary<Guid, string?> PickPayers(List<PayerForMeteringPointsDto>? entries)
+    {
+        var found = new Dictionary<Guid, string?>();
+        foreach (var entry in entries ?? [])
         {
-            _meteringPointType = mp.ParentIdentification != null ? "Child" : "Parent";
-            RecordCoverageExclusion("Excluded payer (6#####)", mp.ParentIdentification != null);
-            RecordSkip(TimeSeriesSkipCategory.ExcludedPayer, null, mp.Identification, mp.Id, null, null, $"payer {payers[mp.Id]}");
+            var payer = entry.Payer?.PayerInformation?.PayerIdentifier;
+            foreach (var mp in entry.MeteringPoints ?? [])
+                if (!found.TryGetValue(mp.MeteringPointId, out var existing) || existing is null
+                    || (payer is { } p && ExcludedPayerPattern.IsMatch(p)))
+                    found[mp.MeteringPointId] = payer;
         }
-        _meteringPointType = "";
-        CountState("Skipped", SkipReason(TimeSeriesSkipCategory.ExcludedPayer), excluded.Count);
-        _log($"Payer 6#####: {excluded.Count} metering point(s) left out ({SkipCsvFileNames[TimeSeriesSkipCategory.ExcludedPayer]})");
-        var excludedIds = excluded.Select(m => m.Id).ToHashSet();
-        return meteringPoints.Where(m => !excludedIds.Contains(m.Id)).ToList();
+        return found;
     }
 
     /// <summary>
@@ -2616,18 +2689,7 @@ public class TimeSeriesRunner
                 var (entries, error) = await _settlPayerClient!.FindPayersForMeteringPointsAsync(chunk, null, ct);
                 if (error != null)
                     throw new InvalidOperationException($"Settl payersForMeteringPoints failed: {error}");
-                var found = new Dictionary<Guid, string?>();
-                foreach (var entry in entries ?? [])
-                {
-                    var payer = entry.Payer?.PayerInformation?.PayerIdentifier;
-                    foreach (var mp in entry.MeteringPoints ?? [])
-                    {
-                        // Should a metering point show up under two payers, a 6##### one wins: leaving it out is the safe side.
-                        if (!found.TryGetValue(mp.MeteringPointId, out var existing) || existing is null
-                            || (payer is { } p && ExcludedPayerPattern.IsMatch(p)))
-                            found[mp.MeteringPointId] = payer;
-                    }
-                }
+                var found = PickPayers(entries);
                 foreach (var id in chunk)
                 {
                     found.TryGetValue(id, out var payer);
