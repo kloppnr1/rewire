@@ -125,4 +125,144 @@ public class StateSourceSnapshotTests
         }
         finally { Directory.Delete(root, recursive: true); }
     }
+
+    // One customer (503281) with one metering point, COS 2025-05-01, and its latest invoice an Aconto:
+    // the old Slutafregning rule would call it active. Only the statement date decides now.
+    private static async Task WriteOneCustomerSnapshotAsync(StateSourceSnapshotStore store,
+        DateTime? latestStatement, bool withSettlementData = true)
+    {
+        await store.BeginAsync(CancellationToken.None);
+        var customerId = Guid.NewGuid();
+        var mpId = Guid.NewGuid();
+        var cos = new DateOnly(2025, 5, 1);
+        var start = new DateTimeOffset(2025, 5, 1, 0, 0, 0, TimeSpan.Zero);
+        var mp = new SettlMpWithCos("MP1", mpId, cos, new MeteringPointInfoDto
+        {
+            InDelivery = true,
+            CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = start }
+        });
+        var statuses = new GetDeliveryStatusesResponse { DeliveryStatuses =
+        [new DeliveryStatusDto { InDelivery = true,
+            Period = new TimePeriodDto { Start = start },
+            StartReason = DeliveryStartReason.ChangeOfSupplier }] };
+        var ct = CancellationToken.None;
+        await store.WriteAsync("settl-customers", new[] { new CustomerInfoDto
+            { Id = customerId, CustomerNumber = "503281", FullName = "Customer" } }, ct);
+        await store.WriteAsync("settl-metering-points", new[] { mp }, ct);
+        await store.WriteAsync("settl-delivery-histories", new[]
+        {
+            new GenerateStateOfflineCache.DeliveryHistoryRecord("MP1", mpId, true,
+                mp.Info.CurrentOrNextDeliveryPeriod, null, statuses, null, cos, "ChangeOfSupplier")
+        }, ct);
+        await store.WriteAsync("settl-payers", new[] { new StatePayerLookup(cos, [mpId],
+        [new PayerForMeteringPointsDto
+        {
+            Payer = new PayerResponse { CustomerId = customerId, IsPrimaryCustomerPayer = true },
+            MeteringPoints = [new PayerMeteringPointDto { MeteringPointId = mpId }]
+        }], null) }, ct);
+        await store.WriteAsync("xellent-mp-accounts", new[] { new StateMpAccount("MP1", "503281") }, ct);
+        await store.WriteAsync("xellent-for-mps", new[] { "MP1" }, ct);
+        await store.WriteAsync("xellent-meh-mps", Array.Empty<string>(), ct);
+        await store.WriteAsync("xellent-representatives", new[]
+            { new StateXellentEvidence("MP1", "503281", "503281", cos, ["503281"]) }, ct);
+        await store.WriteAsync("xellent-invoices", new[]
+        {
+            new Invoice("INV1", "503281", new DateTime(2024, 6, 1),
+                new DateTime(2024, 6, 15), "A", "A", BillingCategory.Aconto,
+                PaymentMedia.Fik, InvoiceStatus.Invoiced, 100m, 25m)
+        }, ct);
+        await store.WriteAsync("xellent-excluded-invoices", Array.Empty<ExcludedCompanyInvoice>(), ct);
+        if (withSettlementData)
+        {
+            await store.WriteAsync("xellent-owner-contracts",
+                new[] { new StateOwnerContract("MP1", "C1", new DateOnly(2025, 4, 30)) }, ct);
+            await store.WriteAsync("xellent-settlement-parts", new[] { new SettlementCheck.PartRow
+            {
+                MeteringPoint = "MP1", ContractNumber = "C1", RecId = 7,
+                StartDate = new DateTime(2020, 1, 1), EndDate = new DateTime(2025, 4, 30)
+            } }, ct);
+            await store.WriteAsync("xellent-statement-dates", latestStatement is { } date
+                ? new[] { new SettlementCheck.StatementRow
+                    { MeteringPoint = "MP1", ContractNumber = "C1", LatestStatementDate = date } }
+                : Array.Empty<SettlementCheck.StatementRow>(), ct);
+        }
+        await store.CompleteAsync(ct);
+    }
+
+    private static GenerateStateFromSettlRunOptions OfflineOptions(string root, string output) => new()
+    {
+        Env = "production", Offline = true, OfflineCacheDirectory = root,
+        OutputPath = Path.Combine(root, output), HistoryYears = 1, SkipWaterCensus = true
+    };
+
+    [Fact]
+    public async Task Offline_customer_billed_up_to_cos_minus_one_keeps_invoices_whatever_the_latest_category()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "settl-sources-" + Guid.NewGuid());
+        try
+        {
+            await WriteOneCustomerSnapshotAsync(StateSourceSnapshotStore.Open(root, "production"),
+                new DateTime(2025, 4, 30));
+            var options = OfflineOptions(root, "state.json");
+            options.SettlementCheck = true;
+
+            Assert.Equal(0, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+
+            Assert.Contains("INV1", await File.ReadAllTextAsync(options.OutputPath));
+            Assert.Contains("503281;503281;MP1;C1;7;2025-05-01;2025-04-30;Settled",
+                await File.ReadAllTextAsync(SettlementCheck.ReportPath(options.OutputPath)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("2025-03-31")]
+    [InlineData(null)]
+    public async Task Offline_customer_not_billed_up_to_cos_minus_one_fails_or_loses_its_invoices(string? latest)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "settl-sources-" + Guid.NewGuid());
+        try
+        {
+            await WriteOneCustomerSnapshotAsync(StateSourceSnapshotStore.Open(root, "production"),
+                latest is null ? null : DateTime.Parse(latest));
+            var options = OfflineOptions(root, "state.json");
+
+            Assert.Equal(1, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+
+            options.SkipActive = true;
+            Assert.Equal(0, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+            var json = await File.ReadAllTextAsync(options.OutputPath);
+            Assert.Contains("503281", json);
+            Assert.DoesNotContain("INV1", json);
+
+            options.SkipActive = false;
+            options.IncludeActive = true;
+            Assert.Equal(0, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+            Assert.Contains("INV1", await File.ReadAllTextAsync(options.OutputPath));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Offline_snapshot_without_statement_dates_is_refused_unless_the_test_is_skipped()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "settl-sources-" + Guid.NewGuid());
+        try
+        {
+            await WriteOneCustomerSnapshotAsync(StateSourceSnapshotStore.Open(root, "production"),
+                new DateTime(2025, 4, 30), withSettlementData: false);
+            var options = OfflineOptions(root, "state.json");
+            options.SkipActive = true;
+
+            Assert.Equal(1, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+            Assert.False(File.Exists(options.OutputPath));
+
+            options.IncludeActive = true;
+            Assert.Equal(0, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+
+            options.SettlementCheck = true;
+            Assert.Equal(1, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
 }

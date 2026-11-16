@@ -74,6 +74,15 @@ points, first supplier changes and Xellent ownership evidence, including an
 offline replay path. It is not a Settl-only command in every mode. Preserve the
 wire contract and coordinate changes with PDF upload and CustomerSupport
 consumers. See [invoice ownership comparison](../invoice-state-comparison.md).
+Which customers keep their invoices: a Settl customer has ended in Xellent when
+every metering point it has in the state was billed up to COS−1, that is, the
+latest `EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE` for the contract and
+agreement in force on COS−1 is COS−1. A point with no statement date counts as
+not ended. Invoice billing categories (Slutafregning) are not used; only the
+deprecated `generate-state` still uses them. `--skip-active` leaves out the
+invoices of customers that have not ended instead of failing; `--include-active`
+skips the test. An offline snapshot pulled before 2026-11-16 has no statement
+dates and is refused unless the test is skipped.
 The established production location is
 `C:\Services\DataMigration\OpsCli\data\migration-state.json`; confirm the target
 path before replacing a file.

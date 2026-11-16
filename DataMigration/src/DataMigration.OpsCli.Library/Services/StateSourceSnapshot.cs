@@ -12,6 +12,9 @@ internal sealed record StatePayerLookup(DateOnly Date, Guid[] MeteringPointIds,
 
 internal sealed record StateMpAccount(string MeteringPoint, string Account);
 
+/// <summary>The contract the COS-1 resolver pinned a metering point to.</summary>
+internal sealed record StateOwnerContract(string MeteringPoint, string ContractNumber, DateOnly EndDate);
+
 internal sealed record StateXellentEvidence(string MeteringPoint, string SourceAccount,
     string Representative, DateOnly Cos, string[] RepresentativeMembers);
 
@@ -54,6 +57,13 @@ internal sealed class StateSourceSnapshot
     public List<StateXellentEvidence> XellentEvidence { get; set; } = [];
     public List<Invoice> Invoices { get; set; } = [];
     public List<ExcludedCompanyInvoice> ExcludedInvoices { get; set; } = [];
+
+    /// <summary>False for a snapshot pulled before statement dates were saved: such a snapshot
+    /// cannot decide whether a customer was settled up to the change of supplier.</summary>
+    public bool HasSettlementData { get; set; }
+    public List<StateOwnerContract> OwnerContracts { get; set; } = [];
+    public List<SettlementCheck.PartRow> SettlementParts { get; set; } = [];
+    public List<SettlementCheck.StatementRow> StatementDates { get; set; } = [];
 }
 
 /// <summary>Batch-friendly JSON Lines store; a section is committed only after its file is complete.</summary>
@@ -147,6 +157,7 @@ internal sealed class StateSourceSnapshotStore(string directory, string environm
         if (!manifest.Complete)
             throw new InvalidOperationException($"Offline source data is incomplete at {directory}; run pull-state-sources again.");
         _manifest = manifest;
+        var hasSettlementData = SettlementSections.All(manifest.Sections.ContainsKey);
         return new StateSourceSnapshot
         {
             IncludesUnknownDeliveryStarts = manifest.IncludesUnknownDeliveryStarts,
@@ -159,9 +170,19 @@ internal sealed class StateSourceSnapshotStore(string directory, string environm
             MehXellentMeteringPoints = await ReadSectionAsync<string>("xellent-meh-mps", ct),
             XellentEvidence = await ReadSectionAsync<StateXellentEvidence>("xellent-representatives", ct),
             Invoices = await ReadSectionAsync<Invoice>("xellent-invoices", ct),
-            ExcludedInvoices = await ReadSectionAsync<ExcludedCompanyInvoice>("xellent-excluded-invoices", ct)
+            ExcludedInvoices = await ReadSectionAsync<ExcludedCompanyInvoice>("xellent-excluded-invoices", ct),
+            HasSettlementData = hasSettlementData,
+            OwnerContracts = hasSettlementData
+                ? await ReadSectionAsync<StateOwnerContract>("xellent-owner-contracts", ct) : [],
+            SettlementParts = hasSettlementData
+                ? await ReadSectionAsync<SettlementCheck.PartRow>("xellent-settlement-parts", ct) : [],
+            StatementDates = hasSettlementData
+                ? await ReadSectionAsync<SettlementCheck.StatementRow>("xellent-statement-dates", ct) : []
         };
     }
+
+    private static readonly string[] SettlementSections =
+        ["xellent-owner-contracts", "xellent-settlement-parts", "xellent-statement-dates"];
 
     public async Task<ContractSourceSnapshot> ReadContractSourcesAsync(CancellationToken ct)
     {

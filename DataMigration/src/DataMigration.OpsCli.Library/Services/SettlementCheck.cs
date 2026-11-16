@@ -13,6 +13,8 @@ namespace DataMigration.OpsCli.Services;
 /// the point's COS-1 contract and agreement (<c>EXU_ContractPartTable.latestStatementDate()</c>, which
 /// reads <c>EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE</c>). The customer is settled when that date is
 /// COS-1. Invoice billing categories (Slutafregning) are deliberately not used.
+/// <c>generate-state-from-settl</c> keeps a customer's invoices only when every one of its points is
+/// settled (<see cref="SettledCustomers"/>); <c>--settlement-check</c> writes the same rows.
 /// </summary>
 internal static class SettlementCheck
 {
@@ -103,25 +105,49 @@ internal static class SettlementCheck
         return new Row(subject, ids, DateOnly.FromDateTime(latest), latest == day ? Settled : NotSettled);
     }
 
+    /// <summary>Classifies every subject against rows already read for them.</summary>
+    internal static IReadOnlyList<Row> ClassifyAll(IEnumerable<Subject> subjects, XellentRows xellent)
+    {
+        var partsByMp = xellent.Parts.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
+        var statementsByMp = xellent.Statements.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
+        return [.. subjects.Select(s => Classify(s, partsByMp[s.MeteringPoint], statementsByMp[s.MeteringPoint]))];
+    }
+
+    /// <summary>
+    /// The Settl customers that Xellent settled up to the change of supplier: every metering point
+    /// the customer has in the check is <see cref="Settled"/>. One <see cref="NotSettled"/> or
+    /// <see cref="Missing"/> point keeps the customer out, and so does having no point at all.
+    /// </summary>
+    internal static HashSet<string> SettledCustomers(IEnumerable<Row> rows) =>
+        [.. rows.GroupBy(r => r.Subject.SettlCustomer, StringComparer.Ordinal)
+            .Where(g => g.All(r => r.Status == Settled))
+            .Select(g => g.Key)];
+
     private static bool IsPinned(string meteringPoint, string contractNumber, Subject subject) =>
         meteringPoint == subject.MeteringPoint
         && string.Equals(contractNumber.Trim(), subject.ContractNumber?.Trim(), StringComparison.Ordinal);
 
     /// <summary>Reads contract parts and latest statement dates for the subjects' points and pinned
     /// contracts, in chunks.</summary>
+    internal static Task<XellentRows> ReadAsync(XellentDbContext context,
+        IReadOnlyList<Subject> subjects, CancellationToken ct) =>
+        ReadAsync(context, subjects.Where(s => s.ContractNumber is not null)
+            .Select(s => (s.MeteringPoint, s.ContractNumber!)).ToList(), ct);
+
+    /// <summary>Reads contract parts and latest statement dates for metering points and the contract
+    /// the COS-1 resolver pinned each one to, in chunks.</summary>
     internal static async Task<XellentRows> ReadAsync(XellentDbContext context,
-        IReadOnlyList<Subject> subjects, CancellationToken ct)
+        IReadOnlyList<(string MeteringPoint, string ContractNumber)> pinned, CancellationToken ct)
     {
         var parts = new List<PartRow>();
         var statements = new List<StatementRow>();
-        var pinned = subjects.Where(s => s.ContractNumber is not null).ToList();
         foreach (var chunk in pinned.Select(s => s.MeteringPoint).Distinct(StringComparer.Ordinal)
                      .Chunk(MeteringPointChunkSize))
         {
             ct.ThrowIfCancellationRequested();
             var points = chunk.ToHashSet(StringComparer.Ordinal);
             var contracts = pinned.Where(s => points.Contains(s.MeteringPoint))
-                .Select(s => s.ContractNumber!).Distinct(StringComparer.Ordinal).ToArray();
+                .Select(s => s.ContractNumber).Distinct(StringComparer.Ordinal).ToArray();
             var pointList = string.Join(", ", chunk.Select((_, i) => $"@m{i}"));
             var contractList = string.Join(", ", contracts.Select((_, i) => $"@c{i}"));
             var companies = $"('{ForInvoiceScope.CompanyId}', '')";

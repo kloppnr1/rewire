@@ -305,44 +305,6 @@ public class CosStatePlannerTests
         Assert.False(CosStatePlanner.IsWithinHistory(invoice, late));
     }
 
-    // --- which accounts contribute invoices ---
-
-    private static Invoice Inv(string account, DateTime date, BillingCategory category) =>
-        new(account, account, date, date, string.Empty, string.Empty, category, PaymentMedia.None, InvoiceStatus.None, 0m, 0m);
-
-    private static readonly Invoice[] MixedInvoices =
-    [
-        Inv("100001", new DateTime(2025, 1, 1), BillingCategory.Aconto),
-        Inv("100001", new DateTime(2025, 6, 1), BillingCategory.Final),   // closed
-        Inv("100002", new DateTime(2025, 1, 1), BillingCategory.Final),
-        Inv("100002", new DateTime(2025, 6, 1), BillingCategory.Aconto),  // still active
-    ];
-
-    [Fact]
-    public void By_default_only_accounts_closed_with_a_slutafregning_contribute_invoices()
-    {
-        var result = CosStatePlanner.EligibleInvoiceAccounts(MixedInvoices, includeActive: false);
-
-        Assert.Contains("100001", result);
-        Assert.DoesNotContain("100002", result);
-    }
-
-    [Fact]
-    public void Include_active_lets_every_account_holding_an_invoice_contribute()
-    {
-        var result = CosStatePlanner.EligibleInvoiceAccounts(MixedInvoices, includeActive: true);
-
-        Assert.Contains("100001", result);
-        Assert.Contains("100002", result);
-        Assert.Equal(2, result.Count);
-    }
-
-    [Fact]
-    public void Include_active_over_an_empty_invoice_set_is_empty()
-    {
-        Assert.Empty(CosStatePlanner.EligibleInvoiceAccounts([], includeActive: true));
-    }
-
     // --- histogram ---
 
     [Fact]

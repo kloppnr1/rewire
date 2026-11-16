@@ -207,21 +207,6 @@ public static class CosStatePlanner
         invoiceDate >= HistoryCutoffFor(cos, historyYears);
 
     /// <summary>
-    /// Which source accounts contribute invoices.
-    ///
-    /// <para>Default: only accounts closed with a Slutafregning — an account whose most recent invoice
-    /// is still an Aconto or a Settlement is a live customer, and its history is not final. With
-    /// <paramref name="includeActive"/> that test is dropped entirely and every account holding an
-    /// invoice is a candidate; the only filter left is the customer's own five-year window
-    /// (<see cref="IsWithinHistory"/>). That is what a run covering the full population — including
-    /// customers still being billed — needs.</para>
-    /// </summary>
-    public static HashSet<string> EligibleInvoiceAccounts(IEnumerable<Invoice> allInvoices, bool includeActive) =>
-        includeActive
-            ? [.. allInvoices.Select(i => i.AccountNumber)]
-            : InvoiceAccountFilter.GetEligibleAccounts(allInvoices);
-
-    /// <summary>
     /// Counts per COS date, most populous first, for the "what is this run about to do" log line.
     /// </summary>
     public static IReadOnlyList<(DateOnly Cos, int Count)> Histogram(IEnumerable<DateOnly> dates) =>

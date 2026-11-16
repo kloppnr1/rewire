@@ -42,15 +42,15 @@ public class GenerateStateFromSettlRunOptions
     public DateTime? IncludeNotInDeliveryCos { get; set; }
 
     /// <summary>
-    /// Opt-in: drop the Slutafregning eligibility test, so a customer that is still being billed keeps
-    /// its invoice history instead of being zeroed out or aborting the run. Only the per-customer
-    /// configured per-customer history window filters. Ignored in <see cref="FlatReferenceDate"/> mode.
+    /// Opt-in: drop the settled-up-to-COS-1 test, so a customer that is still being billed keeps
+    /// its invoice history instead of being zeroed out or aborting the run. Only the configured
+    /// per-customer history window filters.
     /// </summary>
     public bool IncludeActive { get; set; }
 
     /// <summary>
     /// Opt-in: keep the SourceAccounts enrichment but skip the invoice history entirely — no
-    /// CUSTINVOICEJOUR query, no Slutafregning eligibility test, every entry's invoice list left
+    /// CUSTINVOICEJOUR query, no settlement test, every entry's invoice list left
     /// empty. For consumers that only need the account identity (Bifrost reads SettlAccountNumber,
     /// CustomerName, DeliveryCategories and SourceAccounts, and never touches Invoices). The file is
     /// then NOT usable for PDF upload.
@@ -83,8 +83,8 @@ public class GenerateStateFromSettlRunOptions
     public string? OfflineCacheDirectory { get; set; }
     /// <summary>
     /// Also write <c>&lt;state&gt;-settlement-check.csv</c>: per metering point in the state, whether
-    /// the latest statement date billed for its COS-1 contract and agreement is COS-1. Read-only; the state is unchanged.
-    /// Needs live Xellent, so it cannot be combined with <see cref="Offline"/>.
+    /// the latest statement date billed for its COS-1 contract and agreement is COS-1. These are the
+    /// rows the invoice step used to decide which customers have ended. Offline they come from the snapshot.
     /// </summary>
     public bool SettlementCheck { get; set; }
 }
@@ -141,6 +141,7 @@ public class GenerateStateFromSettlRunner
     private IReadOnlyDictionary<string, MeteringPointAccountResolver.OwnerContract> _ownerContractByMp =
         new Dictionary<string, MeteringPointAccountResolver.OwnerContract>();
     private IReadOnlySet<string> _settlCustomerNumbers = new HashSet<string>();
+    private IReadOnlyList<SettlementCheck.Row>? _settlementRows;
     // Bygger sit eget Xellent-lag udenom XellentDomainLoader, så listen skal med her.
     private readonly IReadOnlyList<string> _ignoredGroups;
 
@@ -268,6 +269,18 @@ public class GenerateStateFromSettlRunner
         await using var context = new XellentDbContext(dbOptions);
         var mehIds = await LoadMehMeteringPointIdsAsync(context, cosByMp.Keys, ct);
         await store.WriteAsync("xellent-meh-mps", mehIds.Order(StringComparer.Ordinal).ToArray(), ct);
+
+        // The settlement test of an offline run: the contract each point was pinned to at COS-1,
+        // and what Xellent billed for it.
+        var ownerContracts = resolution.OwnerContractByMpId
+            .Select(kv => new StateOwnerContract(kv.Key, kv.Value.ContractNumber, kv.Value.EndDate))
+            .OrderBy(o => o.MeteringPoint, StringComparer.Ordinal).ToArray();
+        var settlement = await SettlementCheck.ReadAsync(context,
+            ownerContracts.Select(o => (o.MeteringPoint, o.ContractNumber)).ToList(), ct);
+        await store.WriteAsync("xellent-owner-contracts", ownerContracts, ct);
+        await store.WriteAsync("xellent-settlement-parts", settlement.Parts, ct);
+        await store.WriteAsync("xellent-statement-dates", settlement.Statements, ct);
+        Log($"  Xellent statement dates: {settlement.Statements.Count} for {ownerContracts.Length} pinned contract(s)");
 
         // Give every Xellent candidate its own key so a point with several historical accounts
         // cannot suppress representative evidence for any of them.
@@ -635,9 +648,11 @@ public class GenerateStateFromSettlRunner
             Log("ERROR: only a confirmed first ChangeOfSupplier start can establish invoice ownership.");
             return 1;
         }
-        if (options.SettlementCheck && options.Offline)
+        var needsSettlement = options.SettlementCheck || !(options.NoInvoices || options.IncludeActive);
+        if (needsSettlement && _sourceSnapshot is { HasSettlementData: false })
         {
-            Log("ERROR: --settlement-check reads Xellent live and cannot be combined with --offline.");
+            Log("ERROR: this offline snapshot has no Xellent statement dates, so it cannot tell which " +
+                "customers are settled up to COS-1; run pull-state-sources again.");
             return 1;
         }
         // Read before the long run, so a missing or malformed list stops it straight away.
@@ -655,6 +670,7 @@ public class GenerateStateFromSettlRunner
         _excludedCompanyInvoices = null;
         _deliveryStartAudit = null;
         _ownershipEvidence = null;
+        _settlementRows = null;
         _excludedSourceAccounts = [];
         _ownerContractByMp = new Dictionary<string, MeteringPointAccountResolver.OwnerContract>();
 
@@ -819,23 +835,54 @@ public class GenerateStateFromSettlRunner
         return 0;
     }
 
-    private async Task WriteSettlementCheckAsync(MigrationStateDocument state,
-        GenerateStateFromSettlRunOptions options, CancellationToken ct)
+    /// <summary>
+    /// The settlement test per metering point in the state, computed once: the invoice step uses it
+    /// to decide which customers have ended, and <c>--settlement-check</c> writes the same rows.
+    /// Reads the saved snapshot offline, else Xellent through <paramref name="context"/> (or a new
+    /// connection). Without either — the legacy captured-inputs replay — there are no statement
+    /// dates and every point is Missing.
+    /// </summary>
+    private async Task<IReadOnlyList<SettlementCheck.Row>> SettlementRowsAsync(MigrationStateDocument state,
+        GenerateStateFromSettlRunOptions options, XellentDbContext? context, CancellationToken ct)
     {
+        if (_settlementRows is { } computed) return computed;
         var subjects = SettlementCheck.Subjects(state, _ownershipEvidence ?? [],
             _ownerContractByMp.ToDictionary(kv => kv.Key, kv => kv.Value.ContractNumber, StringComparer.Ordinal),
             (_ownershipIssues ?? []).Select(i => i.MeteringPoint));
-        Log($"  Settlement check: reading latest statement dates for {subjects.Count} metering point(s) " +
-            $"in chunks of {SettlementCheck.MeteringPointChunkSize}...");
-        var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
-            .UseXellent(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
-            .Options;
-        await using var context = new XellentDbContext(dbOptions);
-        var xellent = await SettlementCheck.ReadAsync(context, subjects, ct);
-        var partsByMp = xellent.Parts.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
-        var statementsByMp = xellent.Statements.ToLookup(p => p.MeteringPoint, StringComparer.Ordinal);
-        var rows = subjects.Select(s => SettlementCheck.Classify(s, partsByMp[s.MeteringPoint],
-            statementsByMp[s.MeteringPoint])).ToList();
+        SettlementCheck.XellentRows xellent;
+        if (_sourceSnapshot is { } snapshot)
+        {
+            Log($"  Settlement check: saved statement dates for {subjects.Count} metering point(s)");
+            xellent = new(snapshot.SettlementParts, snapshot.StatementDates);
+        }
+        else if (context is not null || !string.IsNullOrEmpty(options.ConnectionString))
+        {
+            Log($"  Settlement check: reading latest statement dates for {subjects.Count} metering point(s) " +
+                $"in chunks of {SettlementCheck.MeteringPointChunkSize}...");
+            XellentDbContext? owned = null;
+            if (context is null)
+            {
+                var dbOptions = new DbContextOptionsBuilder<XellentDbContext>()
+                    .UseXellent(options.ConnectionString, o => { o.UseCompatibilityLevel(110); o.CommandTimeout(300); })
+                    .Options;
+                context = owned = new XellentDbContext(dbOptions);
+            }
+            await using var lease = owned;
+            xellent = await SettlementCheck.ReadAsync(context, subjects, ct);
+        }
+        else
+        {
+            Log("  WARNING: no Xellent source for statement dates; no customer counts as settled up to COS-1");
+            xellent = new([], []);
+        }
+        _settlementRows = SettlementCheck.ClassifyAll(subjects, xellent);
+        return _settlementRows;
+    }
+
+    private async Task WriteSettlementCheckAsync(MigrationStateDocument state,
+        GenerateStateFromSettlRunOptions options, CancellationToken ct)
+    {
+        var rows = await SettlementRowsAsync(state, options, null, ct);
         var reportPath = SettlementCheck.ReportPath(options.OutputPath);
         await File.WriteAllTextAsync(reportPath, SettlementCheck.BuildCsv(rows),
             new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
@@ -936,7 +983,9 @@ public class GenerateStateFromSettlRunner
                 savedSources.XellentMpAccounts.Select(p => (p.MeteringPoint, p.Account)).ToArray(),
                 savedSources.ForXellentMeteringPoints.ToHashSet(StringComparer.Ordinal),
                 new Dictionary<string, string>(), new Dictionary<string, string>(),
-                new HashSet<string>(), new Dictionary<string, MeteringPointAccountResolver.OwnerContract>())
+                new HashSet<string>(), savedSources.OwnerContracts.ToDictionary(o => o.MeteringPoint,
+                    o => new MeteringPointAccountResolver.OwnerContract(o.ContractNumber, o.EndDate),
+                    StringComparer.Ordinal))
             : await MeteringPointAccountResolver.ResolveAsync(
                 options.ConnectionString!, allCosByMp, MigrationConstants.DataAreaId,
                 ct: ct, companyId: InvoiceCompanyId, includeBlankCompany: true);
@@ -1772,8 +1821,8 @@ public class GenerateStateFromSettlRunner
     }
 
     /// <summary>
-    /// Queries CUSTINVOICEJOUR only for approved source accounts, applies the Slutafregning
-    /// eligibility test, and hands each customer invoices inside its own configured window.
+    /// Queries CUSTINVOICEJOUR only for approved source accounts, keeps the invoices of customers
+    /// settled up to COS-1, and hands each customer invoices inside its own configured window.
     /// </summary>
     private async Task<int> AssignInvoicesAsync(
         XellentDbContext? context,
@@ -1817,30 +1866,35 @@ public class GenerateStateFromSettlRunner
         Log($"  FOR invoice scope: {allInvoices.Count} kept, {_excludedCompanyInvoices.Count} " +
             "non-FOR or unlinked invoice row(s) omitted (see excluded-invoices CSV)");
 
-        // Eligibility is date-agnostic — the most recent invoice either is a Slutafregning or is not.
-        var eligibleAccounts = CosStatePlanner.EligibleInvoiceAccounts(allInvoices, options.IncludeActive);
+        // A customer has ended in Xellent when every one of its metering points was billed up to
+        // COS-1: the latest statement date of the contract and agreement in force on COS-1 is COS-1
+        // (SettlementCheck). Invoice billing categories (Slutafregning) are not used.
+        HashSet<string> eligibleAccounts;
         if (options.IncludeActive)
         {
-            // Named, not silent: these are the accounts (and the customers behind them) that the
-            // default run would have handed zero invoices, or aborted on.
-            var strictlyEligible = InvoiceAccountFilter.GetEligibleAccounts(allInvoices);
-            var activeAccounts = eligibleAccounts.Where(a => !strictlyEligible.Contains(a))
-                .ToHashSet(StringComparer.Ordinal);
-            var activeCustomers = state.Accounts.Count(a => a.SourceAccounts.Any(activeAccounts.Contains));
-            Console.WriteLine($"Invoice accounts: {eligibleAccounts.Count} (--include-active) — " +
-                $"{strictlyEligible.Count} closed with a Slutafregning, {activeAccounts.Count} still active");
-            Console.WriteLine($"  {activeCustomers} customer(s) keep invoices that the default run would have excluded as active");
+            eligibleAccounts = [.. allInvoices.Select(i => i.AccountNumber)];
+            Console.WriteLine($"Invoice accounts: {eligibleAccounts.Count} (--include-active: settlement test skipped)");
         }
         else
         {
-            var excludedCount = allSourceAccounts.Count(a => !eligibleAccounts.Contains(a));
-            Console.WriteLine($"Eligible (Slutafregning): {eligibleAccounts.Count}, excluded (active): {excludedCount}");
+            var rows = await SettlementRowsAsync(state, options, context, ct);
+            var settled = SettlementCheck.SettledCustomers(rows);
+            eligibleAccounts = [.. state.Accounts.Where(a => settled.Contains(a.SettlAccountNumber))
+                .SelectMany(a => a.SourceAccounts)];
+            var notSettled = state.Accounts.Where(a => !settled.Contains(a.SettlAccountNumber)).ToList();
+            var withRows = rows.Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
+            var missing = rows.Where(r => r.Status == SettlementCheck.Missing)
+                .Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
+            Console.WriteLine($"Settled up to COS-1: {settled.Count} customer(s); not settled: {notSettled.Count} " +
+                $"({notSettled.Count(a => !withRows.Contains(a.SettlAccountNumber))} without a checked metering point, " +
+                $"{notSettled.Count(a => missing.Contains(a.SettlAccountNumber))} with a point that has no statement date)");
 
-            if (excludedCount > 0 && !options.SkipActive)
+            if (notSettled.Count > 0 && !options.SkipActive)
             {
                 Console.WriteLine();
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"ERROR: {excludedCount} accounts are still active. Use --skip-active to exclude them.");
+                Console.WriteLine($"ERROR: {notSettled.Count} customer(s) are not settled up to COS-1. " +
+                    "Use --skip-active to exclude their invoices.");
                 Console.ResetColor();
                 return 1;
             }
