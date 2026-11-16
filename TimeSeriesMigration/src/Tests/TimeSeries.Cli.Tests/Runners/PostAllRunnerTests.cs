@@ -567,8 +567,8 @@ public class PostAllRunnerTests : IDisposable
 
         Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false, offline: true));
         Assert.Equal(mp2Guid, Assert.Single(_mp.AddEipCalls).MpGuid);
-        Assert.Contains("Payer 6#####: 1 metering point(s) left out (skip-payer-6-series.csv)", logs);
-        Assert.Contains("payer 612345", File.ReadAllText(Path.Combine(OutputDir, "skip-payer-6-series.csv")));
+        Assert.Contains("Payer 6#####: 1 metering point(s) have a 6##### payer today; the payer at the delivery start decides (left out: skip-payer-6-series.csv)", logs);
+        Assert.Contains("payer 612345, at delivery start 2023-06-15 612345", File.ReadAllText(Path.Combine(OutputDir, "skip-payer-6-series.csv")));
         Assert.Equal(payerCalls, _payers.FindPayersForMeteringPointsCalls); // payers came from the snapshot
         Assert.Contains(logs, l => l.StartsWith("Migration: 0 of 1 metering points done (0%)", StringComparison.Ordinal));
 
@@ -576,6 +576,50 @@ public class PostAllRunnerTests : IDisposable
         logs.Clear();
         Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: true, continueOnError: false, offline: true));
         Assert.Contains(logs, l => l.StartsWith("Migration: 1 of 1 metering points done (100%)", StringComparison.Ordinal));
+    }
+
+    // Production 2026-11-16: a 6##### payer took over after the delivery start. The window ends at the delivery start,
+    // so it belongs to the migrated payer then, and is posted.
+    [Fact]
+    public async Task Payer6SeriesToday_ButMigratedPayerAtDeliveryStart_IsPosted()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        var mpGuid = Guid.NewGuid();
+        InSettl((MpId1, mpGuid));
+        _payers.PayerOf[mpGuid] = "612345";
+        _payers.PayerOn[(mpGuid, new DateOnly(2023, 6, 15))] = "509682";
+        var logs = new List<string>();
+
+        Assert.Equal(0, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: false));
+
+        Assert.Equal(mpGuid, Assert.Single(_mp.AddEipCalls).MpGuid);
+        Assert.Contains($"PAYER MP {MpId1}: 612345 today (6#####), 509682 at delivery start 2023-06-15 — migrated", logs);
+        // Today's payers in one call without a date, then this metering point's on its delivery start.
+        Assert.Equal([null, new DateTime(2023, 6, 15)], _payers.SearchDates);
+        Assert.False(File.Exists(Path.Combine(OutputDir, "skip-payer-6-series.csv")));
+    }
+
+    [Fact]
+    public async Task Payer6SeriesToday_ThePayerAtDeliveryStartFailing_FailsTheMeteringPoint()
+    {
+        var supplyStart = new DateTime(2023, 6, 15);
+        InDeliveryFrom(supplyStart);
+        _xellent.SeedHourlyTimeSeries(MpId1, supplyStart.AddYears(-1), hours: 24);
+        _xellent.SeedContract(Account, MpId1, migratedOn: supplyStart);
+        var mpGuid = Guid.NewGuid();
+        InSettl((MpId1, mpGuid));
+        _payers.PayerOf[mpGuid] = "612345";
+        _payers.DatedError = "503";
+        var logs = new List<string>();
+
+        Assert.Equal(1, await BuildRunner(log: logs.Add).RunPostAllAsync("test", dryRun: false, continueOnError: true));
+
+        Assert.Empty(_mp.AddEipCalls);
+        Assert.Empty(_ts.PostCalls);
+        Assert.Contains(logs, l => l.Contains($"Payer at delivery start 2023-06-15 failed for MP {MpId1}") && l.Contains("503"));
     }
 
     // The known-issue meter from above: hourly values throughout, Xellent says 15-minute from 2023-04-26.

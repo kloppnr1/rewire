@@ -183,16 +183,27 @@ public sealed class RecordingMeteringPointClient : ISettlTimeSeriesMeteringPoint
 public sealed class RecordingPayerClient : ISettlPayerClient
 {
     /// <summary>Current payer identification per metering point GUID; metering points not listed have no payer.</summary>
+    /// <summary>The payer today, and on any date <see cref="PayerOn"/> does not name.</summary>
     public Dictionary<Guid, string> PayerOf { get; } = new();
+    /// <summary>The payer on one date (a SearchDate).</summary>
+    public Dictionary<(Guid Id, DateOnly Date), string> PayerOn { get; } = new();
     public int FindPayersForMeteringPointsCalls { get; private set; }
+    public List<DateTime?> SearchDates { get; } = [];
+    public string? DatedError { get; set; }
 
     public Task<(List<PayerForMeteringPointsDto>? Items, string? Error)> FindPayersForMeteringPointsAsync(
         IReadOnlyList<Guid> meteringPointIds, DateTime? searchDate = null, CancellationToken cancellationToken = default)
     {
         FindPayersForMeteringPointsCalls++;
+        SearchDates.Add(searchDate);
+        if (searchDate != null && DatedError != null)
+            return Task.FromResult(((List<PayerForMeteringPointsDto>?)null, (string?)DatedError));
+        string? PayerFor(Guid id) =>
+            searchDate is { } d && PayerOn.TryGetValue((id, DateOnly.FromDateTime(d)), out var dated) ? dated
+            : PayerOf.TryGetValue(id, out var today) ? today : null;
         var items = meteringPointIds
-            .Where(PayerOf.ContainsKey)
-            .GroupBy(id => PayerOf[id])
+            .Where(id => PayerFor(id) != null)
+            .GroupBy(id => PayerFor(id)!)
             .Select(g => new PayerForMeteringPointsDto
             {
                 Payer = new PayerResponse { PayerInformation = new PayerInformationDto { PayerIdentifier = g.Key } },
