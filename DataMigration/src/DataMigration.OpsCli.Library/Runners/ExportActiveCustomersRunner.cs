@@ -509,6 +509,14 @@ public class ExportActiveCustomersRunner
             _log($"WARNING: customer segment names not read, customerSegment is left empty: {e3}");
             segments = null;
         }
+        // The customer's settlement schedule (billing frequency) is named from this list. Like the
+        // segment list it may be missing on a gateway; then the run goes on without schedules.
+        var (schedules, e7) = await _reader.GetAsync($"{billing}/api/v1/settlementSchedules", ct);
+        if (e7 != null)
+        {
+            _log($"WARNING: settlement schedules not read, electricitySettlementSchedule is left empty: {e7}");
+            schedules = null;
+        }
         var (areas, e4) = await _reader.GetAllItemsAsync($"{tenant}/v1/market-balance-areas", 100, ct);
         if (e4 != null) return (null, $"price areas: {e4}");
         var (gridList, e5) = await _reader.GetAllItemsAsync($"{tenant}/v1/metering-grid-areas", 100, ct);
@@ -529,7 +537,8 @@ public class ExportActiveCustomersRunner
             GridAreas: grid,
             CustomerSegments: ByIdOf(segments as JsonArray ?? [], "Name"),
             PriceLists: ByIdOf(priceLists, "PriceListIdentifier"),
-            ProductElements: ByIdOf(elements, "ProductElementCode")), null);
+            ProductElements: ByIdOf(elements, "ProductElementCode"),
+            SettlementSchedules: schedules is JsonArray scheduleList ? ByIdOf(scheduleList, "Name") : null), null);
     }
 
     private static Dictionary<Guid, string> ByIdOf(JsonArray items, string field)
@@ -547,9 +556,10 @@ public class ExportActiveCustomersRunner
         Dictionary<Guid, string> GridAreas,
         Dictionary<Guid, string> CustomerSegments,
         Dictionary<Guid, string> PriceLists,
-        Dictionary<Guid, string> ProductElements)
+        Dictionary<Guid, string> ProductElements,
+        Dictionary<Guid, string>? SettlementSchedules)
     {
-        public static readonly ReferenceNames Empty = new([], [], [], [], []);
+        public static readonly ReferenceNames Empty = new([], [], [], [], [], null);
 
         /// <summary>The name for a Settl id, or null when the id is absent or unknown.</summary>
         public string? Name(Dictionary<Guid, string> names, JsonNode? id) =>
@@ -674,6 +684,16 @@ public class ExportActiveCustomersRunner
                 ["priceArea"] = _names.Name(_names.PriceAreas, a["MarketBalanceAreaId"]),
             };
         }
+        // The customer's settlement schedule per commodity. 404 means the customer has none.
+        JsonNode? scheduleAssociations = null;
+        if (_names.SettlementSchedules != null)
+        {
+            var (node, error) = await _reader.GetAsync($"{billing}/api/v1/settlementScheduleAssociations/{customerId}", ct);
+            if (error != null && !error.StartsWith("HTTP 404", StringComparison.Ordinal))
+                errors.Add(new JsonObject { ["section"] = "settlementScheduleAssociations", ["error"] = error });
+            scheduleAssociations = node;
+        }
+
         var extraInvoiceLines = await GetAll("extraInvoiceLines",
             $"{billing}/api/v2/customers/{customerId}/extraInvoiceLines?countryCode=DK");
 
@@ -684,9 +704,12 @@ public class ExportActiveCustomersRunner
             ["names"] = new JsonObject
             {
                 ["customerSegment"] = _names.Name(_names.CustomerSegments, customerV3?["CustomerSegmentId"]),
+                ["electricitySettlementSchedule"] = _names.SettlementSchedules == null ? null
+                    : _names.Name(_names.SettlementSchedules, scheduleAssociations?["ElectricitySettlementScheduleId"]),
             },
             ["customer"] = customerV3,
             ["customerV2"] = customerV2,
+            ["settlementScheduleAssociations"] = scheduleAssociations,
             ["meteringPointLinks"] = mpLinks,
             ["payers"] = payers,
             ["meteringPoints"] = meteringPoints,

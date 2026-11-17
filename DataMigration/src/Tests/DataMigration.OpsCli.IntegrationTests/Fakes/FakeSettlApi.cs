@@ -35,6 +35,9 @@ public sealed class FakeSettlApi : HttpMessageHandler
     public List<JsonObject> CustomerSegments { get; } = [];
     /// <summary>Answer 404 on the segment list, as the production gateway does (2026-11-17).</summary>
     public bool CustomerSegmentsNotFound { get; set; }
+    public List<JsonObject> SettlementSchedules { get; } = [];
+    /// <summary>Electricity settlement schedule per customer; a customer without one answers 404.</summary>
+    public Dictionary<Guid, Guid> ElectricitySettlementScheduleByCustomer { get; } = [];
     public List<JsonObject> PriceLists { get; } = [];
     public Dictionary<Guid, JsonObject> MarketPriceLists { get; } = [];
     public List<JsonObject> ProductElements { get; } = [];
@@ -79,6 +82,12 @@ public sealed class FakeSettlApi : HttpMessageHandler
                 "api/v3" when rest.Length > 0 && rest[0] == "customers" => CustomerV3(method, rest[1..], body),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("customerSegments", StringComparison.OrdinalIgnoreCase)
                     => CustomerSegmentsNotFound ? (HttpStatusCode.NotFound, null) : Ok(new JsonArray([.. CustomerSegments.Select(c => c.DeepClone())])),
+                "api/v1" when rest.Length == 1 && rest[0] == "settlementSchedules" && method == HttpMethod.Get
+                    => Ok(new JsonArray([.. SettlementSchedules.Select(x => x.DeepClone())])),
+                "api/v1" when rest.Length == 2 && rest[0] == "settlementScheduleAssociations" && method == HttpMethod.Get
+                    => Guid.TryParse(rest[1], out var scheduleCustomer) && ElectricitySettlementScheduleByCustomer.TryGetValue(scheduleCustomer, out var schedule)
+                        ? Ok(new JsonObject { ["ElectricitySettlementScheduleId"] = schedule.ToString(), ["HeatingSettlementScheduleId"] = null, ["WaterSettlementScheduleId"] = null })
+                        : NotFound(),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("Payers", StringComparison.OrdinalIgnoreCase) => Payer(method, rest[1..], q, body),
                 "api/v1" when rest.Length == 1 && rest[0] == "priceLists" && method == HttpMethod.Get
                     => Ok(Page(PriceLists.Select(x => (JsonObject)x.DeepClone()), q)),

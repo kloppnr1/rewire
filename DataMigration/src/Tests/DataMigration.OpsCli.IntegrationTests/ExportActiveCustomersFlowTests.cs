@@ -270,6 +270,11 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             mp.MarketPriceLists.Add(MarketPriceListOn(ended, "41000", "Tariff", "5790000432752",
                 "2020-12-31T23:00:00Z", "2022-12-31T23:00:00Z"));
 
+            // The customer's electricity settlement schedule, named from the schedule list.
+            var schedule = Guid.NewGuid();
+            api.SettlementSchedules.Add(new JsonObject { ["Id"] = schedule.ToString(), ["Name"] = "KvartalAC" });
+            api.ElectricitySettlementScheduleByCustomer[customerId] = schedule;
+
             var (exitCode, document) = await ExportAsync(tenant, raw: false);
 
             Assert.Equal(0, exitCode);
@@ -277,6 +282,7 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
             Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
+            Assert.Equal("KvartalAC", (string?)customer["settlementSchedule"]);
 
             var exported = Assert.Single(customer["meteringPoints"]!.AsArray(), m => (string?)m!["meteringPointId"] == mp.Identification)!;
             Assert.Equal(area.Name, (string?)exported["priceArea"]);
@@ -340,6 +346,7 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             Assert.Equal(0, exitCode);
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Null(customer["customerSegment"]);
+            Assert.Null(customer["settlementSchedule"]);
             Assert.Equal(0, (int?)document["customersWithReadErrors"]);
         }
         finally
