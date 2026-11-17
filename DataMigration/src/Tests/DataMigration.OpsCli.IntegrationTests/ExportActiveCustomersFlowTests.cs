@@ -272,7 +272,11 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
 
             // The customer's electricity settlement schedule, named from the schedule list.
             var schedule = Guid.NewGuid();
-            api.SettlementSchedules.Add(new JsonObject { ["Id"] = schedule.ToString(), ["Name"] = "KvartalAC" });
+            api.SettlementSchedules.Add(new JsonObject
+            {
+                ["Id"] = schedule.ToString(), ["Name"] = "KvartalAC", ["ExternalName"] = "Kvartalsvis aconto",
+                ["FinalSettlementPeriodType"] = "Quarterly", ["OnAccountPeriodType"] = "Quarterly",
+            });
             api.ElectricitySettlementScheduleByCustomer[customerId] = schedule;
 
             var (exitCode, document) = await ExportAsync(tenant, raw: false);
@@ -282,7 +286,9 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
             Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
-            Assert.Equal("KvartalAC", (string?)customer["settlementSchedule"]);
+            Assert.Equal("KvartalAC", (string?)customer["settlementSchedule"]?["name"]);
+            Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["finalSettlementPeriodType"]);
+            Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["onAccountPeriodType"]);
 
             var exported = Assert.Single(customer["meteringPoints"]!.AsArray(), m => (string?)m!["meteringPointId"] == mp.Identification)!;
             Assert.Equal(area.Name, (string?)exported["priceArea"]);

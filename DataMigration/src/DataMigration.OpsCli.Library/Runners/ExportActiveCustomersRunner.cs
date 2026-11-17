@@ -538,7 +538,16 @@ public class ExportActiveCustomersRunner
             CustomerSegments: ByIdOf(segments as JsonArray ?? [], "Name"),
             PriceLists: ByIdOf(priceLists, "PriceListIdentifier"),
             ProductElements: ByIdOf(elements, "ProductElementCode"),
-            SettlementSchedules: schedules is JsonArray scheduleList ? ByIdOf(scheduleList, "Name") : null), null);
+            SettlementSchedules: schedules is JsonArray scheduleList ? ByIdObjects(scheduleList) : null), null);
+    }
+
+    private static Dictionary<Guid, JsonObject> ByIdObjects(JsonArray items)
+    {
+        var result = new Dictionary<Guid, JsonObject>();
+        foreach (var item in items)
+            if (item is JsonObject o && Guid.TryParse((string?)o["Id"], out var id))
+                result[id] = o;
+        return result;
     }
 
     private static Dictionary<Guid, string> ByIdOf(JsonArray items, string field)
@@ -557,7 +566,7 @@ public class ExportActiveCustomersRunner
         Dictionary<Guid, string> CustomerSegments,
         Dictionary<Guid, string> PriceLists,
         Dictionary<Guid, string> ProductElements,
-        Dictionary<Guid, string>? SettlementSchedules)
+        Dictionary<Guid, JsonObject>? SettlementSchedules)
     {
         public static readonly ReferenceNames Empty = new([], [], [], [], [], null);
 
@@ -694,6 +703,11 @@ public class ExportActiveCustomersRunner
             scheduleAssociations = node;
         }
 
+        JsonObject? electricitySchedule = null;
+        if (_names.SettlementSchedules != null
+            && Guid.TryParse((string?)scheduleAssociations?["ElectricitySettlementScheduleId"], out var scheduleId))
+            _names.SettlementSchedules.TryGetValue(scheduleId, out electricitySchedule);
+
         var extraInvoiceLines = await GetAll("extraInvoiceLines",
             $"{billing}/api/v2/customers/{customerId}/extraInvoiceLines?countryCode=DK");
 
@@ -704,9 +718,10 @@ public class ExportActiveCustomersRunner
             ["names"] = new JsonObject
             {
                 ["customerSegment"] = _names.Name(_names.CustomerSegments, customerV3?["CustomerSegmentId"]),
-                ["electricitySettlementSchedule"] = _names.SettlementSchedules == null ? null
-                    : _names.Name(_names.SettlementSchedules, scheduleAssociations?["ElectricitySettlementScheduleId"]),
+                ["electricitySettlementSchedule"] = (string?)electricitySchedule?["Name"],
             },
+            // The whole schedule record: name, final settlement and on-account period types.
+            ["electricitySettlementSchedule"] = electricitySchedule?.DeepClone(),
             ["customer"] = customerV3,
             ["customerV2"] = customerV2,
             ["settlementScheduleAssociations"] = scheduleAssociations,
