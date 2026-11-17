@@ -86,3 +86,13 @@ Vi er i gang med at migrere fra Xellent til Settl. Dette dokument viser de Settl
 | `POST /api/v1/businessProcesses/MoveInSecondary/...` | Tilflytning sekundær |
 | `POST /api/v1/businessProcesses/MoveOut/...` | Fraflytning |
 
+
+---
+
+### Kundesegmenter og afregningsplaner (mangler på produktions-gateway)
+
+Bruges af den natlige eksport til SonWin (`export-active-customers`). Begge lister svarer 404 "Resource not found" på `apim-settl-verdoproduction-westeu.azure-api.net/internal-billing` (konstateret 17.11.2026). Kun læsning.
+
+| `GET /api/v1/customerSegments` | Hent kundesegmenter (navn til kundens segment) |
+| `GET /api/v1/settlementSchedules` | Hent afregningsplaner (navn og periodetyper) |
+| `GET /api/v1/settlementScheduleAssociations/{customerId}` | Hent kundens afregningsplan pr. forsyningsart |
