@@ -33,6 +33,8 @@ public sealed class FakeSettlApi : HttpMessageHandler
     public List<FakeContract> Contracts { get; } = [];
     public List<FakeSettlementGroup> SettlementGroups { get; } = [];
     public List<JsonObject> CustomerSegments { get; } = [];
+    /// <summary>Answer 404 on the segment list, as the production gateway does (2026-11-17).</summary>
+    public bool CustomerSegmentsNotFound { get; set; }
     public List<JsonObject> PriceLists { get; } = [];
     public Dictionary<Guid, JsonObject> MarketPriceLists { get; } = [];
     public List<JsonObject> ProductElements { get; } = [];
@@ -76,7 +78,7 @@ public sealed class FakeSettlApi : HttpMessageHandler
                 "api/v2" when rest.Length > 0 && rest[0] == "customers" => Customer(method, rest[1..], q, body),
                 "api/v3" when rest.Length > 0 && rest[0] == "customers" => CustomerV3(method, rest[1..], body),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("customerSegments", StringComparison.OrdinalIgnoreCase)
-                    => Ok(new JsonArray([.. CustomerSegments.Select(c => c.DeepClone())])),
+                    => CustomerSegmentsNotFound ? (HttpStatusCode.NotFound, null) : Ok(new JsonArray([.. CustomerSegments.Select(c => c.DeepClone())])),
                 "api/v1" when rest.Length > 0 && rest[0].Equals("Payers", StringComparison.OrdinalIgnoreCase) => Payer(method, rest[1..], q, body),
                 "api/v1" when rest.Length == 1 && rest[0] == "priceLists" && method == HttpMethod.Get
                     => Ok(Page(PriceLists.Select(x => (JsonObject)x.DeepClone()), q)),

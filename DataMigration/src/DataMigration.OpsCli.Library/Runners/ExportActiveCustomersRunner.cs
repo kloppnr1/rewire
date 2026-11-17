@@ -501,8 +501,14 @@ public class ExportActiveCustomersRunner
         if (e1 != null) return (null, $"price lists: {e1}");
         var (elements, e2) = await _reader.GetAllItemsAsync($"{billing}/api/v1/productElements?CountryCode=DK", PageSize, ct);
         if (e2 != null) return (null, $"product elements: {e2}");
+        // The segment list is on Settl's internal API only: the production gateway answers 404
+        // (2026-11-17). Without it the run goes on and every customerSegment is null.
         var (segments, e3) = await _reader.GetAsync($"{billing}/api/v1/customerSegments", ct);
-        if (e3 != null) return (null, $"customer segments: {e3}");
+        if (e3 != null)
+        {
+            _log($"WARNING: customer segment names not read, customerSegment is left empty: {e3}");
+            segments = null;
+        }
         var (areas, e4) = await _reader.GetAllItemsAsync($"{tenant}/v1/market-balance-areas", 100, ct);
         if (e4 != null) return (null, $"price areas: {e4}");
         var (gridList, e5) = await _reader.GetAllItemsAsync($"{tenant}/v1/metering-grid-areas", 100, ct);

@@ -321,6 +321,34 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
     }
 
     [Fact]
+    public async Task Missing_customer_segment_list_leaves_the_segment_empty_and_the_run_goes_on()
+    {
+        var tenant = new ProvisioningFixture();
+        await tenant.InitializeAsync();
+        StartDelivery(tenant);
+        try
+        {
+            var api = tenant.Settl.Api;
+            var customerId = api.Customers.Keys.Single();
+            var segment = Guid.NewGuid();
+            api.CustomerSegments.Add(new JsonObject { ["Id"] = segment.ToString(), ["Name"] = "Erhverv" });
+            api.Customers[customerId]["CustomerSegmentId"] = segment.ToString();
+            api.CustomerSegmentsNotFound = true;
+
+            var (exitCode, document) = await ExportAsync(tenant, raw: false);
+
+            Assert.Equal(0, exitCode);
+            var customer = Assert.Single(document["customers"]!.AsArray())!;
+            Assert.Null(customer["customerSegment"]);
+            Assert.Equal(0, (int?)document["customersWithReadErrors"]);
+        }
+        finally
+        {
+            await tenant.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task Payment_agreements_from_the_settl_csv_follow_the_metering_point_or_joint_invoice()
     {
         var tenant = new ProvisioningFixture();
