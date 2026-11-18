@@ -64,7 +64,8 @@
 - Timestamps UTC, as stored and sent; never converted to CET/CEST. Period bounds are Danish calendar dates
 - `Forbrug_Historisk` = sum of the points in the period, kWh
 - Open: which period (calendar year, last 12 months, or supply start to run date)
-- Open: which series (consumption only, or also production for E18), and resolution (as stored, or hourly)
+- Series: consumption only (18.11.2026); production (E18) is left out
+- Open: resolution (as stored, or hourly)
 - Open: file columns (UTC timestamp, kWh, quality) and whether missing points are written
 - Open: run time and size: one points read per metering point, about 59,000 in production; nightly full read or only in the first delivery
 - Open: does the production gateway serve both time series routes; check with one `--customer` run before building on it
