@@ -24,7 +24,7 @@ Unit tests ligger i `src/Tests/`. Den levende Xellent-regressionssuite bor i `Da
 
 ## Dokumentation — læs før du skriver en forespørgsel
 
-- `docs/xellent-datamodel.md` — hvordan Xellent selv hænger sammen: kæden fra kontrakt til målepunkt, hoved- og underkontrakter, paraply-kontrakter uden leveringskategori, betalingsaftalernes felter, dato-sentinels, og hvem der ejer et målepunkt. Den findes fordi netop de forhold er blevet gættet forkert gentagne gange. Hver påstand er enten målt med dato eller markeret som udledt.
+- `docs/xellent-datamodel.md` — hvordan Xellent selv hænger sammen: kæden fra kontrakt til målepunkt, hoved- og underkontrakter, paraply-kontrakter uden leveringskategori, betalingsaftalernes felter, dato-sentinels, hvem der ejer et målepunkt, og hvordan DataHub-beskeder gemmes (bundles deles op pr. målepunkt ved modtagelsen). Den findes fordi netop de forhold er blevet gættet forkert gentagne gange. Hver påstand er enten målt med dato eller markeret som udledt.
 - `docs/domain-model.md` — domænetyperne og loader-kontrakten.
 
 ## Versionering

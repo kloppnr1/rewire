@@ -241,6 +241,124 @@ det er korrekt migrering, ikke drift.
 
 ---
 
+## 7. DataHub-beskeder og bundling
+
+DataHub sender beskeder for mange målepunkter samlet i én besked (en bundle).
+Xellent gemmer dem **ikke** samlet: hver bundle deles ved modtagelsen op i én
+hændelse pr. målepunkt. Den rå bundle findes ikke i databasen.
+
+Målt i Xellent 2026-11-18 (produktion), læst af brugeren, kun id'er og antal.
+
+### Tabellerne
+
+| Tabel | Hvad den holder | Nøgle |
+|---|---|---|
+| `EMS_ZDATAHUBLOG` | Én logrække pr. målepunkt pr. besked (`METERINGPOINT`, `MESSAGEDIRECTION` 1 = ind, 2 = ud, `MESSAGEINTYPE`, `CREATEDDATETIME`) | `ID` |
+| `EMS_ZDATAHUBLOGMESSAGES` | Kobler logrække og hændelse; `DCMESSAGEID` er fælles for alle dele af én DataHub-besked | `DATAHUBLOGID` = log `ID`, `ZEVENTQUEUEREFRECID` |
+| `EXU_ZEVENTQUEUEDATATABLE` | Hændelsens XML i `XMLDATA` (ntext) — kun det ene målepunkts del | `ZEVENTQUEUEREFRECID` |
+| `EXU_ZEVENTQUEUETABLE` | Hændelseskøens hoved, som `ZEVENTQUEUEREFRECID` peger på. Ikke mappet i `XellentData` | — |
+
+Alle joins går også på `DATAAREAID`.
+
+### Sådan deles en bundle
+
+- **Op til 100 målepunkter pr. DataHub-besked.** 2026-08-31 (cutover, 52.651
+  indgående, næsten alle `MESSAGEINTYPE` 100 = `DK_NotifyChangeOfSupplier`):
+  510 `DCMESSAGEID` med præcis 100 målepunkter og 100 hændelser, resten 1–96.
+- **Én hændelse og én logrække pr. målepunkt.** Alle 52.651 hændelser den dag
+  hører til præcis ét målepunkt.
+- **XML'en er kun målepunktets egen del.** I en bundle på 100: 100 hændelser,
+  100 forskellige målepunkter i XML'en, og alle 100 svarer til logrækkens
+  `METERINGPOINT`. Hver XML er 1.331 tegn med ét `MeteringPointDomainLocation`.
+- **Opdelingen sker ved modtagelsen.** Hændelserne har fortløbende id'er
+  (5713740040, …041, …) og logrækkerne oprettes 3–5 i sekundet, så en bundle på
+  100 tager omkring 25 sekunder.
+- **Står samme målepunkt to gange i en bundle, får det to hændelser.** 2026-08-31:
+  tre beskeder med 2 hændelser for 1 målepunkt, én med 10 for 8.
+- **`DCMESSAGEID` er det eneste der binder delene sammen igen.**
+
+Det gælder alle indgående beskedtyper i loggen. Juni 2026: ingen hændelse nævner
+mere end ét målepunkt (`DK_NotifyMasterDataMeteringPoint`, `…Charge`,
+`…Consumer`, `DK_NotifyChangeOfSupplier`, `DK_ConfirmUpdateMasterDataConsumer`,
+`DK_NotifyVolumes`, `DK_RequestReallocateChangeOfSupplier`).
+`DK_NotifyChargeInformation` (priser) og `DK_Acknowledgement` er ikke bundet til
+et målepunkt og nævner ingen.
+
+### Den rå bundle findes ikke
+
+Hver kolonne i en DataHub-, event-queue- eller ebIX-tabel der kan holde en stor
+tekst eller binær værdi blev størrelsesmålt. En bundle på 100 er omkring
+266.000 bytes i `ntext`.
+
+| Kolonne | Største værdi (bytes) | Over 100.000 |
+|---|---|---|
+| `EXU_ZEVENTQUEUEDATATABLE.XMLDATA` | 141.906 | 4.599 |
+| `EMS_ZDATAHUBLOGNOTIFICATI25024.ACTION` | 31.295 | 0 |
+| `EXU_ZEVENTQUEUELOGTABLE.ACTION` | 7.946 | 0 |
+| `EXU_ZEVENTQUEUELOGTABLE.TEXT` | 5.856 | 0 |
+| `EMS_EBIXERRORDESCRIPTIONS.ERRORDESCRIPTION` | 5.206 | 0 |
+| `EMS_ZDATAHUBLOGERRORS.ERRORDESCRIPTION` | 1.322 | 0 |
+
+De 4.599 store `XMLDATA`-rækker er alle `EbixRequestChargeInformationConfirmedEventBody`
+(`hol` 2.752, `han` 1.847): bekræftede pristabeller, ikke målepunkter. Små
+bundles under 100.000 bytes udelukkes af juni-optællingen ovenfor.
+
+Er den rå besked nødvendig, ligger den hos det der tog imod DataHub-beskederne
+foran Xellent, ikke i Xellent.
+
+### Hvad det ikke dækker
+
+- **Måleværdier.** Ingen tidsseriebesked findes i `EMS_ZDATAHUBLOG`; den eneste
+  med mængder er `DK_NotifyVolumes` (25 i juni 2026). Måleværdierne kommer en
+  anden vej ind og lander i `EMS_TIMESERIESVALUES`. Hvordan deres bundles
+  håndteres er ikke undersøgt.
+- **Udgående beskeder** (`MESSAGEDIRECTION` 2) er ikke undersøgt.
+
+### Hvornår loggen stopper
+
+Sidste indgående 2026-09-17 09:07, sidste udgående 2026-09-17 09:40. Efter
+cutover (2026-08-31: 52.651 indgående) kun en hale på nogle hundrede om dagen.
+Retning 0 er en gammel kode, sidst brugt 2016-08-26.
+
+### Forespørgsler
+
+XML-metoder er ikke tilladt i `GROUP BY`; beregn i en underforespørgsel. Kast
+`XMLDATA` via `nvarchar(max)` og fjern UTF-8-erklæringen, ellers afviser SQL
+Server konverteringen. Læs aldrig hele `XMLDATA` ud: den kan indeholde navne og
+installationsadresse. Tæl elementer i stedet:
+
+```sql
+SELECT rootElement, mpsInXml, COUNT(*) AS events
+FROM (
+  SELECT c.x.value('local-name(/*[1])', 'nvarchar(200)') AS rootElement,
+    c.x.value('count(//*[local-name()="MeteringPointDomainLocation"])', 'int') AS mpsInXml
+  FROM EMS_ZDATAHUBLOG l
+  JOIN EMS_ZDATAHUBLOGMESSAGES m ON m.DATAHUBLOGID = l.ID AND m.DATAAREAID = l.DATAAREAID
+  JOIN EXU_ZEVENTQUEUEDATATABLE d ON d.ZEVENTQUEUEREFRECID = m.ZEVENTQUEUEREFRECID AND d.DATAAREAID = m.DATAAREAID
+  CROSS APPLY (SELECT CAST(REPLACE(CAST(d.XMLDATA AS nvarchar(max)), 'encoding="UTF-8"', '') AS xml) AS x) c
+  WHERE l.DATAAREAID = 'hol' AND l.MESSAGEDIRECTION = 1
+    AND l.CREATEDDATETIME >= '2026-06-01' AND l.CREATEDDATETIME < '2026-07-01'
+) t
+GROUP BY rootElement, mpsInXml
+```
+
+Bundles pr. `DCMESSAGEID`:
+
+```sql
+SELECT events, mps, COUNT(*) AS messages
+FROM (
+  SELECT m.DCMESSAGEID, COUNT(DISTINCT m.ZEVENTQUEUEREFRECID) AS events, COUNT(DISTINCT l.METERINGPOINT) AS mps
+  FROM EMS_ZDATAHUBLOG l
+  JOIN EMS_ZDATAHUBLOGMESSAGES m ON m.DATAHUBLOGID = l.ID AND m.DATAAREAID = l.DATAAREAID
+  WHERE l.DATAAREAID = 'hol' AND l.MESSAGEDIRECTION = 1
+    AND l.CREATEDDATETIME >= '2026-08-31' AND l.CREATEDDATETIME < '2026-09-01'
+  GROUP BY m.DCMESSAGEID
+) x
+GROUP BY events, mps
+```
+
+---
+
 ## Sådan holdes dokumentet ærligt
 
 Tallene her er øjebliksbilleder. Bliver et af dem afgørende for en beslutning,
