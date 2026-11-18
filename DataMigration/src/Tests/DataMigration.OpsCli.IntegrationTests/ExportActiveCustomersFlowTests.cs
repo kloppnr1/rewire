@@ -270,6 +270,11 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             mp.MarketPriceLists.Add(MarketPriceListOn(ended, "41000", "Tariff", "5790000432752",
                 "2020-12-31T23:00:00Z", "2022-12-31T23:00:00Z"));
 
+            // The customer group: an owner customer Settl places this customer under.
+            var owner = Guid.NewGuid();
+            api.Customers[owner] = new JsonObject { ["Id"] = owner.ToString(), ["CustomerNumber"] = "900002", ["CustomerType"] = "Company" };
+            api.Customers[customerId]["Owner"] = new JsonObject { ["Start"] = "2024-12-31T23:00:00Z", ["OwnerId"] = owner.ToString() };
+
             // The customer's electricity settlement schedule, named from the schedule list.
             var schedule = Guid.NewGuid();
             api.SettlementSchedules.Add(new JsonObject
@@ -286,6 +291,7 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
             Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
+            Assert.Equal("900002", (string?)customer["ownerCustomerNumber"]);
             Assert.Equal("KvartalAC", (string?)customer["settlementSchedule"]?["name"]);
             Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["finalSettlementPeriodType"]);
             Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["onAccountPeriodType"]);
@@ -353,6 +359,7 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Null(customer["customerSegment"]);
             Assert.Null(customer["settlementSchedule"]);
+            Assert.Null(customer["ownerCustomerNumber"]);
             Assert.Equal(0, (int?)document["customersWithReadErrors"]);
         }
         finally

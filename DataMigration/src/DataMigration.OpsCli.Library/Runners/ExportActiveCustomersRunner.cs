@@ -82,6 +82,11 @@ public class ExportActiveCustomersRunner
     private readonly ConcurrentDictionary<string, Lazy<Task<ContractDetail>>> _contractDetails =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // An owner customer (customer group, e.g. 900002 over 427682) is shared by its members, so it is
+    // read once per run.
+    private readonly ConcurrentDictionary<string, Lazy<Task<(JsonNode? Node, string? Error)>>> _ownerCustomers =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private sealed record ContractDetail(JsonNode? Contract, JsonArray Lines, string? ContractError, string? LinesError);
 
     public ExportActiveCustomersRunner(
@@ -599,6 +604,16 @@ public class ExportActiveCustomersRunner
 
         var customerV3 = await Get("customer", $"{billing}/api/v3/customers/{customerId}");
         var customerV2 = await Get("customerV2", $"{billing}/api/v2/customers/{customerId}");
+
+        // The customer group: the owner customer Settl places this customer under (Organization).
+        JsonNode? ownerCustomer = null;
+        if (Guid.TryParse((string?)customerV3?["Owner"]?["OwnerId"], out var ownerId) && ownerId != Guid.Empty)
+        {
+            var (owner, ownerError) = await _ownerCustomers.GetOrAdd(ownerId.ToString(), id =>
+                new Lazy<Task<(JsonNode?, string?)>>(() => _reader.GetAsync($"{billing}/api/v3/customers/{id}", ct))).Value;
+            if (ownerError != null) errors.Add(new JsonObject { ["section"] = $"owner customer {ownerId}", ["error"] = ownerError });
+            ownerCustomer = owner;
+        }
         var today = DateTime.UtcNow.Date;
         var allLinks = await GetAll("meteringPointLinks", $"{billing}/api/v2/customers/{customerId}/meteringPoints");
 
@@ -718,12 +733,14 @@ public class ExportActiveCustomersRunner
             ["names"] = new JsonObject
             {
                 ["customerSegment"] = _names.Name(_names.CustomerSegments, customerV3?["CustomerSegmentId"]),
+                ["ownerCustomerNumber"] = (string?)ownerCustomer?["CustomerNumber"],
                 ["electricitySettlementSchedule"] = (string?)electricitySchedule?["Name"],
             },
             // The whole schedule record: name, final settlement and on-account period types.
             ["electricitySettlementSchedule"] = electricitySchedule?.DeepClone(),
             ["customer"] = customerV3,
             ["customerV2"] = customerV2,
+            ["ownerCustomer"] = ownerCustomer?.DeepClone(),
             ["settlementScheduleAssociations"] = scheduleAssociations,
             ["meteringPointLinks"] = mpLinks,
             ["payers"] = payers,

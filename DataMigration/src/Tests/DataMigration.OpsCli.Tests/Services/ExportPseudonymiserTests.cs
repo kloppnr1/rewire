@@ -75,6 +75,22 @@ public class ExportPseudonymiserTests
     }
 
     [Fact]
+    public void Owner_customer_number_gets_the_same_fake_as_the_owner_customer()
+    {
+        var node = JsonNode.Parse("""
+            { "names": { "ownerCustomerNumber": "900002" },
+              "ownerCustomer": { "CustomerNumber": "900002" } }
+            """)!;
+
+        new ExportPseudonymiser().Apply(node);
+
+        var name = (string?)node["names"]!["ownerCustomerNumber"];
+        Assert.NotEqual("900002", name);
+        Assert.Matches("^[0-9]{6}$", name);
+        Assert.Equal((string?)node["ownerCustomer"]!["CustomerNumber"], name);
+    }
+
+    [Fact]
     public void Payment_agreement_identifiers_are_replaced_and_the_metering_point_matches()
     {
         var node = JsonNode.Parse(Sample)!;

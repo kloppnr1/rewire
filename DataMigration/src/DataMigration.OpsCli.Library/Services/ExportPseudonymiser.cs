@@ -32,7 +32,7 @@ public sealed class ExportPseudonymiser
         // Address parts below street level, and the street code that pins the street
         "BuildingNumber", "BuildingFloor", "RoomIdentification", "StreetCode",
         // Metering point, meter and customer numbers that lead back to a household
-        "MeteringPointIdentification", "InstallationNumber", "MeterIdentifier", "CustomerNumber",
+        "MeteringPointIdentification", "InstallationNumber", "MeterIdentifier", "CustomerNumber", "ownerCustomerNumber",
         "PayerIdentifier", "JointInvoiceNumber", "WebAccessCode",
         // Settl's copy of the source system's key — the metering point id or Xellent account number
         "ExternalIdentifier",

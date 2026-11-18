@@ -43,6 +43,7 @@ public static class CustomerExportProjection
             ["email"] = Value(address?["Email"]),
             ["customerGroup"] = Value(customer?["CrmData"]?["CustomerGroupName"]),
             ["customerSegment"] = Value(raw["names"]?["customerSegment"]),
+            ["ownerCustomerNumber"] = Value(raw["names"]?["ownerCustomerNumber"]),
             ["settlementSchedule"] = raw["electricitySettlementSchedule"] is JsonObject schedule ? new JsonObject
             {
                 ["name"] = Value(schedule["Name"]),
