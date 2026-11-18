@@ -130,11 +130,11 @@ public sealed class SettlementCheckTests
             SettlementCheck.ReportPath(Path.Combine("out", "state.json")));
     }
 
-    private static SettlementCheck.Row Row(string customer, string mp, string status) =>
-        new(new SettlementCheck.Subject(customer, customer, mp, Contract, Cos), "", null, status);
+    private static SettlementCheck.Row Row(string customer, string mp, string status, string? contract = Contract) =>
+        new(new SettlementCheck.Subject(customer, customer, mp, contract, Cos), "", null, status);
 
     [Fact]
-    public void A_customer_is_settled_only_when_every_metering_point_is()
+    public void A_customer_is_settled_when_a_point_is_settled_and_none_was_billed_to_another_date()
     {
         var settled = SettlementCheck.SettledCustomers(
         [
@@ -143,7 +143,32 @@ public sealed class SettlementCheckTests
             Row("100003", "MP5", SettlementCheck.Settled), Row("100003", "MP6", SettlementCheck.Missing),
         ]);
 
-        Assert.Equal(["100001"], settled);
+        Assert.Equal(["100001", "100003"], settled.Order());
+    }
+
+    [Fact]
+    public void A_never_billed_point_alone_does_not_settle_its_customer()
+    {
+        Assert.Empty(SettlementCheck.SettledCustomers([Row("100001", "MP1", SettlementCheck.Missing)]));
+    }
+
+    [Fact]
+    public void A_point_without_a_cos_minus_one_contract_blocks_its_customer()
+    {
+        Assert.Empty(SettlementCheck.SettledCustomers(
+        [
+            Row("100001", "MP1", SettlementCheck.Settled),
+            Row("100001", "MP2", SettlementCheck.Missing, contract: null),
+        ]));
+    }
+
+    [Fact]
+    public void The_empty_statement_date_is_not_settled_and_blocks()
+    {
+        var row = SettlementCheck.Classify(Subject(), [], [Statement(new DateTime(1900, 1, 1))]);
+
+        Assert.Equal(SettlementCheck.NotSettled, row.Status);
+        Assert.True(SettlementCheck.Blocks(row));
     }
 
     [Fact]
