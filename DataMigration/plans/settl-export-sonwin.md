@@ -60,13 +60,13 @@
 ## Consumption (planned, 18.11.2026)
 - Fields in the data exchange file: `Forbrug_Periode_Fra`, `Forbrug_Periode_Til`, `Forbrug_ConsumptionFile`, `Forbrug_Historisk` (total kWh)
 - Source: Settl time series only. Market `GET /api/v3/meteringPoints/{id}/timeSeries` lists the series; tenant `GET /v1/time-series/{id}/points?Start&End` reads points (`ISettlTimeSeriesClient.GetPointsAsync`, already in SettlClient)
-- One consumption file per metering point in the run folder, named `Consumption_<Kunde_Nummer>_<Mp_Nummer>.csv`; `Forbrug_ConsumptionFile` holds the name
-- Timestamps UTC, as stored and sent; never converted to CET/CEST. Period bounds are Danish calendar dates
+- No consumption file is written by this export (18.11.2026): only the four fields. `Forbrug_ConsumptionFile` holds the name `Consumption_<Kunde_Nummer>_<Mp_Nummer>.csv`
+- Points are read in UTC, as stored; never converted to CET/CEST. Period bounds are Danish calendar dates
 - `Forbrug_Historisk` = sum of the points in the period, kWh
 - Period (18.11.2026): from the metering point's supply start (`Mp_SupplyStart`) to the run date. Points up to Danish midnight at the start of the run date; `Forbrug_Periode_Til` is the last full day (run date − 1)
 - Series: consumption only (18.11.2026); production (E18) is left out
-- Open: resolution (as stored, or hourly)
-- Open: file columns (UTC timestamp, kWh, quality) and whether missing points are written
+- Open: who produces the consumption file named in `Forbrug_ConsumptionFile`, or whether the field stays empty
+- Open: how missing points count in `Forbrug_Historisk` (left out of the sum, or the metering point flagged)
 - Open: run time and size: one points read per metering point, about 59,000 in production; nightly full read or only in the first delivery
 - Open: does the production gateway serve both time series routes; check with one `--customer` run before building on it
 
