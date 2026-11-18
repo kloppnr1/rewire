@@ -13,7 +13,8 @@
 - Environment: `production`, own folder per environment
 - Schedule: nightly
 - Personal data on the share: approved
-- Out of scope: time series, externally invoiced periods, invoices, activity notes, water
+- In scope again (18.11.2026): consumption per metering point, see Consumption below
+- Out of scope: externally invoiced periods, invoices, activity notes, water
 - Reference examples: private `Customer_405013.xlsx`, business `Customer_397697_Verdo_Varme.xlsx` (06.11.2026)
 
 ## Command
@@ -55,6 +56,18 @@
 - Not resolved to names: balance supplier (no lookup endpoint known); customer segment in production (gateway answers 404 on the segment list, 2026-11-17), so `customerSegment` is empty there
 - Not in the export: market price list mandatory and direct invoicing (route and id mapping unverified), "contract shared with other customers", product description template
 - Live check: the new routes (market price lists, contracts, contract lines, price lists, product elements, reference lists) come from the Settl API description, not a live call
+
+## Consumption (planned, 18.11.2026)
+- Fields in the data exchange file: `Forbrug_Periode_Fra`, `Forbrug_Periode_Til`, `Forbrug_ConsumptionFile`, `Forbrug_Historisk` (total kWh)
+- Source: Settl time series only. Market `GET /api/v3/meteringPoints/{id}/timeSeries` lists the series; tenant `GET /v1/time-series/{id}/points?Start&End` reads points (`ISettlTimeSeriesClient.GetPointsAsync`, already in SettlClient)
+- One consumption file per metering point in the run folder, named `Consumption_<Kunde_Nummer>_<Mp_Nummer>.csv`; `Forbrug_ConsumptionFile` holds the name
+- Timestamps UTC, as stored and sent; never converted to CET/CEST. Period bounds are Danish calendar dates
+- `Forbrug_Historisk` = sum of the points in the period, kWh
+- Open: which period (calendar year, last 12 months, or supply start to run date)
+- Open: which series (consumption only, or also production for E18), and resolution (as stored, or hourly)
+- Open: file columns (UTC timestamp, kWh, quality) and whether missing points are written
+- Open: run time and size: one points read per metering point, about 59,000 in production; nightly full read or only in the first delivery
+- Open: does the production gateway serve both time series routes; check with one `--customer` run before building on it
 
 ## Phases
 1. Spike (done): `ExportActiveCustomersFlowTests` over a fake tenant filled by real `create`
