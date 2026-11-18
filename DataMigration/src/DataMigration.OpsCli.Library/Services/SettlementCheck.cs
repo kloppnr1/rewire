@@ -114,14 +114,25 @@ internal static class SettlementCheck
     }
 
     /// <summary>
-    /// The Settl customers that Xellent settled up to the change of supplier: every metering point
-    /// the customer has in the check is <see cref="Settled"/>. One <see cref="NotSettled"/> or
-    /// <see cref="Missing"/> point keeps the customer out, and so does having no point at all.
+    /// The Settl customers that Xellent settled up to the change of supplier: at least one metering
+    /// point is <see cref="Settled"/> and none blocks (<see cref="Blocks"/>). Having no point at all
+    /// keeps the customer out.
     /// </summary>
     internal static HashSet<string> SettledCustomers(IEnumerable<Row> rows) =>
         [.. rows.GroupBy(r => r.Subject.SettlCustomer, StringComparer.Ordinal)
-            .Where(g => g.All(r => r.Status == Settled))
+            .Where(g => g.Any(r => r.Status == Settled) && !g.Any(Blocks))
             .Select(g => g.Key)];
+
+    /// <summary>
+    /// Whether a point keeps its customer out. <see cref="NotSettled"/> always does: the latest
+    /// statement is another date, including the empty date 1900-01-01, which production shows on
+    /// contracts billed on account and never settled. <see cref="Missing"/> with a pinned contract
+    /// does not: Xellent has no billing row for that contract, and in production none of those
+    /// contracts (405 of 405, 2026-11-18) had a single invoice, so there is nothing to settle.
+    /// Missing without a pinned contract still blocks, because nothing was checked.
+    /// </summary>
+    internal static bool Blocks(Row row) =>
+        row.Status == NotSettled || row.Status == Missing && row.Subject.ContractNumber is null;
 
     private static bool IsPinned(string meteringPoint, string contractNumber, Subject subject) =>
         meteringPoint == subject.MeteringPoint

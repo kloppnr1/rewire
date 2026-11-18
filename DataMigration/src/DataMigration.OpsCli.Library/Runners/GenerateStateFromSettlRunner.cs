@@ -1883,11 +1883,16 @@ public class GenerateStateFromSettlRunner
                 .SelectMany(a => a.SourceAccounts)];
             var notSettled = state.Accounts.Where(a => !settled.Contains(a.SettlAccountNumber)).ToList();
             var withRows = rows.Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
-            var missing = rows.Where(r => r.Status == SettlementCheck.Missing)
+            var otherDate = rows.Where(r => r.Status == SettlementCheck.NotSettled)
                 .Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
+            var noContract = rows.Where(r => r.Status == SettlementCheck.Missing && r.Subject.ContractNumber is null)
+                .Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
+            var neverBilled = rows.Count(r => r.Status == SettlementCheck.Missing && r.Subject.ContractNumber is not null);
             Console.WriteLine($"Settled up to COS-1: {settled.Count} customer(s); not settled: {notSettled.Count} " +
                 $"({notSettled.Count(a => !withRows.Contains(a.SettlAccountNumber))} without a checked metering point, " +
-                $"{notSettled.Count(a => missing.Contains(a.SettlAccountNumber))} with a point that has no statement date)");
+                $"{notSettled.Count(a => otherDate.Contains(a.SettlAccountNumber))} with a point billed up to another date, " +
+                $"{notSettled.Count(a => noContract.Contains(a.SettlAccountNumber))} with a point without a COS-1 contract)");
+            Console.WriteLine($"  {neverBilled} metering point(s) with no billing row for their COS-1 contract do not block their customer");
 
             if (notSettled.Count > 0 && !options.SkipActive)
             {
