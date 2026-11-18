@@ -63,7 +63,7 @@
 - One consumption file per metering point in the run folder, named `Consumption_<Kunde_Nummer>_<Mp_Nummer>.csv`; `Forbrug_ConsumptionFile` holds the name
 - Timestamps UTC, as stored and sent; never converted to CET/CEST. Period bounds are Danish calendar dates
 - `Forbrug_Historisk` = sum of the points in the period, kWh
-- Open: which period (calendar year, last 12 months, or supply start to run date)
+- Period (18.11.2026): from the metering point's supply start (`Mp_SupplyStart`) to the run date. Points up to Danish midnight at the start of the run date; `Forbrug_Periode_Til` is the last full day (run date − 1)
 - Series: consumption only (18.11.2026); production (E18) is left out
 - Open: resolution (as stored, or hourly)
 - Open: file columns (UTC timestamp, kWh, quality) and whether missing points are written
