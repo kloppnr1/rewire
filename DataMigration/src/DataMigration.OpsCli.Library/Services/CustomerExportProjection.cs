@@ -43,6 +43,13 @@ public static class CustomerExportProjection
             ["email"] = Value(address?["Email"]),
             ["customerGroup"] = Value(customer?["CrmData"]?["CustomerGroupName"]),
             ["customerSegment"] = Value(raw["names"]?["customerSegment"]),
+            ["settlementSchedule"] = raw["electricitySettlementSchedule"] is JsonObject schedule ? new JsonObject
+            {
+                ["name"] = Value(schedule["Name"]),
+                ["externalName"] = Value(schedule["ExternalName"]),
+                ["finalSettlementPeriodType"] = Value(schedule["FinalSettlementPeriodType"]),
+                ["onAccountPeriodType"] = Value(schedule["OnAccountPeriodType"]),
+            } : null,
             ["manualApprovalRequired"] = Value(customer?["CreditInfo"]?["ManualApprovalRequired"]),
             ["address"] = Address(postal?["PhysicalAddress"]),
             ["meteringPoints"] = new JsonArray(meteringPoints.Select(m => (JsonNode?)MeteringPoint(m, contracts)).ToArray()),

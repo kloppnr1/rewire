@@ -270,6 +270,15 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             mp.MarketPriceLists.Add(MarketPriceListOn(ended, "41000", "Tariff", "5790000432752",
                 "2020-12-31T23:00:00Z", "2022-12-31T23:00:00Z"));
 
+            // The customer's electricity settlement schedule, named from the schedule list.
+            var schedule = Guid.NewGuid();
+            api.SettlementSchedules.Add(new JsonObject
+            {
+                ["Id"] = schedule.ToString(), ["Name"] = "KvartalAC", ["ExternalName"] = "Kvartalsvis aconto",
+                ["FinalSettlementPeriodType"] = "Quarterly", ["OnAccountPeriodType"] = "Quarterly",
+            });
+            api.ElectricitySettlementScheduleByCustomer[customerId] = schedule;
+
             var (exitCode, document) = await ExportAsync(tenant, raw: false);
 
             Assert.Equal(0, exitCode);
@@ -277,6 +286,9 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             var customer = Assert.Single(document["customers"]!.AsArray())!;
             Assert.Equal("Erhverv", (string?)customer["customerSegment"]);
             Assert.Equal("Yes", (string?)customer["manualApprovalRequired"]);
+            Assert.Equal("KvartalAC", (string?)customer["settlementSchedule"]?["name"]);
+            Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["finalSettlementPeriodType"]);
+            Assert.Equal("Quarterly", (string?)customer["settlementSchedule"]?["onAccountPeriodType"]);
 
             var exported = Assert.Single(customer["meteringPoints"]!.AsArray(), m => (string?)m!["meteringPointId"] == mp.Identification)!;
             Assert.Equal(area.Name, (string?)exported["priceArea"]);
@@ -313,6 +325,35 @@ public class ExportActiveCustomersFlowTests : IClassFixture<ProvisioningFixture>
             Assert.Equal(area.Name, (string?)price["priceArea"]);
             Assert.Equal("2023-01-01", (string?)price["start"]);
             Assert.Null(price["end"]);
+        }
+        finally
+        {
+            await tenant.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Missing_customer_segment_list_leaves_the_segment_empty_and_the_run_goes_on()
+    {
+        var tenant = new ProvisioningFixture();
+        await tenant.InitializeAsync();
+        StartDelivery(tenant);
+        try
+        {
+            var api = tenant.Settl.Api;
+            var customerId = api.Customers.Keys.Single();
+            var segment = Guid.NewGuid();
+            api.CustomerSegments.Add(new JsonObject { ["Id"] = segment.ToString(), ["Name"] = "Erhverv" });
+            api.Customers[customerId]["CustomerSegmentId"] = segment.ToString();
+            api.CustomerSegmentsNotFound = true;
+
+            var (exitCode, document) = await ExportAsync(tenant, raw: false);
+
+            Assert.Equal(0, exitCode);
+            var customer = Assert.Single(document["customers"]!.AsArray())!;
+            Assert.Null(customer["customerSegment"]);
+            Assert.Null(customer["settlementSchedule"]);
+            Assert.Equal(0, (int?)document["customersWithReadErrors"]);
         }
         finally
         {

@@ -51,7 +51,8 @@
 - Payment CSV: who exports it from Settl before each run; ask the vendor for an API endpoint
 - SonWin: projected or `--raw`, schema, pick-up by `_READY`
 - Settl vendor: modified-since filter or change feed (would replace the full scan)
-- Not resolved to names: balance supplier (no lookup endpoint known)
+- Settl vendor: publish `customerSegments`, `settlementSchedules` and `settlementScheduleAssociations/{id}` on the production gateway (all 404 on 17.11.2026); until then segment and settlement schedule are empty in production
+- Not resolved to names: balance supplier (no lookup endpoint known); customer segment in production (gateway answers 404 on the segment list, 2026-11-17), so `customerSegment` is empty there
 - Not in the export: market price list mandatory and direct invoicing (route and id mapping unverified), "contract shared with other customers", product description template
 - Live check: the new routes (market price lists, contracts, contract lines, price lists, product elements, reference lists) come from the Settl API description, not a live call
 
