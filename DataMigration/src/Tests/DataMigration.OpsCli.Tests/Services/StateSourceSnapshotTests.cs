@@ -265,4 +265,74 @@ public class StateSourceSnapshotTests
         }
         finally { Directory.Delete(root, recursive: true); }
     }
+
+    // One customer (503281) with two metering points on one account. MP1's contract C1 is billed up
+    // to COS-1; MP2's contract C2 only has the empty statement date. Only C2's invoice is held back.
+    [Fact]
+    public async Task Offline_invoices_of_a_contract_not_billed_up_to_cos_minus_one_are_held_back()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "settl-sources-" + Guid.NewGuid());
+        try
+        {
+            var store = StateSourceSnapshotStore.Open(root, "production");
+            await store.BeginAsync(CancellationToken.None);
+            var ct = CancellationToken.None;
+            var customerId = Guid.NewGuid();
+            var cos = new DateOnly(2025, 5, 1);
+            var start = new DateTimeOffset(2025, 5, 1, 0, 0, 0, TimeSpan.Zero);
+            var points = new[] { ("MP1", Guid.NewGuid()), ("MP2", Guid.NewGuid()) };
+            var statuses = new GetDeliveryStatusesResponse { DeliveryStatuses =
+            [new DeliveryStatusDto { InDelivery = true, Period = new TimePeriodDto { Start = start },
+                StartReason = DeliveryStartReason.ChangeOfSupplier }] };
+            var mps = points.Select(p => new SettlMpWithCos(p.Item1, p.Item2, cos, new MeteringPointInfoDto
+                { InDelivery = true, CurrentOrNextDeliveryPeriod = new TimePeriodDto { Start = start } })).ToArray();
+            await store.WriteAsync("settl-customers", new[] { new CustomerInfoDto
+                { Id = customerId, CustomerNumber = "503281", FullName = "Customer" } }, ct);
+            await store.WriteAsync("settl-metering-points", mps, ct);
+            await store.WriteAsync("settl-delivery-histories", mps.Select(m =>
+                new GenerateStateOfflineCache.DeliveryHistoryRecord(m.Identification, m.Id, true,
+                    m.Info.CurrentOrNextDeliveryPeriod, null, statuses, null, cos, "ChangeOfSupplier")).ToArray(), ct);
+            await store.WriteAsync("settl-payers", new[] { new StatePayerLookup(cos, [.. points.Select(p => p.Item2)],
+            [new PayerForMeteringPointsDto
+            {
+                Payer = new PayerResponse { CustomerId = customerId, IsPrimaryCustomerPayer = true },
+                MeteringPoints = [.. points.Select(p => new PayerMeteringPointDto { MeteringPointId = p.Item2 })]
+            }], null) }, ct);
+            await store.WriteAsync("xellent-mp-accounts", points.Select(p => new StateMpAccount(p.Item1, "503281")).ToArray(), ct);
+            await store.WriteAsync("xellent-for-mps", points.Select(p => p.Item1).ToArray(), ct);
+            await store.WriteAsync("xellent-meh-mps", Array.Empty<string>(), ct);
+            await store.WriteAsync("xellent-representatives", points.Select(p =>
+                new StateXellentEvidence(p.Item1, "503281", "503281", cos, ["503281"])).ToArray(), ct);
+            Invoice Inv(string id, string contract) => new(id, "503281", new DateTime(2024, 6, 1),
+                new DateTime(2024, 6, 15), "A", "A", BillingCategory.Aconto, PaymentMedia.Fik,
+                InvoiceStatus.Invoiced, 100m, 25m) { ContractNumber = contract };
+            await store.WriteAsync("xellent-invoices", new[] { Inv("INV1", "C1"), Inv("INV2", "C2") }, ct);
+            await store.WriteAsync("xellent-excluded-invoices", Array.Empty<ExcludedCompanyInvoice>(), ct);
+            await store.WriteAsync("xellent-owner-contracts", new[]
+            {
+                new StateOwnerContract("MP1", "C1", new DateOnly(2025, 4, 30)),
+                new StateOwnerContract("MP2", "C2", new DateOnly(2025, 4, 30)),
+            }, ct);
+            await store.WriteAsync("xellent-settlement-parts", Array.Empty<SettlementCheck.PartRow>(), ct);
+            await store.WriteAsync("xellent-statement-dates", new[]
+            {
+                new SettlementCheck.StatementRow { MeteringPoint = "MP1", ContractNumber = "C1", LatestStatementDate = new DateTime(2025, 4, 30) },
+                new SettlementCheck.StatementRow { MeteringPoint = "MP2", ContractNumber = "C2", LatestStatementDate = new DateTime(1900, 1, 1) },
+            }, ct);
+            await store.CompleteAsync(ct);
+            var options = OfflineOptions(root, "state.json");
+
+            Assert.Equal(1, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+
+            options.SkipActive = true;
+            Assert.Equal(0, await new GenerateStateFromSettlRunner(null!).RunAsync(options));
+            var json = await File.ReadAllTextAsync(options.OutputPath);
+            Assert.Contains("INV1", json);
+            Assert.DoesNotContain("INV2", json);
+            var held = await File.ReadAllTextAsync(SettlementCheck.HeldInvoicesReportPath(options.OutputPath));
+            Assert.Contains("503281;503281;INV2;2024-06-01;2;2;C2;MP2;2025-05-01;1900-01-01", held);
+            Assert.DoesNotContain("INV1", held);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
 }

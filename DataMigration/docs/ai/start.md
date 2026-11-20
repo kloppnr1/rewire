@@ -74,18 +74,20 @@ points, first supplier changes and Xellent ownership evidence, including an
 offline replay path. It is not a Settl-only command in every mode. Preserve the
 wire contract and coordinate changes with PDF upload and CustomerSupport
 consumers. See [invoice ownership comparison](../invoice-state-comparison.md).
-Which customers keep their invoices: a Settl customer has ended in Xellent when
-at least one metering point it has in the state was billed up to COS−1 (the
-latest `EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE` for the contract and
-agreement in force on COS−1 is COS−1) and no point blocks. A point billed up to
-another date blocks, including the empty date 1900-01-01, which marks contracts
-billed on account and never settled. A point whose COS−1 contract has no
-billing row at all does not block: in production none of those contracts had
-an invoice. Invoice billing categories (Slutafregning) are not used; only the
-deprecated `generate-state` still uses them. `--skip-active` leaves out the
-invoices of customers that have not ended instead of failing; `--include-active`
-skips the test. An offline snapshot pulled before 2026-11-16 has no statement
-dates and is refused unless the test is skipped.
+Which invoices come over: those of a Settl customer that has at least one
+metering point billed up to COS−1 (the latest
+`EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE` for the contract and agreement in
+force on COS−1 is COS−1), except the invoices of a COS−1 contract billed up to
+another date. Those are held back and listed in `<state>-held-invoices.csv`;
+the empty date 1900-01-01 counts as another date and marks contracts billed on
+account and never settled. A contract with no billing row holds nothing back:
+in production none of those contracts had an invoice. A customer with no point
+billed up to COS−1, or with a point without a COS−1 contract, gets no invoices.
+Invoice billing categories (Slutafregning) are not used; only the deprecated
+`generate-state` still uses them. `--skip-active` leaves the held-back invoices
+and not-settled customers out instead of failing; `--include-active` skips the
+test. An offline snapshot needs statement dates (pulled from 2026-11-16) and,
+when a contract is held back, invoice contract numbers (pulled from 2026-11-20).
 The established production location is
 `C:\Services\DataMigration\OpsCli\data\migration-state.json`; confirm the target
 path before replacing a file.

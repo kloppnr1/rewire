@@ -29,6 +29,7 @@ public static class XellentInvoiceQueries
                     i.Invoiceid,
                     i.Invoiceaccount,
                     i.Invoicedate,
+                    i.ExuContractnum,
                     i.Duedate,
                     i.Deliveryaddress,
                     i.Invoicingaddress,
@@ -53,7 +54,10 @@ public static class XellentInvoiceQueries
                     PaymentMedia: (PaymentMedia)row.ExuPaymentmedia,
                     InvoiceStatus: (InvoiceStatus)row.ExuCustfreeinvoicestatus,
                     InvoiceAmount: row.Invoiceamountmst,
-                    SumTax: row.Sumtax));
+                    SumTax: row.Sumtax)
+                {
+                    ContractNumber = string.IsNullOrWhiteSpace(row.ExuContractnum) ? null : row.ExuContractnum.Trim()
+                });
             }
         }
 

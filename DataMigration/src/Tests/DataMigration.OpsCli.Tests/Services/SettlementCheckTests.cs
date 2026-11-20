@@ -134,16 +134,30 @@ public sealed class SettlementCheckTests
         new(new SettlementCheck.Subject(customer, customer, mp, contract, Cos), "", null, status);
 
     [Fact]
-    public void A_customer_is_settled_when_a_point_is_settled_and_none_was_billed_to_another_date()
+    public void A_customer_with_a_settled_point_comes_over_even_when_another_contract_is_not_settled()
     {
         var settled = SettlementCheck.SettledCustomers(
         [
             Row("100001", "MP1", SettlementCheck.Settled), Row("100001", "MP2", SettlementCheck.Settled),
             Row("100002", "MP3", SettlementCheck.Settled), Row("100002", "MP4", SettlementCheck.NotSettled),
             Row("100003", "MP5", SettlementCheck.Settled), Row("100003", "MP6", SettlementCheck.Missing),
+            Row("100004", "MP7", SettlementCheck.NotSettled),
         ]);
 
-        Assert.Equal(["100001", "100003"], settled.Order());
+        Assert.Equal(["100001", "100002", "100003"], settled.Order());
+    }
+
+    [Fact]
+    public void Only_contracts_billed_up_to_another_date_are_held()
+    {
+        var held = SettlementCheck.HeldContracts(
+        [
+            Row("100001", "MP1", SettlementCheck.Settled, contract: "C1"),
+            Row("100001", "MP2", SettlementCheck.NotSettled, contract: " C2 "),
+            Row("100001", "MP3", SettlementCheck.Missing, contract: "C3"),
+        ]);
+
+        Assert.Equal(["C2"], held);
     }
 
     [Fact]
@@ -163,12 +177,26 @@ public sealed class SettlementCheckTests
     }
 
     [Fact]
-    public void The_empty_statement_date_is_not_settled_and_blocks()
+    public void The_empty_statement_date_is_not_settled_and_holds_its_contract()
     {
         var row = SettlementCheck.Classify(Subject(), [], [Statement(new DateTime(1900, 1, 1))]);
 
         Assert.Equal(SettlementCheck.NotSettled, row.Status);
-        Assert.True(SettlementCheck.Blocks(row));
+        Assert.Equal([Contract], SettlementCheck.HeldContracts([row]));
+    }
+
+    [Fact]
+    public void Held_invoices_csv_names_the_contract_point_and_statement_date()
+    {
+        var row = SettlementCheck.Classify(Subject(), [], [Statement(new DateTime(1900, 1, 1))]);
+        var invoice = new DataMigration.Domain.Customers.Invoice("INV9", "41589", new DateTime(2025, 6, 1),
+            new DateTime(2025, 6, 15), "", "", DataMigration.Domain.Customers.BillingCategory.Aconto,
+            DataMigration.Domain.Customers.PaymentMedia.Fik, DataMigration.Domain.Customers.InvoiceStatus.Invoiced, 1m, 0m)
+            { ContractNumber = Contract };
+
+        var csv = SettlementCheck.BuildHeldInvoicesCsv([("941589", invoice)], [row]);
+
+        Assert.Contains($"941589;41589;INV9;2025-06-01;2;2;{Contract};{Mp};2026-05-01;1900-01-01", csv);
     }
 
     [Fact]

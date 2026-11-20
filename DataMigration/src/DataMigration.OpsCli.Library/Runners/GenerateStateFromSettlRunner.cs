@@ -1866,10 +1866,14 @@ public class GenerateStateFromSettlRunner
         Log($"  FOR invoice scope: {allInvoices.Count} kept, {_excludedCompanyInvoices.Count} " +
             "non-FOR or unlinked invoice row(s) omitted (see excluded-invoices CSV)");
 
-        // A customer has ended in Xellent when every one of its metering points was billed up to
-        // COS-1: the latest statement date of the contract and agreement in force on COS-1 is COS-1
+        // An invoice comes over when Xellent has finished billing: its customer has a metering point
+        // billed up to COS-1 (the latest statement date of the contract and agreement in force on
+        // COS-1 is COS-1), and its own contract is not one that Xellent billed up to another date
         // (SettlementCheck). Invoice billing categories (Slutafregning) are not used.
         HashSet<string> eligibleAccounts;
+        HashSet<string> heldContracts = [];
+        var notSettledCount = 0;
+        IReadOnlyList<SettlementCheck.Row> settlementRows = [];
         if (options.IncludeActive)
         {
             eligibleAccounts = [.. allInvoices.Select(i => i.AccountNumber)];
@@ -1877,30 +1881,30 @@ public class GenerateStateFromSettlRunner
         }
         else
         {
-            var rows = await SettlementRowsAsync(state, options, context, ct);
-            var settled = SettlementCheck.SettledCustomers(rows);
+            settlementRows = await SettlementRowsAsync(state, options, context, ct);
+            var settled = SettlementCheck.SettledCustomers(settlementRows);
+            heldContracts = SettlementCheck.HeldContracts(settlementRows);
             eligibleAccounts = [.. state.Accounts.Where(a => settled.Contains(a.SettlAccountNumber))
                 .SelectMany(a => a.SourceAccounts)];
             var notSettled = state.Accounts.Where(a => !settled.Contains(a.SettlAccountNumber)).ToList();
-            var withRows = rows.Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
-            var otherDate = rows.Where(r => r.Status == SettlementCheck.NotSettled)
+            notSettledCount = notSettled.Count;
+            var withRows = settlementRows.Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
+            var noContract = settlementRows.Where(SettlementCheck.BlocksCustomer)
                 .Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
-            var noContract = rows.Where(r => r.Status == SettlementCheck.Missing && r.Subject.ContractNumber is null)
-                .Select(r => r.Subject.SettlCustomer).ToHashSet(StringComparer.Ordinal);
-            var neverBilled = rows.Count(r => r.Status == SettlementCheck.Missing && r.Subject.ContractNumber is not null);
+            var neverBilled = settlementRows.Count(r => r.Status == SettlementCheck.Missing && r.Subject.ContractNumber is not null);
             Console.WriteLine($"Settled up to COS-1: {settled.Count} customer(s); not settled: {notSettled.Count} " +
                 $"({notSettled.Count(a => !withRows.Contains(a.SettlAccountNumber))} without a checked metering point, " +
-                $"{notSettled.Count(a => otherDate.Contains(a.SettlAccountNumber))} with a point billed up to another date, " +
-                $"{notSettled.Count(a => noContract.Contains(a.SettlAccountNumber))} with a point without a COS-1 contract)");
-            Console.WriteLine($"  {neverBilled} metering point(s) with no billing row for their COS-1 contract do not block their customer");
+                $"{notSettled.Count(a => noContract.Contains(a.SettlAccountNumber))} with a point without a COS-1 contract, " +
+                $"{notSettled.Count(a => withRows.Contains(a.SettlAccountNumber) && !noContract.Contains(a.SettlAccountNumber))} with no point billed up to COS-1)");
+            Console.WriteLine($"  {heldContracts.Count} contract(s) billed up to another date: their invoices are held back");
+            Console.WriteLine($"  {neverBilled} metering point(s) with no billing row for their COS-1 contract hold nothing back");
 
-            if (notSettled.Count > 0 && !options.SkipActive)
+            // A snapshot saved before invoices carried their contract cannot apply the contract test.
+            if (heldContracts.Count > 0 && allInvoices.Any(i => eligibleAccounts.Contains(i.AccountNumber)
+                    && i.ContractNumber is null))
             {
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"ERROR: {notSettled.Count} customer(s) are not settled up to COS-1. " +
-                    "Use --skip-active to exclude their invoices.");
-                Console.ResetColor();
+                Log("ERROR: some invoices have no contract number, so the held-back contracts cannot be applied; " +
+                    "run pull-state-sources again.");
                 return 1;
             }
         }
@@ -1914,6 +1918,7 @@ public class GenerateStateFromSettlRunner
         var invoiceIssues = new List<SourceAccountOwnershipIssue>();
         var kept = 0;
         var outsideWindow = 0;
+        var heldInvoices = new List<(string Owner, Invoice Invoice)>();
         foreach (var invoice in allInvoices.Where(i => eligibleAccounts.Contains(i.AccountNumber)))
         {
             if (!ownerBySource.TryGetValue(invoice.AccountNumber, out var owner)
@@ -1931,8 +1936,32 @@ public class GenerateStateFromSettlRunner
                 outsideWindow++;
                 continue;
             }
+            if (invoice.ContractNumber is { } contract && heldContracts.Contains(contract))
+            {
+                heldInvoices.Add((owner, invoice));
+                continue;
+            }
             invoicesByCustomer[owner].Add(ToManifestItem(invoice));
             kept++;
+        }
+
+        if (!options.IncludeActive)
+        {
+            var heldPath = SettlementCheck.HeldInvoicesReportPath(options.OutputPath);
+            await File.WriteAllTextAsync(heldPath, SettlementCheck.BuildHeldInvoicesCsv(heldInvoices, settlementRows),
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
+            Log($"  Held back: {heldInvoices.Count} invoice(s) on {heldInvoices.Select(h => h.Invoice.ContractNumber).Distinct().Count()} " +
+                $"contract(s) of {heldInvoices.Select(h => h.Owner).Distinct().Count()} customer(s) → {heldPath}");
+            if ((notSettledCount > 0 || heldInvoices.Count > 0) && !options.SkipActive)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"ERROR: {notSettledCount} customer(s) are not settled up to COS-1 and " +
+                    $"{heldInvoices.Count} invoice(s) are on contracts not billed up to COS-1. " +
+                    "Use --skip-active to leave them out.");
+                Console.ResetColor();
+                return 1;
+            }
         }
 
         _ownershipIssues = [.. (_ownershipIssues ?? []), .. invoiceIssues];

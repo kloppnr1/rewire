@@ -13,8 +13,9 @@ namespace DataMigration.OpsCli.Services;
 /// the point's COS-1 contract and agreement (<c>EXU_ContractPartTable.latestStatementDate()</c>, which
 /// reads <c>EXU_LATESTBILLINGDATES.LATESTSTATEMENTDATE</c>). The customer is settled when that date is
 /// COS-1. Invoice billing categories (Slutafregning) are deliberately not used.
-/// <c>generate-state-from-settl</c> keeps a customer's invoices only when every one of its points is
-/// settled (<see cref="SettledCustomers"/>); <c>--settlement-check</c> writes the same rows.
+/// <c>generate-state-from-settl</c> keeps the invoices of customers with a settled point
+/// (<see cref="SettledCustomers"/>), except those of contracts not billed up to COS-1
+/// (<see cref="HeldContracts"/>); <c>--settlement-check</c> writes the same rows.
 /// </summary>
 internal static class SettlementCheck
 {
@@ -114,25 +115,29 @@ internal static class SettlementCheck
     }
 
     /// <summary>
-    /// The Settl customers that Xellent settled up to the change of supplier: at least one metering
-    /// point is <see cref="Settled"/> and none blocks (<see cref="Blocks"/>). Having no point at all
-    /// keeps the customer out.
+    /// The Settl customers whose invoice history can come over: at least one metering point is
+    /// <see cref="Settled"/>, and every point had a COS-1 contract to check. A point billed up to
+    /// another date does not keep the customer out; only that contract's invoices are held back
+    /// (<see cref="HeldContracts"/>). Having no point at all keeps the customer out.
     /// </summary>
     internal static HashSet<string> SettledCustomers(IEnumerable<Row> rows) =>
         [.. rows.GroupBy(r => r.Subject.SettlCustomer, StringComparer.Ordinal)
-            .Where(g => g.Any(r => r.Status == Settled) && !g.Any(Blocks))
+            .Where(g => g.Any(r => r.Status == Settled) && !g.Any(BlocksCustomer))
             .Select(g => g.Key)];
 
+    /// <summary>A point with no COS-1 contract keeps its customer out, because nothing was checked.</summary>
+    internal static bool BlocksCustomer(Row row) => row.Status == Missing && row.Subject.ContractNumber is null;
+
     /// <summary>
-    /// Whether a point keeps its customer out. <see cref="NotSettled"/> always does: the latest
-    /// statement is another date, including the empty date 1900-01-01, which production shows on
-    /// contracts billed on account and never settled. <see cref="Missing"/> with a pinned contract
-    /// does not: Xellent has no billing row for that contract, and in production none of those
-    /// contracts (405 of 405, 2026-11-18) had a single invoice, so there is nothing to settle.
-    /// Missing without a pinned contract still blocks, because nothing was checked.
+    /// The COS-1 contracts that Xellent has not billed up to COS-1: the latest statement is another
+    /// date, including the empty date 1900-01-01, which production shows on contracts billed on
+    /// account and never settled. Their invoices are not final and are held back. A contract with
+    /// no billing row at all (<see cref="Missing"/>) is not held: in production none of those
+    /// contracts (405 of 405, 2026-11-18) had a single invoice, so there is nothing to hold.
     /// </summary>
-    internal static bool Blocks(Row row) =>
-        row.Status == NotSettled || row.Status == Missing && row.Subject.ContractNumber is null;
+    internal static HashSet<string> HeldContracts(IEnumerable<Row> rows) =>
+        [.. rows.Where(r => r.Status == NotSettled && r.Subject.ContractNumber is not null)
+            .Select(r => r.Subject.ContractNumber!.Trim())];
 
     private static bool IsPinned(string meteringPoint, string contractNumber, Subject subject) =>
         meteringPoint == subject.MeteringPoint
@@ -235,6 +240,40 @@ internal static class SettlementCheck
                 .AppendLine(row.Status);
         }
         return csv.ToString();
+    }
+
+    /// <summary>One row per invoice held back because its contract was not billed up to COS-1.</summary>
+    internal static string BuildHeldInvoicesCsv(IEnumerable<(string Owner, DataMigration.Domain.Customers.Invoice Invoice)> held,
+        IEnumerable<Row> rows)
+    {
+        var byContract = rows.Where(r => r.Status == NotSettled && r.Subject.ContractNumber is not null)
+            .GroupBy(r => r.Subject.ContractNumber!.Trim(), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var csv = new StringBuilder();
+        csv.AppendLine("SettlCustomer;SourceAccount;InvoiceId;InvoiceDate;BillingCategory;InvoiceStatus;ContractNumber;MeteringPoint;Cos;LatestStatementDate");
+        foreach (var (owner, invoice) in held.OrderBy(h => h.Owner, StringComparer.Ordinal)
+                     .ThenBy(h => h.Invoice.InvoiceDate).ThenBy(h => h.Invoice.InvoiceId, StringComparer.Ordinal))
+        {
+            var row = byContract.GetValueOrDefault(invoice.ContractNumber ?? "");
+            csv.Append(Csv(owner)).Append(';')
+                .Append(Csv(invoice.AccountNumber)).Append(';')
+                .Append(Csv(invoice.InvoiceId)).Append(';')
+                .Append(invoice.InvoiceDate.ToString("yyyy-MM-dd")).Append(';')
+                .Append((int)invoice.BillingCategory).Append(';')
+                .Append((int)invoice.InvoiceStatus).Append(';')
+                .Append(Csv(invoice.ContractNumber ?? "")).Append(';')
+                .Append(Csv(row?.Subject.MeteringPoint ?? "")).Append(';')
+                .Append(row?.Subject.Cos.ToString("yyyy-MM-dd") ?? "").Append(';')
+                .AppendLine(row?.LatestStatementDate?.ToString("yyyy-MM-dd") ?? "");
+        }
+        return csv.ToString();
+    }
+
+    internal static string HeldInvoicesReportPath(string stateOutputPath)
+    {
+        var directory = Path.GetDirectoryName(stateOutputPath);
+        var filename = $"{Path.GetFileNameWithoutExtension(stateOutputPath)}-held-invoices.csv";
+        return string.IsNullOrEmpty(directory) ? filename : Path.Combine(directory, filename);
     }
 
     internal static string ReportPath(string stateOutputPath)

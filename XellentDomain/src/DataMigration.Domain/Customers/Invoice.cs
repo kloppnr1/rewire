@@ -14,4 +14,8 @@ public sealed record Invoice(
     decimal SumTax)
 {
     public const int ExportHistoryYears = 5;
+
+    /// <summary>Trimmed Xellent EXU_CONTRACTNUM: the contract the invoice was billed on. Null when
+    /// the invoice has none, or when it was read from data saved before the field existed.</summary>
+    public string? ContractNumber { get; init; }
 }
