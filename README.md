@@ -198,3 +198,7 @@ A few rules that are easy to get wrong:
 | Guides for AI assistants | `CLAUDE.md` in the root and each folder, and each folder's `docs/ai/start.md` |
 
 Settl's internal API descriptions are not published in this repository.
+
+## License
+
+[MIT](LICENSE)
