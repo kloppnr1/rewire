@@ -1,0 +1,24 @@
+{
+  "Name": "test-default",
+  "Description": "Default test profile - query-based account selection",
+  "StartingPayerId": 10000,
+
+  "AccountSource": {
+    "Type": "Query",
+    "Query": {
+      "DeliveryCategory": "",
+      "ProductNum": "",
+      "ExcludeEndedParts": true,
+      "ExcludeAccounts": []
+    }
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {},
+    "ProductNum": {}
+  }
+}

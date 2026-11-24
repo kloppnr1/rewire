@@ -1,0 +1,488 @@
+{
+  "accountForQuantityQuality": true,
+  "points": [
+    {
+      "quality": "Measured",
+      "quantity": 6.140000000000,
+      "time": "2024-01-01T22:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.150000000000,
+      "time": "2024-01-01T22:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.170000000000,
+      "time": "2024-01-01T21:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.250000000000,
+      "time": "2024-01-01T02:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.250000000000,
+      "time": "2024-01-01T02:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.250000000000,
+      "time": "2024-01-01T21:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.260000000000,
+      "time": "2024-01-01T21:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.280000000000,
+      "time": "2023-12-31T23:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.280000000000,
+      "time": "2024-01-01T03:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.280000000000,
+      "time": "2024-01-01T20:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.310000000000,
+      "time": "2024-01-01T02:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.320000000000,
+      "time": "2024-01-01T00:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.330000000000,
+      "time": "2024-01-01T00:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.340000000000,
+      "time": "2024-01-01T00:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.350000000000,
+      "time": "2024-01-01T00:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.350000000000,
+      "time": "2024-01-01T03:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.370000000000,
+      "time": "2023-12-31T23:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.370000000000,
+      "time": "2024-01-01T01:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.370000000000,
+      "time": "2024-01-01T01:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.370000000000,
+      "time": "2024-01-01T22:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.380000000000,
+      "time": "2023-12-31T23:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.410000000000,
+      "time": "2024-01-01T02:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.430000000000,
+      "time": "2024-01-01T22:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.450000000000,
+      "time": "2024-01-01T01:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.460000000000,
+      "time": "2024-01-01T01:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.480000000000,
+      "time": "2023-12-31T23:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.480000000000,
+      "time": "2024-01-01T21:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.510000000000,
+      "time": "2024-01-01T04:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.530000000000,
+      "time": "2024-01-01T03:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.540000000000,
+      "time": "2024-01-01T20:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.570000000000,
+      "time": "2024-01-01T20:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.590000000000,
+      "time": "2024-01-01T03:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.600000000000,
+      "time": "2024-01-01T04:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.660000000000,
+      "time": "2024-01-01T04:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.710000000000,
+      "time": "2024-01-01T20:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 6.920000000000,
+      "time": "2024-01-01T19:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.050000000000,
+      "time": "2024-01-01T19:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.130000000000,
+      "time": "2024-01-01T13:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.210000000000,
+      "time": "2024-01-01T13:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.290000000000,
+      "time": "2024-01-01T13:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.300000000000,
+      "time": "2024-01-01T14:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.320000000000,
+      "time": "2024-01-01T15:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.340000000000,
+      "time": "2024-01-01T14:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.340000000000,
+      "time": "2024-01-01T17:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.350000000000,
+      "time": "2024-01-01T17:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.380000000000,
+      "time": "2024-01-01T10:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.470000000000,
+      "time": "2024-01-01T11:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.470000000000,
+      "time": "2024-01-01T18:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.480000000000,
+      "time": "2024-01-01T16:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.500000000000,
+      "time": "2024-01-01T18:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.520000000000,
+      "time": "2024-01-01T16:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.630000000000,
+      "time": "2024-01-01T16:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.650000000000,
+      "time": "2024-01-01T16:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.670000000000,
+      "time": "2024-01-01T06:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.700000000000,
+      "time": "2024-01-01T18:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.710000000000,
+      "time": "2024-01-01T11:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.710000000000,
+      "time": "2024-01-01T15:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.720000000000,
+      "time": "2024-01-01T12:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.730000000000,
+      "time": "2024-01-01T12:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.760000000000,
+      "time": "2024-01-01T06:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.790000000000,
+      "time": "2024-01-01T15:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.800000000000,
+      "time": "2024-01-01T18:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.810000000000,
+      "time": "2024-01-01T04:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.810000000000,
+      "time": "2024-01-01T12:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.830000000000,
+      "time": "2024-01-01T11:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.850000000000,
+      "time": "2024-01-01T14:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.860000000000,
+      "time": "2024-01-01T17:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.880000000000,
+      "time": "2024-01-01T11:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.890000000000,
+      "time": "2024-01-01T13:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.900000000000,
+      "time": "2024-01-01T19:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.920000000000,
+      "time": "2024-01-01T10:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.940000000000,
+      "time": "2024-01-01T17:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.990000000000,
+      "time": "2024-01-01T15:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 7.990000000000,
+      "time": "2024-01-01T19:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.010000000000,
+      "time": "2024-01-01T12:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.010000000000,
+      "time": "2024-01-01T14:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.030000000000,
+      "time": "2024-01-01T06:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.090000000000,
+      "time": "2024-01-01T06:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.110000000000,
+      "time": "2024-01-01T05:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.210000000000,
+      "time": "2024-01-01T05:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.310000000000,
+      "time": "2024-01-01T05:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.430000000000,
+      "time": "2024-01-01T05:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.490000000000,
+      "time": "2024-01-01T08:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.590000000000,
+      "time": "2024-01-01T08:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.670000000000,
+      "time": "2024-01-01T09:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.730000000000,
+      "time": "2024-01-01T08:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.800000000000,
+      "time": "2024-01-01T07:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.930000000000,
+      "time": "2024-01-01T07:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.940000000000,
+      "time": "2024-01-01T09:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 8.940000000000,
+      "time": "2024-01-01T10:15:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.110000000000,
+      "time": "2024-01-01T09:45:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.120000000000,
+      "time": "2024-01-01T07:00:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.140000000000,
+      "time": "2024-01-01T08:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.230000000000,
+      "time": "2024-01-01T07:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.250000000000,
+      "time": "2024-01-01T09:30:00Z"
+    },
+    {
+      "quality": "Measured",
+      "quantity": 9.330000000000,
+      "time": "2024-01-01T10:00:00Z"
+    }
+  ],
+  "registrationTime": "2026-01-01T00:00:00\u002B00:00",
+  "revision": "2026-01-01T00:00:00\u002B00:00",
+  "transactionId": "\u003Cguid\u003E"
+}

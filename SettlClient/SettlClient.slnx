@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataMigration.SettlApi/DataMigration.SettlApi.csproj" />
+    <Project Path="src/DataMigration.SettlClient/DataMigration.SettlClient.csproj" />
+  </Folder>
+  <Folder Name="/src/Tests/">
+    <Project Path="src/Tests/DataMigration.SettlClient.Tests/DataMigration.SettlClient.Tests.csproj" />
+  </Folder>
+</Solution>

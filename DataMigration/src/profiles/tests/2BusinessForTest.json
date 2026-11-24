@@ -1,0 +1,23 @@
+{
+  "Name": "2BusinessForTest",
+  "Description": "Profile with 2 business accounts",
+  "StartingPayerId": 10251,
+
+  "Accounts": ["324408","327005"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["324408","327005"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {},
+    "ProductNum": {
+      "V LadVariP": "V Lade Variabel"
+    }
+  }
+}

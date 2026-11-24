@@ -1,0 +1,835 @@
+{
+  "CustTables": [
+    {
+      "Accountnum": "446977",
+      "Dataareaid": "hol",
+      "Name": "Navnf Navng Navnh A/S",
+      "Address": "Fiktivvejba  15\n9000  Aalborg",
+      "Street": "Fiktivvejba  15",
+      "City": "Aalborg",
+      "Zipcode": "9000",
+      "Countryregionid": "DK",
+      "Phone": "",
+      "Cellularphone": "",
+      "Telefax": "",
+      "Email": "uc@db.example.dk",
+      "Companyregnum": "",
+      "Identificationnumber": "",
+      "Partytype": 2,
+      "Namealias": "Navnf Navng Navnh A/S",
+      "ExuCprDisponent1": "",
+      "Exualternativecustomernumber": "59751548",
+      "ExuAdditionalname": "",
+      "ExuCprDisponent2": "",
+      "ExuCvrDisponent1": "59751548",
+      "ExuCvrDisponent2": "59751548",
+      "Recid": 25637680931,
+      "Partyid": "696603",
+      "ExuTechnicgroup4": "SparNordBa"
+    }
+  ],
+  "ExuContractTables": [
+    {
+      "Contractnum": "10480430",
+      "Dataareaid": "hol",
+      "Custaccount": "446977",
+      "Name": "",
+      "Contractstartdate": "2023-01-01T00:00:00",
+      "Contractenddate": "2025-12-31T00:00:00",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Referencetomaincontract": "",
+      "AddressRecid": 0,
+      "Pbsagreementnum": 0,
+      "Mobilepaysubscriptionagre20135": "",
+      "Mobilepayagreementcanceldate": "1900-01-01T00:00:00",
+      "Einvoiceeannum": "5790002328930",
+      "Custpaymcode": "Lbm+1d",
+      "Billingplannum": "Måned.",
+      "Billingbasis": 1,
+      "Contracttemplatenum": "V_Erhverv",
+      "Custcontactpersonid": "016746_003",
+      "Einvoiceaccountcode": "",
+      "Custpurchaseorder": "",
+      "Recid": 25637960516
+    }
+  ],
+  "ExuContractPartTables": [
+    {
+      "Contractnum": "10480430",
+      "Instagreenum": "3083692",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2023-12-31T00:00:00",
+      "Amrcode": "10480430",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638260900
+    },
+    {
+      "Contractnum": "10480430",
+      "Instagreenum": "3083692",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2024-01-01T00:00:00",
+      "Enddate": "2024-12-31T00:00:00",
+      "Amrcode": "10480430_4",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638373018
+    },
+    {
+      "Contractnum": "10480430",
+      "Instagreenum": "3083692",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Productnum": "VGGFa/Sp0",
+      "Startdate": "2025-01-01T00:00:00",
+      "Enddate": "2025-12-31T00:00:00",
+      "Amrcode": "10480430_5",
+      "Contractpartsubreferencetype": 0,
+      "Contractpartsubreferenceid": "",
+      "Dataareaid": "hol",
+      "Recid": 25638449624
+    }
+  ],
+  "DirPartyAddressRelationships": [
+    {
+      "Recid": 25638097828,
+      "Dataareaid": "hol",
+      "Partyid": "696603",
+      "Isprimary": 1,
+      "Validtodatetime": "2154-12-30T23:00:00"
+    }
+  ],
+  "DirPartyAddressRelationshi1066s": [
+    {
+      "Recid": 25638097828,
+      "Dataareaid": "hol",
+      "Addressrecid": 25638185885,
+      "Partyaddressrelationshiprecid": 25638097828
+    }
+  ],
+  "Addresses": [
+    {
+      "Recid": 25638185885,
+      "Dataareaid": "hol",
+      "Street": "Fiktivvejba  15",
+      "Zipcode": "9000",
+      "City": "Aalborg",
+      "Countryregionid": "DK",
+      "State": "",
+      "County": "",
+      "Addrtableid": 2303,
+      "ExuAddressid": "350ab84e-7f6e-4705-853a-6fa1d9c27e33",
+      "FullAddress": "Fiktivvejba  15 9000 Aalborg"
+    }
+  ],
+  "ExuAgreementTables": [
+    {
+      "Agreementnum": "3083692",
+      "Dataareaid": "hol",
+      "Companyid": "for",
+      "Deliverycategory": "El-Ekstern",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2025-12-31T00:00:00",
+      "Instbillingname": "",
+      "Street": "Fiktivvejcfw 31",
+      "Streetnum": "0011",
+      "Housenumstart": 31,
+      "Houseletterstart": "",
+      "Floor": "",
+      "Apartment": "",
+      "Zipcodeid": "9500",
+      "City": "Hobro",
+      "Addrlocation": "",
+      "Countycode": "",
+      "Country": "DK",
+      "Recid": 5637497672
+    }
+  ],
+  "ExuDelpoints": [
+    {
+      "Num": "1",
+      "DelParentdelpointnum": "",
+      "Extnum": "           0000005",
+      "Name": "E17",
+      "Deliverycategory": "El-Ekstern",
+      "Attachmentnum": "3083692",
+      "Companyid": "for",
+      "Custaccount": "",
+      "Streetnum": "0011",
+      "Countynum": "846",
+      "Zipcodeid": "9500",
+      "Meteringpoint": "571313115500000057",
+      "Addressstreet": "",
+      "Gsrn": "",
+      "Housenumstart": 31,
+      "Houseletterstart": "",
+      "Apartment": "",
+      "Floor": "",
+      "Addrlocation": "",
+      "Addressid": "7c7e8981-6f98-4601-a6a6-611c0807c299",
+      "EmsNetarea": "131",
+      "Powerexchangearea": "DK Vest",
+      "Dataareaid": "hol",
+      "Recid": 25637715294
+    }
+  ],
+  "ExuDelpointContactInfoTables": [
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 1,
+      "Startdate": "2017-06-01T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "",
+      "Name2": "",
+      "Recid": 644460
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 2,
+      "Startdate": "2017-06-01T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "",
+      "Name2": "",
+      "Recid": 644461
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 3,
+      "Startdate": "2017-06-01T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "",
+      "Name2": "",
+      "Recid": 644462
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 4,
+      "Startdate": "2017-01-01T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "Navnf Navng Navnh A/S",
+      "Name2": "",
+      "Recid": 293237
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 5,
+      "Startdate": "2017-10-17T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "2018-08-02T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "Navnf Navng",
+      "Name2": "",
+      "Recid": 644463
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 5,
+      "Startdate": "2018-08-03T00:00:00",
+      "Deliverycategory": "El",
+      "Companyid": "Net",
+      "Dataareaid": "hol",
+      "Enddate": "1900-01-01T00:00:00",
+      "Streetname": "Fiktivvejcfw",
+      "Housenumber": "31",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9500",
+      "Addressid": "",
+      "Name1": "Navnf Navng Navnh A/S",
+      "Name2": "",
+      "Recid": 894043
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 1,
+      "Startdate": "2023-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-12-31T00:00:00",
+      "Streetname": "Fiktivvejba",
+      "Housenumber": "15",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9000",
+      "Addressid": "350ab84e-7f6e-4705-853a-6fa1d9c27e33",
+      "Name1": "Navnf Navng Navnh A/S",
+      "Name2": "",
+      "Recid": 1747774
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 4,
+      "Startdate": "2023-01-01T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2023-03-23T00:00:00",
+      "Streetname": "Fiktivvejba",
+      "Housenumber": "15",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9000",
+      "Addressid": "350ab84e-7f6e-4705-853a-6fa1d9c27e33",
+      "Name1": "Navnf Navng Navnh A/S",
+      "Name2": "",
+      "Recid": 1747773
+    },
+    {
+      "Meteringpoint": "571313115500000057",
+      "Contacttype": 4,
+      "Startdate": "2023-03-24T00:00:00",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Dataareaid": "hol",
+      "Enddate": "2025-12-31T00:00:00",
+      "Streetname": "Fiktivvejba",
+      "Housenumber": "15",
+      "Apartment": "",
+      "Floor": "",
+      "Zipcode": "9000",
+      "Addressid": "350ab84e-7f6e-4705-853a-6fa1d9c27e33",
+      "Name1": "Navnf Navng Navnh A/S",
+      "Name2": "",
+      "Recid": 1791975
+    }
+  ],
+  "AddressZipCodes": [
+    {
+      "Zipcode": "9000",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Aalborg",
+      "Recid": 1236
+    },
+    {
+      "Zipcode": "9500",
+      "County": "",
+      "Countryregionid": "DK",
+      "Dataareaid": "hol",
+      "City": "Hobro",
+      "Recid": 1269
+    }
+  ],
+  "DirPartyECommunicationRela2608s": [
+    {
+      "Partyid": "696603",
+      "Status": 0,
+      "Priority": 1,
+      "Valuesrecid": 25637411389,
+      "Dataareaid": "hol",
+      "Recid": 25638327125
+    }
+  ],
+  "DirECommunicationAddresses": [
+    {
+      "Ecommunicationtypeid": "Email",
+      "Url": "",
+      "Email": "uc@db.example.dk",
+      "Phone": "",
+      "Dataareaid": "hol",
+      "Recid": 25637411389
+    }
+  ],
+  "EgsMeterpointTypecodeperiods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3083692",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meterpointtypecode": "FORB",
+      "Recid": 25637560709
+    }
+  ],
+  "ExuBillingMethodPeriods": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Attachmentnum": "3083692",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "2154-12-31T00:00:00",
+      "Billingmethod": 2,
+      "Recid": 25637796772
+    }
+  ],
+  "ExuDelpoint2delpointrela25505s": [],
+  "ExuStreets": [
+    {
+      "Streetnum": "0011",
+      "Countynum": "730",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcfx",
+      "Recid": 448714
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "846",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcfw",
+      "Recid": 508399
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "147",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcfy",
+      "Recid": 30021193215
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "153",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcfz",
+      "Recid": 30021194035
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "157",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcga",
+      "Recid": 30021194144
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "173",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgb",
+      "Recid": 30021195808
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "190",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgc",
+      "Recid": 30021196482
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "230",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgd",
+      "Recid": 30021196883
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "250",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcge",
+      "Recid": 30021198695
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "219",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgf",
+      "Recid": 30021198853
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "265",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgg",
+      "Recid": 30021199400
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "260",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgh",
+      "Recid": 30021199670
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "240",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgi",
+      "Recid": 30021200179
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "316",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgh",
+      "Recid": 30021201685
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "259",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejfb",
+      "Recid": 30021203500
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "350",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgj",
+      "Recid": 30021204211
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "270",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgk",
+      "Recid": 30021204386
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "360",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgl",
+      "Recid": 30021204619
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "370",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgm",
+      "Recid": 30021205156
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "306",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgn",
+      "Recid": 30021209023
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "326",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgo",
+      "Recid": 30021210755
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "492",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgp",
+      "Recid": 30021211618
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "330",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgq",
+      "Recid": 30021212707
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "530",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgr",
+      "Recid": 30021213134
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "340",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgs",
+      "Recid": 30021214025
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "550",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgt",
+      "Recid": 30021214612
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "420",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgu",
+      "Recid": 30021214683
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "510",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgv",
+      "Recid": 30021219163
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "430",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgw",
+      "Recid": 30021220257
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "440",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgx",
+      "Recid": 30021220465
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "410",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgy",
+      "Recid": 30021220814
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "450",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejbti",
+      "Recid": 30021221846
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "461",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcgz",
+      "Recid": 30021223963
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "479",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcha",
+      "Recid": 30021224530
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "480",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcfw",
+      "Recid": 30021225232
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "756",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchb",
+      "Recid": 30021226105
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "540",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcdl",
+      "Recid": 30021226613
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "482",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccv",
+      "Recid": 30021227524
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "665",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchc",
+      "Recid": 30021229089
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "707",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcge",
+      "Recid": 30021230834
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "840",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchd",
+      "Recid": 30021232605
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "740",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejche",
+      "Recid": 30021233762
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "615",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccv",
+      "Recid": 30021234003
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "621",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchf",
+      "Recid": 30021234568
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "657",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchg",
+      "Recid": 30021235894
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "661",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejho",
+      "Recid": 30021236124
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "671",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchh",
+      "Recid": 30021236878
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "710",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejccf",
+      "Recid": 30021237900
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "746",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchi",
+      "Recid": 30021238678
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "810",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchd",
+      "Recid": 30021243099
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "825",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchj",
+      "Recid": 30021245245
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "169",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchk",
+      "Recid": 360255349838
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "217",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchl",
+      "Recid": 720510708248
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "751",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchm",
+      "Recid": 720510708430
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "161",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchn",
+      "Recid": 720510761241
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "329",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejcho",
+      "Recid": 720510780240
+    },
+    {
+      "Streetnum": "0011",
+      "Countynum": "165",
+      "Dataareaid": "hol",
+      "Streetname": "Fiktivvejchp",
+      "Recid": 720510782245
+    }
+  ],
+  "ExuMeterTableTrades": [
+    {
+      "Dataareaid": "hol",
+      "Deliverycategory": "El-Ekstern",
+      "Companyid": "for",
+      "Agreementnum": "3083692",
+      "Delpointnum": "1",
+      "Startdate": "2023-01-01T00:00:00",
+      "Enddate": "1900-01-01T00:00:00",
+      "Meternum": "28550399",
+      "Recid": 5637844286
+    }
+  ],
+  "ExuGroupTables": [
+    {
+      "Groupnum": "SparNordBa",
+      "Dataareaid": "hol"
+    }
+  ],
+  "ExuInstallations": [],
+  "ExuMeterJournalTrans": []
+}

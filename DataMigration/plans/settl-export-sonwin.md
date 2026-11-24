@@ -1,0 +1,77 @@
+# Nightly Settl export to network share (SonWin migration)
+
+## Goal
+- Nightly read-only export of Settl `production` data to a network share, as input to the SonWin migration
+- Scope: the data the Xellent migration wrote to Settl, for electricity only
+- Runs until cutover to SonWin
+
+## Decisions
+- Source: Settl only, no Xellent reads
+- Selection: customers linked today to an electricity metering point with `InDelivery=true`
+- Two active delivery statuses on one metering point cannot occur; if Settl returns it anyway, the run fails
+- Current state only, no history: links open today or starting later; ended links left out (2026-11-11)
+- Environment: `production`, own folder per environment
+- Schedule: nightly
+- Personal data on the share: approved
+- In scope again (18.11.2026): consumption per metering point, see Consumption below
+- Out of scope: externally invoiced periods, invoices, activity notes, water
+- Reference examples: private `Customer_405013.xlsx`, business `Customer_397697_Verdo_Varme.xlsx` (06.11.2026)
+
+## Command
+- Operated through `settl-export.ps1` (Trial, Run, Check, Schedule, Unschedule), deployed next to the exe: [runbook](../docs/settl-export-runbook.md)
+- `export-active-customers --env production --deliver-to <unc> --payment-agreements <csv> [--keep 14] [--raw]`
+- `check-share-delivery --env production --deliver-to <unc>`: read-only check of the newest run
+- `--limit`/`--customer` with `--deliver-to`: trial run in `<env>-trial`, never touches the real delta
+- GET only; never Settl's export endpoints (`POST .../export`, `exportApprovedSettlement`, `POST /SettlementExports`)
+- Identifiers kept apart: Settl GUID, 18-digit metering point identification, EAN on payer
+
+## Content (done)
+- Customer: master data, CPR/CVR, segment, manual approval
+- Payers: billing and payment configuration, automatic approval, active metering point links
+- Metering points in delivery: master data, consumer, delivery status, billing configuration, ignore in billing, VAT exempt, exemptions, settlement groups, price area, grid area, remark, meters
+- Market price lists per metering point (id, type, charge owner GLN, period, occurrences, name, description)
+- Contracts: full contract, settlement terms, lines not ended
+- Customer price lists (price list, product element, contract, price area, period)
+- Extra invoice lines
+- Payment agreements from the Settl 'Payment Agreement' CSV, by metering point or joint invoice number
+- Settl ids resolved to names once per run (price area, grid area, segment, price list, product element)
+- All dates are Danish calendar dates of the Settl instant; a value without zone keeps its date (2026-11-11)
+
+## Delivery (done)
+- Run folder `<root>/<env>/<yyyy-MM-ddTHHmmssZ>/`: `customers.jsonl`, `delta.jsonl`, `manifest.json`, `_READY` last
+- Written to `.tmp-<run>`, renamed when complete
+- Delta against the last published run: added, changed (full line), removed (number only); key = customer number
+- State (line hashes) in `<env>/state/`, saved after publishing
+- Failed export or read errors: `<run>.failed`, no `_READY`, state unchanged, non-zero exit
+- Payment CSV missing or older than 24 hours: run refused
+- `.lock` stops overlapping runs; a crash leaves it, removed by hand
+- Keeps the newest 14 published and 14 failed runs
+
+## Open
+- Host and UNC path; account for the scheduled task; who watches `Check` (alerting not built)
+- Payment CSV: who exports it from Settl before each run; ask the vendor for an API endpoint
+- SonWin: projected or `--raw`, schema, pick-up by `_READY`
+- Settl vendor: modified-since filter or change feed (would replace the full scan)
+- Settl vendor: publish `customerSegments`, `settlementSchedules` and `settlementScheduleAssociations/{id}` on the production gateway (all 404 on 17.11.2026); until then segment and settlement schedule are empty in production
+- Not resolved to names: balance supplier (no lookup endpoint known); customer segment in production (gateway answers 404 on the segment list, 2026-11-17), so `customerSegment` is empty there
+- Not in the export: market price list mandatory and direct invoicing (route and id mapping unverified), "contract shared with other customers", product description template
+- Live check: the new routes (market price lists, contracts, contract lines, price lists, product elements, reference lists) come from the Settl API description, not a live call
+
+## Consumption (planned, 18.11.2026)
+- Fields in the data exchange file: `Forbrug_Periode_Fra`, `Forbrug_Periode_Til`, `Forbrug_ConsumptionFile`, `Forbrug_Historisk` (total kWh)
+- Source: Settl time series only. Market `GET /api/v3/meteringPoints/{id}/timeSeries` lists the series; tenant `GET /v1/time-series/{id}/points?Start&End` reads points (`ISettlTimeSeriesClient.GetPointsAsync`, already in SettlClient)
+- No consumption file is written by this export (18.11.2026): only the four fields. `Forbrug_ConsumptionFile` holds the name `Consumption_<Kunde_Nummer>_<Mp_Nummer>.csv`
+- Points are read in UTC, as stored; never converted to CET/CEST. Period bounds are Danish calendar dates
+- `Forbrug_Historisk` = sum of the points in the period, kWh
+- Period (18.11.2026): from the metering point's supply start (`Mp_SupplyStart`) to the run date. Points up to Danish midnight at the start of the run date; `Forbrug_Periode_Til` is the last full day (run date − 1)
+- Series: consumption only (18.11.2026); production (E18) is left out
+- Open: who produces the consumption file named in `Forbrug_ConsumptionFile`, or whether the field stays empty
+- Open: how missing points count in `Forbrug_Historisk` (left out of the sum, or the metering point flagged)
+- Open: run time and size: one points read per metering point, about 59,000 in production; nightly full read or only in the first delivery
+- Open: does the production gateway serve both time series routes; check with one `--customer` run before building on it
+
+## Phases
+1. Spike (done): `ExportActiveCustomersFlowTests` over a fake tenant filled by real `create`
+2. Build (done): content above, JSON Lines, share delivery; tests against the fake
+3. Real-system testing, by the user, following the runbook: featuretest trial, full run, payment CSV, SonWin trial import
+4. Production: runbook steps 4 and 5, after host, share and SonWin format are settled

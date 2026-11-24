@@ -1,0 +1,4 @@
+"Identification";"Status";"Relation";"Årsager";"ReferenceDato";"Settl_MeteringPointType";"Settl_MeteringPointSubType";"Xellent_MeteringPointType";"Xellent_MeteringPointSubType";"Settl_MeterReadingOccurrence";"Xellent_MeterReadingOccurrence";"Settl_EstimatedAnnualVolume";"Xellent_EstimatedAnnualVolume";"Settl_Meters";"Xellent_Meters"
+"571313114900385351";"NeedsUpdate";"Parent";"MultiplicationFactor";"2026-05-01";"Consumption";"Virtual";"Consumption";"Virtual";"Hourly";"Hourly";"77777";"2906";"×1";"×0"
+"571313113161269318";"AlreadyCorrect";"Parent";"";"2026-05-01";"Consumption";"Physical";"Consumption";"Physical";"Hourly";"Hourly";"6491";"8959";"4186795×1";"4186795×1"
+"571313115242231955";"AlreadyCorrect";"Parent";"";"2026-05-01";"Consumption";"Physical";"Consumption";"Physical";"Hourly";"Hourly";"2516";"2368";"30426225×1";"30426225×1"

@@ -1,0 +1,21 @@
+{
+  "Name": "test-accounts",
+  "Description": "Test profile with explicit account list",
+  "StartingPayerId": 10000,
+
+  "Accounts": ["458813"],
+
+  "AccountSource": {
+    "Type": "List",
+    "Accounts": ["458813"]
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {},
+    "ProductNum": {}
+  }
+}

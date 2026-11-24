@@ -1,0 +1,22 @@
+{
+  "Name": "exolak",
+  "Description": "Dry-run migration for Exolak (electricity)",
+
+  "AccountSource": {
+    "Type": "Query",
+    "Query": {
+      "DeliveryCategory": "El-ekstern",
+      "GroupNums": ["Exolak"]
+    }
+  },
+
+  "Extraction": {
+    "DeliveryCategory": "El-ekstern"
+  },
+
+  "Mappings": {
+    "GroupNum": {
+      "Exolak": "E_FinansielPulje_DK1_Exolak"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "Name": "water-hjh",
+  "Description": "Water supply migration - hjh (Hjerting)",
+  "AccountSource": {
+    "Type": "Query",
+    "Query": {
+      "DeliveryCategory": "Vand"
+    }
+  },
+  "Extraction": {
+    "DataAreaId": "HJH",
+    "DeliveryCategory": "Vand"
+  }
+}

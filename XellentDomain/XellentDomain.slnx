@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataMigration.Core/DataMigration.Core.csproj" />
+    <Project Path="src/DataMigration.Domain.Engros/DataMigration.Domain.Engros.csproj" />
+    <Project Path="src/DataMigration.Domain.TimeSeries/DataMigration.Domain.TimeSeries.csproj" />
+    <Project Path="src/DataMigration.Domain.Xellent/DataMigration.Domain.Xellent.csproj" />
+    <Project Path="src/DataMigration.Domain/DataMigration.Domain.csproj" />
+    <Project Path="src/DataMigration.XellentData/DataMigration.XellentData.csproj" />
+  </Folder>
+  <Folder Name="/src/Tests/">
+    <Project Path="src/Tests/DataMigration.Core.Tests/DataMigration.Core.Tests.csproj" />
+    <Project Path="src/Tests/DataMigration.Domain.Engros.Tests/DataMigration.Domain.Engros.Tests.csproj" />
+    <Project Path="src/Tests/DataMigration.Domain.Tests/DataMigration.Domain.Tests.csproj" />
+    <Project Path="src/Tests/DataMigration.Domain.Xellent.Tests/DataMigration.Domain.Xellent.Tests.csproj" />
+  </Folder>
+</Solution>

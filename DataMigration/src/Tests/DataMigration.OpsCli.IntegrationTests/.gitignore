@@ -1,0 +1,4 @@
+testsettings.json
+# Proposed baselines waiting for review. Copy accepted files into Goldens/<runner>/
+Goldens/**/new/
+src/Tests/DataMigration.OpsCli.IntegrationTests/artifacts/

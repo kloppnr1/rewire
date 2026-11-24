@@ -1,0 +1,17 @@
+{
+  "Name": "vand-sample",
+  "Description": "Vand-regression for WaterProfileTests — én konto med aktiv vand-kontrakt",
+  "Accounts": [
+    "313809"
+  ],
+  "Extraction": {
+    "DataAreaId": "hol",
+    "DeliveryCategory": "Vand",
+    "LegacyTg4Merge": true
+  },
+  "Mappings": {
+    "ProductNum": {
+      "Vand-alm": "Vand_Almindelig"
+    }
+  }
+}

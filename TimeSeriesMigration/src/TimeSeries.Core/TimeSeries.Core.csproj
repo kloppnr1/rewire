@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>TimeSeriesMigration.Core</PackageId>
+    <Description>Shared DTOs for the TimeSeries migration pipeline (TimeSeriesDto, MeteringPointTimeSeriesDto, TimeResolutionDto, TimeSeriesFileDto). Settl wire-format DTOs (SettlTimeSeriesRequestDto, SettlTimeSeriesPointDto) lever nu i SettlClient.Api.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\SettlClient\src\DataMigration.SettlApi\DataMigration.SettlApi.csproj" />
+  </ItemGroup>
+
+</Project>

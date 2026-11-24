@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TimeSeries.Cli/TimeSeries.Cli.csproj" />
+    <Project Path="src/TimeSeries.Core/TimeSeries.Core.csproj" />
+    <Project Path="src/TimeSeries.Migration/TimeSeries.Migration.csproj" />
+  </Folder>
+  <Folder Name="/src/Tests/">
+    <Project Path="src/Tests/TimeSeries.Core.Tests/TimeSeries.Core.Tests.csproj" />
+    <Project Path="src/Tests/TimeSeries.Cli.Tests/TimeSeries.Cli.Tests.csproj" />
+  </Folder>
+</Solution>

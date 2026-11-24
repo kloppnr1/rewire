@@ -1,0 +1,180 @@
+{
+  "customerExceptions": [
+    { "name": "Hybel Nord*", "segment": "Partner", "schedule": "HalvårBagud" },
+    { "name": "Hybel Sjælland*", "segment": "Partner", "schedule": "HalvårBagud" },
+    { "name": "Hybel Syd*", "segment": "Partner", "schedule": "HalvårBagud" },
+    { "name": "Hybel Midt*", "segment": "Partner", "schedule": "HalvårBagud" }
+  ],
+  // Xellent → Settl mapping for export-settlement-config. Begge maps ligger i én fil, fordi de
+  // udfyldes af samme udtræk og altid skal deployes sammen.
+
+  // ExuContractTable.Billingplannum -> Settl Settlement Schedule.
+  // Nøgler matches case-insensitivt, så "Måned." dækker også Xellents "måned."-variant.
+  //
+  "schedules": {
+    "EnergiRds": "HelårBagud",
+    "Erh_4_FU": "Md+3MdAC",
+    "Kvartal": "KvartalOpg",
+    "KvartalAC": "KvartalAC",
+    "Md+MdAC": "Md+MdAC",
+    "Md+3MdAC": "Md+3MdAC",
+    "Måned.": "Måned.",
+    "½År_Bagud": "HalvårBagud"
+  },
+
+  // Standing answers for customers whose metering points name more than one of these four schedules,
+  // decided by Janni/Lone 2026-09-08. Xellent determines the proposal; Settl is comparison only.
+  // Each row matches only the exact set of schedules
+  // listed: a customer whose disagreement touches a schedule outside a row is not covered by it and
+  // stays a conflict.
+  //
+  // Deliberately NOT a single priority order over the four schedules: HalvårBagud beats KvartalAC and
+  // Md+MdAC head-to-head, and beats Måned., but KvartalAC wins when all four are present. That is not
+  // representable as one ranking, so each combination is its own row instead of a rank lookup.
+  "scheduleConflicts": [
+    { "schedules": ["KvartalAC", "Måned."], "winner": "KvartalAC" },
+    { "schedules": ["HalvårBagud", "KvartalAC"], "winner": "HalvårBagud" },
+    { "schedules": ["Md+MdAC", "Måned."], "winner": "Md+MdAC" },
+    { "schedules": ["HalvårBagud", "Md+MdAC"], "winner": "HalvårBagud" },
+    { "schedules": ["HalvårBagud", "Måned."], "winner": "HalvårBagud" },
+    { "schedules": ["KvartalAC", "Md+MdAC"], "winner": "KvartalAC" },
+    { "schedules": ["KvartalAC", "Md+MdAC", "Måned."], "winner": "KvartalAC" },
+    { "schedules": ["HalvårBagud", "KvartalAC", "Md+MdAC", "Måned."], "winner": "KvartalAC" }
+  ],
+
+  // ExuContractTable.Contracttemplatenum ("skabelon") -> Settl Customer Segment.
+  //
+  // Skabelonen alene afgør ikke segmentet: Settl accepterer ikke et privat-segment på et CVR-nummer,
+  // og Xellent har begge dele under samme skabelon. Derfor vælges segmentet af skabelon PLUS kundens
+  // identifikation — "cvr" (CustTable.ExuCvrDisponent1, 8 cifre), "cpr" (ExuCprDisponent1 eller
+  // Exualternativecustomernumber "PNR="), eller "blank" (ingen af delene). CVR vinder over CPR, som i
+  // CustomerMapper's CustomerType. Identifikationen tages på repræsentant-kontoen, altså den konto
+  // hvis Accountnum er Settl-kundenummeret.
+  //
+  // En liste betyder at skabelon + identifikation stadig ikke afgør segmentet: de kunder rapporteres
+  // som konflikter (med MP-ider) i stedet for at blive gættet ind i en gruppe.
+  //
+  // En ren streng/liste (uden cvr/cpr/blank) betyder "samme segment uanset identifikation".
+  "segments": {
+    "HCEI_UG":    { "cvr": "Erhverv_UG", "cpr": "Privat", "blank": "Privat" },
+    "M_Erh_UG":   { "cvr": "Erhverv_UG", "cpr": "Privat", "blank": "Privat" },
+    "M_Erhverv":  { "cvr": "Erhverv",    "cpr": "Privat", "blank": "Privat" },
+    // Ikke en skabelon, men en tastefejl: præcis én kontrakt (10541730, konto 482779) mangler
+    // V_-præfikset. Den er CPR, KvartalAC og sluttede 31-08-2026, så den hører til 01-09-2026-
+    // kørslen. Uden en regel faldt den tilbage på sit eget navn "Privat", som kolliderer med
+    // selve segmentet af samme navn — og så stod hele gruppen på 32.530 kunder som umappet.
+    // Samme regel som V_Privat, fordi det er hvad kontrakten skulle have heddet.
+    "Privat":     { "cvr": "Erhverv",    "cpr": "Privat", "blank": "Privat" },
+    "V_Erh_Prod": { "cvr": "Erhverv_UG", "cpr": "Privat", "blank": "Privat" },
+    "V_Erh_UG":   { "cvr": "Erhverv_UG", "cpr": "Privat", "blank": "Privat" },
+    "V_Erhverv":  { "cvr": "Erhverv",    "cpr": "Privat", "blank": "Privat" },
+    "V_Fordel":   { "cvr": "Fordel",     "cpr": "Privat", "blank": "Privat" },
+    "V_Hjerting": { "cvr": "Erhverv",    "cpr": "Privat", "blank": "Privat" },
+    // Electricity templates cannot distinguish Eje from Leje. Read dated Xellent Charge_Abo
+    // products at COS-1 independently of current Settl assignments.
+    // Confirmed ownership codes include OAboEjeUEL and O HCEjeUL3/4/5 (2026-09-22).
+    // Email 2026-09-23: Eje > Leje > Privat after a successful read; failed reads remain unresolved.
+    "V_LadePriv": {
+      "cvr": "Erhverv_Uden_Kontrakt",
+      "cpr": ["Privat_Opladning_Eje", "Privat_Opladning_Leje"],
+      "blank": ["Privat_Opladning_Eje", "Privat_Opladning_Leje"]
+    },
+    "V_Partner":  { "cvr": "Partner",    "cpr": "Privat", "blank": "Privat" },
+    "V_Privat":   { "cvr": "Erhverv",    "cpr": "Privat", "blank": "Privat" },
+    "V_SME":      { "cvr": "SME",        "cpr": "Privat", "blank": "Privat" }
+  },
+
+  // Kunder hvis målepunkter hver for sig peger entydigt på et segment, men ikke på det samme. Janni
+  // har 2026-08-11 stikprøvet dem blandt de migrerede og afgjort at de hører til Erhverv. Nye
+  // eksempler viser dog private kunder blandt dem: privatkunder med lade går i ladesegmentet, og
+  // andre privatkunder med et Privat-kandidatsegment går i Privat. Erhverv er kun standardsvaret
+  // for de øvrige uenigheder. Fjernes nøglen, bliver de konflikter igen.
+  // Gælder kun den rene uenighed: en kunde hvis skabelon i sig selv giver flere kandidater er stadig
+  // en konflikt, for der er intet entydigt svar at gå imod.
+  "multipleSegments": "Erhverv",
+
+  // Målepunkter i delivery i Settl som eksporten ikke kan finde en Xellent-kontrakt til. De har
+  // ingen skabelon at slå op, så segmentet kan kun komme herfra. Janni har 2026-08-11 afgjort begge
+  // årsager: dem uden ophav i Xellent er oprettet direkte i Settl og er alle erhverv, og dem hvor
+  // kontrakten er væk eller flyttet er også erhverv — undtagen når kunden i Settl står med et
+  // CPR-nummer, for så er det en privatperson.
+  //
+  // Svaret gælder kun kunder der ikke i forvejen ligger i et segment. Har kunden andre målepunkter
+  // der afgjorde sagen, står det segment ved magt.
+  "unresolvedSegments": {
+    "notFoundInXellent": "Erhverv",
+    "noContractAtChangeOfSupplier": { "cvr": "Erhverv", "cpr": "Privat", "blank": "Erhverv" }
+  },
+
+  // ---- Kandidat-regler, kun til sammenligning i export-settlement-config ----
+  // De tre sektioner herunder afgør ingenting i migreringen. De findes for at rapporten kan vise
+  // hvad hvert foreslået regelsæt VILLE give pr. kunde, side om side med det der gælder i dag, så
+  // valget mellem dem kan træffes på data. Ingen af dem skrives til Settl.
+
+  // Settl Settlement Group-navn -> Settlement Schedule.
+  // Medlemskabet læses live fra Settl (den faktiske medlemsliste pr. gruppe), ikke fra profilernes
+  // Mappings.SettlementGroup. Gruppenavne her der ikke findes som aktiv gruppe i Settl logges —
+  // fire af dem findes kun Settl-side og optræder ikke i nogen profil i dette repo.
+  "groupSchedules": {
+    "Årlig opgørelse": "HelårBagud",
+    // Bindestreg, ikke tankestreg: Settl staver gruppen "PPA - afregning". Verificeret mod
+    // produktion 2026-08-07 — tankestregen matchede ingen aktiv gruppe.
+    "PPA - afregning": "Måned.",
+    "Månedsopg. + 4 md a'c": "Md+3MdAC",
+    "Månedlige opgørelser": "Måned.",
+    "Kvartalsvis Opgørelse": "KvartalOpg",
+    "Kvartalsvis Aconto": "KvartalAC",
+    "1/2 år bagud": "HalvårBagud",
+    "MånedOpg+MånedAconto": "Md+MdAC"
+  },
+
+  // Det Settl-drevne segment-regelsæt for allerede migrerede kunder:
+  //   CVR + mindst ét MP på en af smeContracts        -> sme
+  //   CVR + mindst ét MP med billing exemption i Settl -> businessExempt
+  //   CVR i øvrigt                                     -> business
+  //   uden CVR                                         -> intet segment
+  // Rækkefølgen er som skrevet: SME vinder over exemption.
+  "settlSegments": {
+    "smeContracts": [ "E_SME_Spot_Lb+1d", "E_SME_Pulje_Lb+1d", "E_SME_SpotH_Lb+1d" ],
+    "sme": "SME",
+    "business": "Erhverv",
+    "businessExempt": "Erhverv_UG"
+  },
+
+  // Skabelon (Contracttemplatenum) + produkt (ExuContractPartTable.Productnum) -> segment + den
+  // Settl-kontrakt kunden forventes at skulle have. Regelsættet for erhvervskunder der endnu ikke
+  // er migreret; alle rækker i kildetabellen er CVR-kunder, så reglen anvendes kun på dem.
+  //
+  // Nøgler matches case-insensitivt, og mellemrum og underscore er ombyttelige ("V Privat" =
+  // "V_Privat") — Xellent staver skabelonen med underscore, kildetabellen med mellemrum.
+  // Produktnøglen "Spot*" matcher på præfiks; "*" matcher ethvert produkt.
+  // contract: null = "samme migreringsregel som erhverv", altså ingen selvstændig kontrakt-forventning.
+  "templateProducts": {
+    "V_Privat": {
+      "V ErhKvt":   { "segment": "Erhverv_Uden_Kontrakt", "contract": "E_ErhKvt" },
+      "V P Flex":   { "segment": "Fordel",                 "contract": "V P Flex" },
+      "V P Fast":   { "segment": "Fordel",                 "contract": "V P Fast" },
+      "V ErhVari":  { "segment": "Erhverv_Uden_Kontrakt", "contract": "E_ErhVari" },
+      "V SMESpot":  { "segment": "SME",                    "contract": null },
+      "V Variabel": { "segment": "Erhverv_Uden_Kontrakt", "contract": "V ErhVari" }
+    },
+    "V_Erhverv": {
+      "Spot*": { "segment": "Erhverv", "contract": null }
+    },
+    "V_SME": {
+      "SME spot": { "segment": "SME", "contract": null }
+    },
+    "V_Partner": {
+      "V P Fast":  { "segment": "Partner", "contract": "V P Fast" },
+      "V P Hybel": { "segment": "Partner", "contract": "Partner_HybelStenhøj" },
+      "Spot*":     { "segment": "Partner", "contract": null }
+    },
+    "V_Fordel": {
+      "V P Flex": { "segment": "Fordel", "contract": "V P Flex" }
+    },
+    // Kildetabellens produktkolonne er tom for denne skabelon — gælder ethvert produkt.
+    "E. ErhProd": {
+      "*": { "segment": "Erhverv", "contract": "V ProdErhv" }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet run:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet list:*)",
+      "Bash(dotnet sln:*)",
+      "Bash(dotnet-svcutil:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git -C:*)",
+      "Bash(dir:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(move:*)",
+      "Bash(xargs:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(sqlcmd:*)",
+      "WebSearch",
+      "WebFetch(domain:search.idq.dk)"
+    ],
+    "deny": []
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "Name": "el-han",
+  "Description": "Electricity migration - han DataArea",
+  "AccountSource": {
+    "Type": "Query",
+    "Query": {
+      "DeliveryCategory": "El-ekstern"
+    }
+  },
+  "Extraction": {
+    "DataAreaId": "han",
+    "DeliveryCategory": "El-ekstern"
+  }
+}
